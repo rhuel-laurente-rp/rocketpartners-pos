@@ -6,20 +6,21 @@ The cashier drives one Transaction from empty basket to Receipt. Pressing **Tota
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Idle
+    [*] --> InProgress
 
-    Idle --> InProgress: scan UPC / Quick Add
     InProgress --> InProgress: scan UPC / Quick Add (add Line Item)
     InProgress --> InProgress: Void Line
     InProgress --> InProgress: Change Quantity (optional)
-    InProgress --> Idle: Void Basket
-    InProgress --> Finalized: Total
+    InProgress --> Voided: Void Basket
+    InProgress --> Totaled: Total
 
-    Finalized --> Tendered: Pay Cash
-    Finalized --> Tendered: Pay Next Dollar
-    Finalized --> Tendered: Pay Debit/Credit
+    Totaled --> Voided: Void Basket
+    Totaled --> Paid: Pay Cash
+    Totaled --> Paid: Pay Next Dollar
+    Totaled --> Paid: Pay Debit/Credit
 
-    Tendered --> [*]: print Receipt
+    Paid --> [*]: print Receipt
+    Voided --> [*]
 
     note right of InProgress
         Basket is mutable.
@@ -29,14 +30,13 @@ stateDiagram-v2
         Illegal: any tender.
     end note
 
-    note right of Finalized
+    note right of Totaled
         Basket is frozen.
         Legal: Pay Cash,
         Pay Next Dollar,
-        Pay Debit/Credit.
+        Pay Debit/Credit, Void Basket.
         Illegal: add Line Item,
-        Void Line, Void Basket,
-        Change Quantity.
+        Void Line, Change Quantity.
     end note
 ```
 
