@@ -1,0 +1,84 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.rocketpartners.onboarding'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // UI
+    implementation 'com.formdev:flatlaf:3.5.2'
+
+    // CLI
+    implementation 'com.beust:jcommander:1.82'
+
+    // JSON
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // HTTP client
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.3.1'
+
+    // Spring Boot
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // Database
+    runtimeOnly 'com.h2database:h2'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+
+    // Testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.mockito:mockito-core'
+    testImplementation 'org.mockito:mockito-junit-jupiter'
+    testImplementation 'org.awaitility:awaitility:4.2.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+springBoot {
+    mainClass = 'com.rocketpartners.onboarding.posdiscountengine.Application'
+}
+
+tasks.named('bootJar') {
+    mainClass = 'com.rocketpartners.onboarding.posdiscountengine.Application'
+}
+
+tasks.named('bootRun') {
+    mainClass = 'com.rocketpartners.onboarding.posdiscountengine.Application'
+}
+
+tasks.register('runPos', JavaExec) {
+    group = 'application'
+    description = 'Run the POS desktop client'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rocketpartners.onboarding.possystem.Application'
+    standardInput = System.in
+}
+
+tasks.register('runJournal', JavaExec) {
+    group = 'application'
+    description = 'Run the virtual journal server'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rocketpartners.onboarding.posvirtualjournal.Driver'
+}
