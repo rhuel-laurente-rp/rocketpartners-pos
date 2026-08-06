@@ -48,6 +48,10 @@ public class CustomerViewController implements IController, IPosEventListener {
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.TOTAL_PRESSED,
             PosEventType.ITEM_SCANNED,
+            // Re-render whenever a peer controller has mutated the basket (e.g. the
+            // change-qty dialog changed a quantity or voided a line via the zero path).
+            PosEventType.QUANTITY_CHANGED,
+            PosEventType.LINE_VOIDED,
             PosEventType.RECEIPT_DISMISSED));
 
     private final CustomerView view;
@@ -95,6 +99,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_PRESSED -> handleVoidBasket();
             case TOTAL_PRESSED -> handleTotal();
+            case QUANTITY_CHANGED, LINE_VOIDED -> render();
             case RECEIPT_DISMISSED -> beginNewTransaction();
             default -> { /* not subscribed */ }
         }
@@ -134,8 +139,9 @@ public class CustomerViewController implements IController, IPosEventListener {
         }
         Map<String, Object> props = new HashMap<>();
         props.put("lineItem", selected);
+        // Re-render happens via the LINE_VOIDED subscription — no need to call render()
+        // directly, and doing so would double-render (mocked view expectations would break).
         parent.dispatchPosEvent(new PosEvent(PosEventType.LINE_VOIDED, props));
-        render();
     }
 
     private void handleVoidBasket() {

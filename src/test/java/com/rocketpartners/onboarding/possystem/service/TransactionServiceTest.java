@@ -219,17 +219,100 @@ class TransactionServiceTest {
     }
 
     @Test
-    void updateLineItemQuantity_rejectsZero() {
+    void updateLineItemQuantity_zero_routesThroughVoidPath_leavesLineOnTransaction() {
         RecordingDispatcher dispatcher = new RecordingDispatcher();
         TransactionService svc = service(NO_TAX, dispatcher);
         svc.startTransaction();
         LineItem line = svc.addItemByUpc(WIDGET.getUpc(), 2);
-        assertThatThrownBy(() -> svc.updateLineItemQuantity(line, 0))
+
+        svc.updateLineItemQuantity(line, 0);
+
+        // Same outcome as calling voidLine: line stays on the transaction, flagged voided,
+        // contributes zero to totals.
+        assertThat(line.isVoided()).isTrue();
+        assertThat(svc.getCurrentTransaction().getLineItems()).containsExactly(line);
+        assertThat(svc.getCurrentTransaction().subtotal()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void updateLineItemQuantity_negative_dispatchesErrorAndThrows() {
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        TransactionService svc = service(NO_TAX, dispatcher);
+        svc.startTransaction();
+        LineItem line = svc.addItemByUpc(WIDGET.getUpc(), 2);
+        assertThatThrownBy(() -> svc.updateLineItemQuantity(line, -1))
                 .isInstanceOf(IllegalArgumentException.class);
         PosEvent error = dispatcher.onlyError();
         assertThat(error.getProperty("code", String.class)).isEqualTo("INVALID_ARGUMENT");
         assertThat(error.getProperty("operation", String.class)).isEqualTo("updateLineItemQuantity");
         assertThat(line.getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void updateLineItemQuantity_aboveMax_dispatchesAboveMaxErrorAndThrows() {
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        TransactionService svc = new TransactionService(
+                repo(), new TaxService(NO_TAX), dispatcher, 999);
+        svc.startTransaction();
+        LineItem line = svc.addItemByUpc(WIDGET.getUpc(), 1);
+        assertThatThrownBy(() -> svc.updateLineItemQuantity(line, 99999))
+                .isInstanceOf(IllegalArgumentException.class);
+        PosEvent error = dispatcher.onlyError();
+        assertThat(error.getProperty("code", String.class)).isEqualTo("ABOVE_MAX_QUANTITY");
+        assertThat(line.getQuantity()).isEqualTo(1);
+    }
+
+    @Test
+    void updateLineItemQuantity_unchanged_isNoOp_noEventNoRecompute() {
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        TransactionService svc = service(NO_TAX, dispatcher);
+        svc.startTransaction();
+        LineItem line = svc.addItemByUpc(WIDGET.getUpc(), 2);
+        dispatcher.clear();
+
+        svc.updateLineItemQuantity(line, 2);
+
+        assertThat(line.getQuantity()).isEqualTo(2);
+        assertThat(dispatcher.events).isEmpty();
+    }
+
+    @Test
+    void updateLineItemQuantity_onAlreadyVoidedLine_dispatchesErrorAndThrows() {
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        TransactionService svc = service(NO_TAX, dispatcher);
+        svc.startTransaction();
+        LineItem line = svc.addItemByUpc(WIDGET.getUpc(), 2);
+        svc.voidLine(line);
+        dispatcher.clear();
+
+        assertThatThrownBy(() -> svc.updateLineItemQuantity(line, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+        PosEvent error = dispatcher.onlyError();
+        assertThat(error.getProperty("code", String.class)).isEqualTo("INVALID_ARGUMENT");
+        assertThat(error.getProperty("operation", String.class)).isEqualTo("updateLineItemQuantity");
+    }
+
+    @Test
+    void updateLineItemQuantity_toThree_matchesScanningThreeTimes() {
+        // The strongest check that the shared recompute path is actually shared: setting
+        // quantity to 3 must yield exactly the totals of scanning the item three times.
+        BigDecimal rate = new BigDecimal("0.07");
+        TransactionService scanThrice = service(rate);
+        scanThrice.startTransaction();
+        scanThrice.addItemByUpc(WIDGET.getUpc(), 1);
+        scanThrice.addItemByUpc(WIDGET.getUpc(), 1);
+        scanThrice.addItemByUpc(WIDGET.getUpc(), 1);
+        Transaction scannedTx = scanThrice.getCurrentTransaction();
+
+        TransactionService changedQty = service(rate);
+        changedQty.startTransaction();
+        LineItem line = changedQty.addItemByUpc(WIDGET.getUpc(), 1);
+        changedQty.updateLineItemQuantity(line, 3);
+        Transaction changedTx = changedQty.getCurrentTransaction();
+
+        assertThat(changedTx.subtotal()).isEqualByComparingTo(scannedTx.subtotal());
+        assertThat(changedTx.taxTotal()).isEqualByComparingTo(scannedTx.taxTotal());
+        assertThat(changedTx.grandTotal()).isEqualByComparingTo(scannedTx.grandTotal());
     }
 
     @Test

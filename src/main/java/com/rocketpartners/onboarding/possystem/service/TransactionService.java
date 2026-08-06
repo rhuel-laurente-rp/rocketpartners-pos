@@ -35,9 +35,13 @@ import java.util.Optional;
  */
 public class TransactionService {
 
+    /** Default upper bound on a line item's quantity — a fat-fingered scanner input guard. */
+    public static final int DEFAULT_MAX_LINE_QUANTITY = 999;
+
     private final ItemRepository itemRepository;
     private final TaxService taxService;
     private final IPosEventDispatcher eventDispatcher;
+    private final int maxLineQuantity;
 
     private Transaction currentTransaction;
 
@@ -49,12 +53,31 @@ public class TransactionService {
      */
     public TransactionService(ItemRepository itemRepository, TaxService taxService,
                               IPosEventDispatcher eventDispatcher) {
+        this(itemRepository, taxService, eventDispatcher, DEFAULT_MAX_LINE_QUANTITY);
+    }
+
+    /**
+     * As {@link #TransactionService(ItemRepository, TaxService, IPosEventDispatcher)}, but with
+     * an explicit upper bound on line-item quantities. Any change-qty call above this bound is
+     * rejected with an {@code ABOVE_MAX_QUANTITY} error event rather than accepted.
+     */
+    public TransactionService(ItemRepository itemRepository, TaxService taxService,
+                              IPosEventDispatcher eventDispatcher, int maxLineQuantity) {
         if (itemRepository == null) throw new IllegalArgumentException("itemRepository must not be null");
         if (taxService == null) throw new IllegalArgumentException("taxService must not be null");
         if (eventDispatcher == null) throw new IllegalArgumentException("eventDispatcher must not be null");
+        if (maxLineQuantity < 1) {
+            throw new IllegalArgumentException("maxLineQuantity must be >= 1, got " + maxLineQuantity);
+        }
         this.itemRepository = itemRepository;
         this.taxService = taxService;
         this.eventDispatcher = eventDispatcher;
+        this.maxLineQuantity = maxLineQuantity;
+    }
+
+    /** @return the configured upper bound on line-item quantities */
+    public int getMaxLineQuantity() {
+        return maxLineQuantity;
     }
 
     /**
@@ -145,15 +168,53 @@ public class TransactionService {
      * TOTALED invariant as {@link #voidLine(LineItem)}: legal only in
      * {@link TransactionState#IN_PROGRESS}.
      *
+     * <p><strong>Zero routes through the void path.</strong> {@code newQuantity == 0} is a
+     * void — this method delegates to {@link #voidLine(LineItem)} rather than opening a
+     * parallel code path. The line stays on the transaction, marked voided, contributes zero
+     * to totals, and is omitted from the printed receipt. Two ways to void a line means two
+     * sets of bugs; this method deliberately doesn't do that.</p>
+     *
+     * <p><strong>Unchanged quantity is a no-op.</strong> If {@code newQuantity} equals the
+     * line's current quantity, this method returns without touching the transaction and
+     * without dispatching any event. No journal entry, no recompute.</p>
+     *
      * @param lineItem    a line item on the current transaction
-     * @param newQuantity the new quantity; must be at least 1
+     * @param newQuantity the new quantity; must be non-negative and at most
+     *                    {@link #getMaxLineQuantity()}
      * @throws IllegalStateException    if no transaction is open, or the current one is not
      *                                  {@link TransactionState#IN_PROGRESS}
-     * @throws IllegalArgumentException if the line is not on the current transaction, is voided,
-     *                                  or {@code newQuantity < 1}
+     * @throws IllegalArgumentException if the line is not on the current transaction, is
+     *                                  voided, is negative, or above the configured max
      */
     public void updateLineItemQuantity(LineItem lineItem, int newQuantity) {
         requireCurrentTransaction("updateLineItemQuantity");
+        if (lineItem == null) {
+            IllegalArgumentException ex = new IllegalArgumentException("lineItem must not be null");
+            dispatchError("INVALID_ARGUMENT", ex.getMessage(), ex, "operation", "updateLineItemQuantity");
+            throw ex;
+        }
+        if (newQuantity < 0) {
+            IllegalArgumentException ex = new IllegalArgumentException(
+                    "quantity must be non-negative, got " + newQuantity);
+            dispatchError("INVALID_ARGUMENT", ex.getMessage(), ex, "operation", "updateLineItemQuantity");
+            throw ex;
+        }
+        if (newQuantity > maxLineQuantity) {
+            IllegalArgumentException ex = new IllegalArgumentException(
+                    "quantity " + newQuantity + " exceeds max " + maxLineQuantity);
+            dispatchError("ABOVE_MAX_QUANTITY", ex.getMessage(), ex,
+                    "operation", "updateLineItemQuantity");
+            throw ex;
+        }
+        // Unchanged quantity on a non-voided line: no-op, no event, no recompute.
+        if (!lineItem.isVoided() && lineItem.getQuantity() == newQuantity) {
+            return;
+        }
+        // Zero routes through the shared void path — same operation as the Void Line button.
+        if (newQuantity == 0) {
+            voidLine(lineItem);
+            return;
+        }
         try {
             currentTransaction.updateLineItemQuantity(lineItem, newQuantity);
         } catch (IllegalStateException e) {

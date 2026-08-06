@@ -68,6 +68,7 @@ public class CustomerView extends JFrame {
     private final JLabel runningTotalLabel = new JLabel("Total: $0.00", SwingConstants.RIGHT);
 
     private final List<JButton> quickAddButtons = new ArrayList<>();
+    private final JButton changeQtyButton = new JButton("Change Qty");
     private final JButton voidLineButton = new JButton("Void Line");
     private final JButton voidBasketButton = new JButton("Void Basket");
     private final JButton totalButton = new JButton("Total");
@@ -120,14 +121,33 @@ public class CustomerView extends JFrame {
     }
 
     /**
-     * Enables or disables the basket-input controls (quick-add buttons, void-line, void-basket,
-     * total). Called with {@code false} once {@code Total} is pressed.
+     * Enables or disables the basket-input controls (quick-add buttons, change-qty, void-line,
+     * void-basket, total). Called with {@code false} once {@code Total} is pressed.
+     *
+     * <p>Change Qty additionally requires a non-voided row to be selected; when
+     * {@code enabled} is {@code true} that combined rule is re-applied. When {@code enabled}
+     * is {@code false}, Change Qty is unconditionally disabled — the TOTALED invariant.</p>
      */
     public void setBasketInputEnabled(boolean enabled) {
         for (JButton b : quickAddButtons) b.setEnabled(enabled);
         voidLineButton.setEnabled(enabled);
         voidBasketButton.setEnabled(enabled);
         totalButton.setEnabled(enabled);
+        if (enabled) {
+            refreshChangeQtyEnabled();
+        } else {
+            changeQtyButton.setEnabled(false);
+        }
+    }
+
+    /**
+     * Applies the Change Qty enable rule based on current selection state. Called by the
+     * selection listener and by {@link #setBasketInputEnabled(boolean)}.
+     */
+    private void refreshChangeQtyEnabled() {
+        LineItem sel = basketList.getSelectedValue();
+        boolean basketInputOn = voidLineButton.isEnabled(); // proxy: same lifecycle
+        changeQtyButton.setEnabled(basketInputOn && sel != null && !sel.isVoided());
     }
 
     /**
@@ -144,6 +164,11 @@ public class CustomerView extends JFrame {
     /** @return the line item currently selected in the basket list, or {@code null} if none */
     public LineItem getSelectedLineItem() {
         return basketList.getSelectedValue();
+    }
+
+    /** @return {@code true} if the Change Qty button is currently enabled */
+    public boolean isChangeQtyEnabled() {
+        return changeQtyButton.isEnabled();
     }
 
     /**
@@ -219,7 +244,13 @@ public class CustomerView extends JFrame {
         runningTotalLabel.setFont(runningTotalLabel.getFont().deriveFont(Font.BOLD, 18f));
         south.add(runningTotalLabel, BorderLayout.NORTH);
 
-        JPanel actions = new JPanel(new GridLayout(1, 3, 6, 0));
+        JPanel actions = new JPanel(new GridLayout(1, 4, 6, 0));
+        changeQtyButton.addActionListener(e -> {
+            LineItem selected = getSelectedLineItem();
+            Map<String, Object> props = new HashMap<>();
+            if (selected != null) props.put("lineItem", selected);
+            dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CHANGE_QTY_PRESSED, props));
+        });
         voidLineButton.addActionListener(e -> {
             LineItem selected = getSelectedLineItem();
             Map<String, Object> props = new HashMap<>();
@@ -230,10 +261,19 @@ public class CustomerView extends JFrame {
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
+        changeQtyButton.setEnabled(false);
+        actions.add(changeQtyButton);
         actions.add(voidLineButton);
         actions.add(voidBasketButton);
         actions.add(totalButton);
         south.add(actions, BorderLayout.CENTER);
+
+        // Selection listener drives Change Qty's enabled state: on when a non-voided row is
+        // selected, off otherwise. The basket-input toggle (Total → disable) is applied by
+        // the controller via setBasketInputEnabled.
+        basketList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) refreshChangeQtyEnabled();
+        });
 
         column.add(south, BorderLayout.SOUTH);
         return column;

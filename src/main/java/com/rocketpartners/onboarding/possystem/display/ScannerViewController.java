@@ -89,14 +89,18 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.TENDER_CASH_PRESSED,
             PosEventType.TENDER_DEBIT_PRESSED,
             PosEventType.TENDER_CREDIT_PRESSED,
+            PosEventType.CHANGE_QTY_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED,
             PosEventType.CASH_TENDERED,
             PosEventType.CARD_TENDERED,
+            PosEventType.CHANGE_QTY_CONFIRM_PRESSED,
+            PosEventType.CHANGE_QTY_CANCEL_PRESSED,
             PosEventType.TRANSACTION_COMPLETED,
             PosEventType.RECEIPT_DISMISSED,
             // Focus-restore triggers.
             PosEventType.ITEM_ADDED,
             PosEventType.LINE_VOIDED,
+            PosEventType.QUANTITY_CHANGED,
             PosEventType.BASKET_VOIDED,
             PosEventType.TRANSACTION_TOTALED,
             PosEventType.ERROR));
@@ -232,17 +236,20 @@ public class ScannerViewController implements IController, IPosEventListener {
             case SCAN_SUBMIT_PRESSED -> handleManualSubmit(event);
 
             // Suspend while modals are up. Card modal opens on TENDER_*_PRESSED; the modal
-            // closes when the payment completes (CASH_TENDERED / CARD_TENDERED).
+            // closes when the payment completes (CASH_TENDERED / CARD_TENDERED). The
+            // change-qty dialog opens on CHANGE_QTY_PRESSED and closes on the confirm/cancel
+            // events.
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
-                 TRANSACTION_COMPLETED -> suspendCapture();
-            case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED, RECEIPT_DISMISSED
-                    -> resumeCapture();
+                 CHANGE_QTY_PRESSED, TRANSACTION_COMPLETED -> suspendCapture();
+            case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
+                 CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
+                 RECEIPT_DISMISSED -> resumeCapture();
 
             case TRANSACTION_TOTALED -> view.setStatusHint(ScannerView.STATUS_LOCKED);
 
             // Focus-restore hooks. After any interaction that isn't the modal-driving ones
             // above, put the cursor back on the scan field so the next scan lands there.
-            case ITEM_ADDED, LINE_VOIDED, BASKET_VOIDED, ERROR -> restoreScanFocus();
+            case ITEM_ADDED, LINE_VOIDED, QUANTITY_CHANGED, BASKET_VOIDED, ERROR -> restoreScanFocus();
 
             default -> { /* not subscribed */ }
         }
