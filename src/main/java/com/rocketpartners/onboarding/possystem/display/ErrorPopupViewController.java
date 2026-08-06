@@ -175,6 +175,13 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
                 return upc != null
                         ? "Item not found: " + upc
                         : "Item not found.";
+            case "INVALID_BARCODE":
+                String raw = event.getProperty("raw", String.class);
+                return (raw == null || raw.isEmpty())
+                        ? "Not a valid barcode."
+                        : "Not a valid barcode: " + raw;
+            case "SCAN_LOCKED":
+                return "Scanning is locked — press Total to tender.";
             case "INVALID_CASH_AMOUNT":
                 return "Invalid cash amount. Enter a valid, non-negative number.";
             case "UNDERPAYMENT":

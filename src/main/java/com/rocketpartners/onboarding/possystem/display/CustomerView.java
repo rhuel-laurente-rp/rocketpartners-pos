@@ -10,6 +10,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -74,6 +75,9 @@ public class CustomerView extends JFrame {
     private final JButton payCashButton = new JButton("Pay Cash");
     private final JButton payDebitButton = new JButton("Pay Debit");
     private final JButton payCreditButton = new JButton("Pay Credit");
+
+    /** Mount point for the {@link ScannerView} at the top of the Basket column. */
+    private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
 
     /**
      * @param title         window title (typically {@code "Rocket POS — <store> lane <n>"})
@@ -142,6 +146,20 @@ public class CustomerView extends JFrame {
         return basketList.getSelectedValue();
     }
 
+    /**
+     * Installs the given component as the scan bar at the top of the Basket column.
+     * Idempotent — a subsequent call replaces the previous scan bar.
+     *
+     * @param scanBar the component to mount; must not be {@code null}
+     */
+    public void installScanBar(JComponent scanBar) {
+        if (scanBar == null) throw new IllegalArgumentException("scanBar must not be null");
+        basketNorthSlot.removeAll();
+        basketNorthSlot.add(scanBar, BorderLayout.CENTER);
+        basketNorthSlot.revalidate();
+        basketNorthSlot.repaint();
+    }
+
     // ---- Layout helpers ----------------------------------------------------
 
     private JPanel buildHeader(String title) {
@@ -186,6 +204,10 @@ public class CustomerView extends JFrame {
     private JPanel buildBasketColumn() {
         JPanel column = new JPanel(new BorderLayout(0, 6));
         column.setBorder(BorderFactory.createTitledBorder("Basket"));
+
+        // Slot the ScannerView installs itself into. Kept above the basket list so cause
+        // (scan) and effect (line item appearing) sit vertically adjacent.
+        column.add(basketNorthSlot, BorderLayout.NORTH);
 
         basketList.setCellRenderer(new LineItemCellRenderer());
         basketList.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));

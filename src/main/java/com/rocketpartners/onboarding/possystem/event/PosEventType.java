@@ -80,6 +80,15 @@ public enum PosEventType {
     /** A UPC was scanned or entered on {@code ScannerView}; carries a {@code upc} property. */
     ITEM_SCANNED,
 
+    /**
+     * The cashier submitted the scan field manually (typed digits then hit Enter). Input
+     * event; carries the raw field text as a {@code raw} property. The controller validates
+     * and, if the input parses as a UPC, dispatches {@link #ITEM_SCANNED}; otherwise
+     * {@link #ERROR}. Distinct from {@link #ITEM_SCANNED} so tests can tell the two paths
+     * apart.
+     */
+    SCAN_SUBMIT_PRESSED,
+
     /** An item was added to the basket (new line or quantity increment). */
     ITEM_ADDED,
 

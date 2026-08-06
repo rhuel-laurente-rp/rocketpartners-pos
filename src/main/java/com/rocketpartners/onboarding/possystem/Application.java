@@ -6,6 +6,7 @@ import com.beust.jcommander.ParameterException;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
+import com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
 import com.rocketpartners.onboarding.possystem.display.CustomerViewController;
 import com.rocketpartners.onboarding.possystem.display.ErrorPopupViewController;
@@ -15,6 +16,8 @@ import com.rocketpartners.onboarding.possystem.display.PayWithCashView;
 import com.rocketpartners.onboarding.possystem.display.PayWithCashViewController;
 import com.rocketpartners.onboarding.possystem.display.ReceiptView;
 import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
+import com.rocketpartners.onboarding.possystem.display.ScannerView;
+import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
 import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
@@ -126,8 +129,19 @@ public final class Application {
             ReceiptViewController receiptController =
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
 
+            ScannerView scannerView = new ScannerView(pos);
+            view.installScanBar(scannerView);
+            BarcodeInputBuffer scanBuffer = new BarcodeInputBuffer(
+                    args.scanBurstGapMs,
+                    BarcodeInputBuffer.DEFAULT_STALE_TIMEOUT_MS,
+                    BarcodeInputBuffer.NO_PREFIX,
+                    java.util.Set.of(BarcodeInputBuffer.TERMINATOR_ENTER,
+                            BarcodeInputBuffer.TERMINATOR_TAB));
+            ScannerViewController scannerController =
+                    new ScannerViewController(scannerView, scanBuffer, args.debug);
+
             ErrorPopupViewController errorController =
-                    new ErrorPopupViewController(view, view);
+                    new ErrorPopupViewController(view, scannerView.getScanField());
 
             view.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             view.addWindowListener(new WindowAdapter() {
@@ -142,6 +156,7 @@ public final class Application {
             pos.addController(cardController);
             pos.addController(receiptController);
             pos.addController(errorController);
+            pos.addController(scannerController);
             pos.start();
 
             if (args.debug) {
@@ -198,6 +213,11 @@ public final class Application {
 
         @Parameter(names = "--discount-engine-url", description = "Discount engine HTTP base URL")
         public String discountEngineUrl = "http://localhost:8080";
+
+        @Parameter(names = "--scan-burst-gap-ms",
+                description = "Max inter-character gap (ms) inside a scanner burst; input arriving "
+                        + "beyond this gap is treated as human typing. Default 50.")
+        public long scanBurstGapMs = BarcodeInputBuffer.DEFAULT_BURST_GAP_MS;
 
         @Parameter(names = {"--help", "-h"}, description = "Print this usage and exit", help = true)
         public boolean help = false;
