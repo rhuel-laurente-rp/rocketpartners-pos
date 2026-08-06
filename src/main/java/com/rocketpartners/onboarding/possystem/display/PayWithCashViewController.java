@@ -175,7 +175,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
 
         Transaction paid;
         try {
-            paid = parent.getTransactionService().tenderCash(cashReceived);
+            paid = parent.getTransactionService().tenderCash(cashReceived, amountDue);
         } catch (RuntimeException ex) {
             // Service already dispatched an error; surface it inline and leave the dialog open
             // so the cashier can retry (e.g. tender was pressed with no totaled transaction).
@@ -183,7 +183,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
             return;
         }
 
-        BigDecimal changeDue = cashReceived.subtract(amountDue).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal changeDue = paid.changeDue();
         Map<String, Object> props = new HashMap<>();
         props.put("transaction", paid);
         props.put("tenderType", TenderType.CASH);
@@ -191,11 +191,12 @@ public class PayWithCashViewController implements IController, IPosEventListener
         props.put("amountDue", amountDue);
         props.put("changeDue", changeDue);
         parent.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED, props));
-        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED, props));
-
-        view.showChangeDue(changeDue);
+        // Close the dialog before dispatching completion so the receipt modal opens over the
+        // main frame rather than the cash dialog. Change due is on the receipt — no need for a
+        // separate confirmation popup.
         view.closeDialog();
         amountDue = null;
+        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED, props));
     }
 
     private void cancel() {

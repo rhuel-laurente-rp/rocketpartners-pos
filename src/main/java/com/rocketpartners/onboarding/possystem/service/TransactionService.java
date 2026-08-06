@@ -213,10 +213,23 @@ public class TransactionService {
      * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
      */
     public Transaction tenderCash(BigDecimal amount) {
+        return tenderCash(amount, null);
+    }
+
+    /**
+     * As {@link #tenderCash(BigDecimal)}, but records the settled amount due — the total the
+     * cashier told the customer to pay. Passed non-null when the cashier used the Next Dollar
+     * shortcut so the receipt reflects the rounded amount, not the raw grand total.
+     *
+     * @param amount    cash presented; must not be {@code null}
+     * @param amountDue settled amount due; may be {@code null} to default to grand total
+     * @return the paid transaction
+     */
+    public Transaction tenderCash(BigDecimal amount, BigDecimal amountDue) {
         requireCurrentTransaction("tenderCash");
         Transaction tx = currentTransaction;
         try {
-            tx.tender(TenderType.CASH, amount);
+            tx.tender(TenderType.CASH, amount, amountDue);
         } catch (IllegalStateException e) {
             dispatchError("TOTALED_INVARIANT", e.getMessage(), e, "operation", "tenderCash");
             throw e;

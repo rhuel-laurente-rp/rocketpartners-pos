@@ -134,7 +134,9 @@ class TransactionTotalsTest {
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         assertThat(tx.getTenderType()).isEqualTo(TenderType.CASH);
         assertThat(tx.getCashTendered()).isEqualByComparingTo("8.00");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.99");
+        // Next Dollar settles at the rounded total — the customer receives no change.
+        assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
     }
 
     @Test

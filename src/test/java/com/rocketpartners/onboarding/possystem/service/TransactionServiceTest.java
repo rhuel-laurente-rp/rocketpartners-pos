@@ -338,7 +338,9 @@ class TransactionServiceTest {
         assertThat(paid.getState()).isEqualTo(TransactionState.PAID);
         assertThat(paid.getTenderType()).isEqualTo(TenderType.CASH);
         assertThat(paid.getCashTendered()).isEqualByComparingTo("8.00");
-        assertThat(paid.changeDue()).isEqualByComparingTo("0.99");
+        // Next Dollar settles at the rounded amount — no change to the customer.
+        assertThat(paid.amountDue()).isEqualByComparingTo("8.00");
+        assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
         assertThat(svc.getCurrentTransaction()).isNull();
     }
 
@@ -510,6 +512,62 @@ class TransactionServiceTest {
         String receipt = svc.generateReceipt(paid);
         assertThat(receipt).contains("0.06");
         assertThat(receipt).doesNotContain("0.055");
+    }
+
+    // -----------------------------------------------------------------------
+    // Amount-due on the receipt
+
+    @Test
+    void generateReceipt_exactTender_showsAmountDueEqualToGrandTotal() {
+        TransactionService svc = service(NO_TAX);
+        svc.startTransaction();
+        svc.addItemByUpc(WIDGET.getUpc(), 1);
+        svc.total();
+        Transaction paid = svc.tenderCash(new BigDecimal("10.00"), new BigDecimal("10.00"));
+        String receipt = svc.generateReceipt(paid);
+        assertThat(receipt).contains("Amount Due (Exact):");
+        assertThat(receipt).doesNotContain("Next Dollar");
+    }
+
+    @Test
+    void generateReceipt_nextDollarTender_showsAmountDueAndModeLabel() {
+        Item penny = new Item("UPC-P", "PennyGoods", new BigDecimal("7.30"));
+        Map<String, Item> items = new LinkedHashMap<>();
+        items.put(penny.getUpc(), penny);
+        TransactionService svc = new TransactionService(
+                new InMemoryItemRepository(items),
+                new TaxService(NO_TAX),
+                new RecordingDispatcher());
+        svc.startTransaction();
+        svc.addItemByUpc(penny.getUpc(), 1);
+        svc.total();
+        Transaction paid = svc.tenderCash(new BigDecimal("8.00"), new BigDecimal("8.00"));
+        String receipt = svc.generateReceipt(paid);
+        assertThat(receipt).contains("TOTAL:");
+        assertThat(receipt).contains("7.30");                 // raw grand total
+        assertThat(receipt).contains("Amount Due (Next Dollar):");
+        assertThat(receipt).contains("8.00");                 // settled amount
+        // No change: the customer paid the settled amount.
+        assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void generateReceipt_payNextDollarHelper_showsNextDollarLine() {
+        Item penny = new Item("UPC-P", "PennyGoods", new BigDecimal("7.30"));
+        Map<String, Item> items = new LinkedHashMap<>();
+        items.put(penny.getUpc(), penny);
+        TransactionService svc = new TransactionService(
+                new InMemoryItemRepository(items),
+                new TaxService(NO_TAX),
+                new RecordingDispatcher());
+        svc.startTransaction();
+        svc.addItemByUpc(penny.getUpc(), 1);
+        svc.total();
+        Transaction paid = svc.tenderPayNextDollar();
+        String receipt = svc.generateReceipt(paid);
+        assertThat(receipt).contains("Amount Due (Next Dollar):");
+        assertThat(receipt).contains("8.00");
+        assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
     }
 
     // -----------------------------------------------------------------------

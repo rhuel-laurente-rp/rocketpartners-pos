@@ -4,9 +4,11 @@ import com.rocketpartners.onboarding.commons.model.Discount;
 import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.commons.model.TenderType;
 import com.rocketpartners.onboarding.commons.model.Transaction;
+import com.rocketpartners.onboarding.commons.model.TransactionState;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 
@@ -26,6 +28,11 @@ public final class ReceiptFormatter {
     private static final int LINE_WIDTH = 40;
     private static final String DOUBLE_RULE = "=".repeat(LINE_WIDTH);
     private static final String SINGLE_RULE = "-".repeat(LINE_WIDTH);
+
+    /** Cashier-readable timestamp (local zone): {@code MM/dd/yyyy HH:mm:ss}. */
+    private static final DateTimeFormatter DATE_FORMAT =
+            DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm:ss", Locale.US)
+                    .withZone(ZoneId.systemDefault());
 
     private ReceiptFormatter() {}
 
@@ -62,7 +69,7 @@ public final class ReceiptFormatter {
             sb.append(DOUBLE_RULE).append('\n');
         }
         sb.append("Transaction: ").append(tx.getTransactionId()).append('\n');
-        sb.append("Date:        ").append(DateTimeFormatter.ISO_INSTANT.format(tx.getCreatedAt())).append('\n');
+        sb.append("Date:        ").append(DATE_FORMAT.format(tx.getCreatedAt())).append('\n');
         sb.append(DOUBLE_RULE).append('\n');
 
         for (LineItem li : tx.getLineItems()) {
@@ -80,9 +87,20 @@ public final class ReceiptFormatter {
             sb.append(pad("Discount: " + d.getDescription(), "-" + money(d.getAppliedAmount()))).append('\n');
         }
 
-        sb.append(pad("Tax:", money(tx.taxTotal()))).append('\n');
+        sb.append(pad("Tax (7%):", money(tx.taxTotal()))).append('\n');
         sb.append(SINGLE_RULE).append('\n');
         sb.append(pad("TOTAL:", money(tx.grandTotal()))).append('\n');
+
+        // Show the settled amount only once the transaction is paid — beforehand there is no
+        // "amount due" separate from the grand total. When they differ (Next Dollar shortcut),
+        // annotate with the mode so the audit trail records which cashier action produced it.
+        if (tx.getState() == TransactionState.PAID) {
+            BigDecimal grand = tx.grandTotal();
+            BigDecimal settled = tx.amountDue();
+            String modeLabel = settled.compareTo(grand) == 0 ? "Exact" : "Next Dollar";
+            sb.append(pad("Amount Due (" + modeLabel + "):", money(settled))).append('\n');
+        }
+
         sb.append(DOUBLE_RULE).append('\n');
 
         TenderType tenderType = tx.getTenderType();

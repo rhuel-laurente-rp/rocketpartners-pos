@@ -9,7 +9,6 @@ import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
@@ -89,14 +88,6 @@ public class PayWithCashView {
     public String getCashReceivedText() {
         String text = cashReceivedField.getText();
         return text == null ? "" : text;
-    }
-
-    /** Displays the change due to the customer via a modal message before the dialog closes. */
-    public void showChangeDue(BigDecimal change) {
-        if (change == null) throw new IllegalArgumentException("change must not be null");
-        String message = "Change due: $" + change.setScale(2, RoundingMode.HALF_UP).toPlainString();
-        statusLabel.setText(message);
-        JOptionPane.showMessageDialog(dialog, message, "Change Due", JOptionPane.INFORMATION_MESSAGE);
     }
 
     /** Shows an inline error message on the dialog (does not close it). */

@@ -62,6 +62,14 @@ public class Transaction {
     private BigDecimal cashTendered;
 
     /**
+     * The customer-facing total the cashier settled at — {@link #grandTotal()} by default, but
+     * may be higher when a cash tender used a rounding shortcut (e.g. Next Dollar rounded
+     * $7.30 up to $8.00 so the customer could hand over a single bill and receive no change).
+     * {@code null} until tendered.
+     */
+    private BigDecimal amountDue;
+
+    /**
      * Opens a new transaction with a freshly generated id and the current instant.
      *
      * @param taxRate flat sales-tax rate; must not be {@code null}
@@ -208,11 +216,27 @@ public class Transaction {
      * @throws IllegalArgumentException if either argument is null
      */
     public void tender(TenderType type, BigDecimal cashTendered) {
+        tender(type, cashTendered, null);
+    }
+
+    /**
+     * As {@link #tender(TenderType, BigDecimal)}, but records the customer-facing amount the
+     * cashier settled at. Pass a non-null {@code amountDue} when it differs from
+     * {@link #grandTotal()} — the Next Dollar shortcut is the canonical case. When
+     * {@code amountDue} is {@code null} the transaction's amount due defaults to
+     * {@link #grandTotal()} at read time.
+     *
+     * @param type         payment method; must not be {@code null}
+     * @param cashTendered amount presented; must not be {@code null}
+     * @param amountDue    settled amount due; may be {@code null} to mean "same as grand total"
+     */
+    public void tender(TenderType type, BigDecimal cashTendered, BigDecimal amountDue) {
         requireState("tender", TransactionState.TOTALED);
         if (type == null) throw new IllegalArgumentException("tender type must not be null");
         if (cashTendered == null) throw new IllegalArgumentException("cashTendered must not be null");
         this.tenderType = type;
         this.cashTendered = cashTendered;
+        this.amountDue = amountDue == null ? null : amountDue.setScale(2, RoundingMode.HALF_UP);
         this.state = TransactionState.PAID;
     }
 
@@ -226,7 +250,9 @@ public class Transaction {
     public void payNextDollar() {
         requireState("payNextDollar", TransactionState.TOTALED);
         BigDecimal nextDollar = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2);
-        tender(TenderType.CASH, nextDollar);
+        // The customer pays the rounded-up amount and receives no change; the receipt should
+        // show that adjusted total, not the raw grand total.
+        tender(TenderType.CASH, nextDollar, nextDollar);
     }
 
     /**
@@ -279,9 +305,13 @@ public class Transaction {
     }
 
     /**
-     * Change due to the customer: {@code cashTendered − grandTotal}, rounded to scale 2 with
-     * {@link RoundingMode#HALF_UP}. Returns {@link BigDecimal#ZERO} if the transaction has
-     * not been tendered, or if the tender type is not {@link TenderType#CASH}.
+     * Change due to the customer: {@code cashTendered − amountDue()}, rounded to scale 2 with
+     * {@link RoundingMode#HALF_UP}. Returns {@link BigDecimal#ZERO} if the transaction has not
+     * been tendered, or if the tender type is not {@link TenderType#CASH}.
+     *
+     * <p>The Next Dollar shortcut records an {@code amountDue} above {@link #grandTotal()};
+     * change is measured against that settled amount, not the raw grand total, so a
+     * "hand over $8 for a $7.30 total" tender yields $0.00 change — not $0.70.</p>
      *
      * @return change due, scale 2; never {@code null}
      */
@@ -289,7 +319,18 @@ public class Transaction {
         if (cashTendered == null || tenderType != TenderType.CASH) {
             return BigDecimal.ZERO;
         }
-        return cashTendered.subtract(grandTotal()).setScale(2, RoundingMode.HALF_UP);
+        return cashTendered.subtract(amountDue()).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * The customer-facing amount the cashier settled at. Defaults to {@link #grandTotal()};
+     * differs when the tender used the Next Dollar shortcut, in which case the customer paid
+     * a rounded-up amount to avoid receiving change.
+     *
+     * @return the settled amount due, scale 2; never {@code null}
+     */
+    public BigDecimal amountDue() {
+        return amountDue == null ? grandTotal() : amountDue;
     }
 
     private void requireState(String operation, TransactionState... allowed) {
