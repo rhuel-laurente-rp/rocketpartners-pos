@@ -173,8 +173,9 @@ public class PayWithCashViewController implements IController, IPosEventListener
             return;
         }
 
+        Transaction paid;
         try {
-            parent.getTransactionService().tenderCash(cashReceived);
+            paid = parent.getTransactionService().tenderCash(cashReceived);
         } catch (RuntimeException ex) {
             // Service already dispatched an error; surface it inline and leave the dialog open
             // so the cashier can retry (e.g. tender was pressed with no totaled transaction).
@@ -184,6 +185,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
 
         BigDecimal changeDue = cashReceived.subtract(amountDue).setScale(2, RoundingMode.HALF_UP);
         Map<String, Object> props = new HashMap<>();
+        props.put("transaction", paid);
         props.put("tenderType", TenderType.CASH);
         props.put("amountTendered", cashReceived);
         props.put("amountDue", amountDue);

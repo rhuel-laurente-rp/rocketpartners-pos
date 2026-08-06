@@ -24,14 +24,16 @@ import java.util.Set;
  *
  * <p>Subscribes to the four basket-input event types ({@link PosEventType#QUICK_ADD_PRESSED},
  * {@link PosEventType#VOID_LINE_PRESSED}, {@link PosEventType#VOID_BASKET_PRESSED},
- * {@link PosEventType#TOTAL_PRESSED}) and to {@link PosEventType#TRANSACTION_COMPLETED} as a
+ * {@link PosEventType#TOTAL_PRESSED}) and to {@link PosEventType#RECEIPT_DISMISSED} as a
  * lifecycle signal. The three tender-input events belong to child controllers
  * ({@link PayWithCashViewController}, {@link PayWithCardViewController}); this controller
  * doesn't tender itself.</p>
  *
- * <p>After any terminal transition — {@link PosEventType#VOID_BASKET_PRESSED} or any tender
- * (surfaced via {@link PosEventType#TRANSACTION_COMPLETED}) — the controller opens a fresh
- * transaction so the next customer can be rung up without a restart.</p>
+ * <p>After any terminal transition — {@link PosEventType#VOID_BASKET_PRESSED} or a tender
+ * followed by receipt dismissal (surfaced via {@link PosEventType#RECEIPT_DISMISSED}) — the
+ * controller opens a fresh transaction so the next customer can be rung up without a restart.
+ * Waiting for {@code RECEIPT_DISMISSED} rather than {@code TRANSACTION_COMPLETED} ensures the
+ * cashier sees the receipt before the display flips back to an empty basket.</p>
  *
  * <p>Service calls that throw are swallowed at this layer — the service has already dispatched
  * an {@link PosEventType#ERROR} event and the view has not yet been updated for the failed
@@ -45,7 +47,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             PosEventType.VOID_LINE_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.TOTAL_PRESSED,
-            PosEventType.TRANSACTION_COMPLETED));
+            PosEventType.RECEIPT_DISMISSED));
 
     private final CustomerView view;
     private PosComponent parent;
@@ -91,7 +93,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_PRESSED -> handleVoidBasket();
             case TOTAL_PRESSED -> handleTotal();
-            case TRANSACTION_COMPLETED -> beginNewTransaction();
+            case RECEIPT_DISMISSED -> beginNewTransaction();
             default -> { /* not subscribed */ }
         }
     }

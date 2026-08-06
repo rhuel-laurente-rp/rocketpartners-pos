@@ -16,26 +16,51 @@ import java.util.Locale;
  * <p>The receipt is a projection of the transaction, not a source of truth — no state is
  * stored here. Money values are rendered at scale 2 with {@link RoundingMode#HALF_UP} for
  * display only; the underlying aggregate is untouched.</p>
+ *
+ * <p>Two entry points: a header-less {@link #format(Transaction)} used by tests that don't care
+ * about store metadata, and {@link #format(Transaction, String, int)} which prepends the store
+ * name and lane number the way a real receipt reads. Both share the same body.</p>
  */
 public final class ReceiptFormatter {
 
-    private static final int LINE_WIDTH = 33;
+    private static final int LINE_WIDTH = 40;
     private static final String DOUBLE_RULE = "=".repeat(LINE_WIDTH);
     private static final String SINGLE_RULE = "-".repeat(LINE_WIDTH);
 
     private ReceiptFormatter() {}
 
     /**
-     * Formats the transaction as a multi-line plain-text receipt.
+     * Formats the transaction as a multi-line plain-text receipt, without a store header.
      *
      * @param tx the transaction to render; must not be {@code null}
      * @return the receipt text
      */
     public static String format(Transaction tx) {
+        return format(tx, null, null);
+    }
+
+    /**
+     * Formats the transaction with the given store name and lane number in the header.
+     *
+     * @param tx         the transaction to render; must not be {@code null}
+     * @param storeName  the store label; may be {@code null} to omit
+     * @param laneNumber the lane number; may be {@code null} to omit
+     * @return the receipt text
+     */
+    public static String format(Transaction tx, String storeName, Integer laneNumber) {
         if (tx == null) throw new IllegalArgumentException("tx must not be null");
 
         StringBuilder sb = new StringBuilder();
         sb.append(DOUBLE_RULE).append('\n');
+        if (storeName != null) {
+            sb.append(center(storeName)).append('\n');
+        }
+        if (laneNumber != null) {
+            sb.append(center("Lane " + laneNumber)).append('\n');
+        }
+        if (storeName != null || laneNumber != null) {
+            sb.append(DOUBLE_RULE).append('\n');
+        }
         sb.append("Transaction: ").append(tx.getTransactionId()).append('\n');
         sb.append("Date:        ").append(DateTimeFormatter.ISO_INSTANT.format(tx.getCreatedAt())).append('\n');
         sb.append(DOUBLE_RULE).append('\n');
@@ -44,6 +69,8 @@ public final class ReceiptFormatter {
             if (li.isVoided()) continue;
             String left = li.getQuantity() + " x " + li.getItem().getDescription();
             sb.append(pad(left, money(li.extendedTotal()))).append('\n');
+            String unitPrice = "  @ " + money(li.getItem().getUnitPrice()) + " ea";
+            sb.append(unitPrice).append('\n');
         }
 
         sb.append(SINGLE_RULE).append('\n');
@@ -73,6 +100,11 @@ public final class ReceiptFormatter {
     private static String pad(String left, String right) {
         int spaces = Math.max(1, LINE_WIDTH - left.length() - right.length());
         return left + " ".repeat(spaces) + right;
+    }
+
+    private static String center(String text) {
+        int pad = Math.max(0, (LINE_WIDTH - text.length()) / 2);
+        return " ".repeat(pad) + text;
     }
 
     private static String money(BigDecimal amount) {

@@ -8,10 +8,13 @@ import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
 import com.rocketpartners.onboarding.possystem.display.CustomerViewController;
+import com.rocketpartners.onboarding.possystem.display.ErrorPopupViewController;
 import com.rocketpartners.onboarding.possystem.display.PayWithCardView;
 import com.rocketpartners.onboarding.possystem.display.PayWithCardViewController;
 import com.rocketpartners.onboarding.possystem.display.PayWithCashView;
 import com.rocketpartners.onboarding.possystem.display.PayWithCashViewController;
+import com.rocketpartners.onboarding.possystem.display.ReceiptView;
+import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
 import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
@@ -119,6 +122,13 @@ public final class Application {
             PayWithCardView cardView = new PayWithCardView(view);
             PayWithCardViewController cardController = new PayWithCardViewController(cardView);
 
+            ReceiptView receiptView = new ReceiptView(view, pos);
+            ReceiptViewController receiptController =
+                    new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
+
+            ErrorPopupViewController errorController =
+                    new ErrorPopupViewController(view, view);
+
             view.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             view.addWindowListener(new WindowAdapter() {
                 @Override
@@ -130,6 +140,8 @@ public final class Application {
             pos.addController(controller);
             pos.addController(cashController);
             pos.addController(cardController);
+            pos.addController(receiptController);
+            pos.addController(errorController);
             pos.start();
 
             if (args.debug) {

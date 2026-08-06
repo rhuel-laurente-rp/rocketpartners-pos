@@ -295,6 +295,14 @@ public class TransactionService {
     }
 
     /**
+     * As {@link #generateReceipt(Transaction)}, but prepends the store name and lane number
+     * to the header. Used by the UI when it has these from the CLI args.
+     */
+    public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber) {
+        return ReceiptFormatter.format(transaction, storeName, laneNumber);
+    }
+
+    /**
      * @return the current in-flight transaction, or {@code null} if none is open
      */
     public Transaction getCurrentTransaction() {

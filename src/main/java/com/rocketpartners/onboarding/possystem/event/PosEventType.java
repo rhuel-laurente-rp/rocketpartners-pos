@@ -105,9 +105,36 @@ public enum PosEventType {
      */
     CARD_TENDERED,
 
-    /** Receipt printed; the transaction is fully complete. Terminal notification. */
+    /**
+     * Payment recorded; the receipt is about to be displayed. Carries the paid
+     * {@code transaction} (Transaction) plus {@code tenderType} (TenderType),
+     * {@code amountTendered} (BigDecimal), and {@code changeDue} (BigDecimal). The tender
+     * controllers dispatch this; {@link com.rocketpartners.onboarding.possystem.display.ReceiptViewController}
+     * reacts by rendering the receipt.
+     */
     TRANSACTION_COMPLETED,
 
-    /** A POS-level error occurred (e.g. bad UPC lookup, illegal state, journal unreachable). */
+    /**
+     * The dismiss button on the receipt dialog was pressed. Input event; no properties. The
+     * cashier is done reviewing the receipt.
+     */
+    RECEIPT_DISMISS_PRESSED,
+
+    /**
+     * The receipt was dismissed and the POS is ready for the next customer. Notification
+     * event; no properties. Consumers ({@code CustomerViewController}) reset the basket
+     * display and start a new transaction.
+     */
+    RECEIPT_DISMISSED,
+
+    /**
+     * A POS-level error occurred (e.g. bad UPC lookup, illegal state, journal unreachable).
+     *
+     * <p>Standard properties: {@code code} (short identifier such as {@code UPC_NOT_FOUND},
+     * {@code TOTALED_INVARIANT}, {@code INVALID_CASH_AMOUNT}, {@code UNDERPAYMENT},
+     * {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT}), {@code message} (human-readable
+     * detail), and {@code cause} (Throwable, when present). May also carry
+     * {@code operation}, {@code upc}, and other kind-specific keys.</p>
+     */
     ERROR
 }

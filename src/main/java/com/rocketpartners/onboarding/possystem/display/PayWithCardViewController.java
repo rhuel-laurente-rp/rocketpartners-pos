@@ -122,8 +122,9 @@ public class PayWithCardViewController implements IController, IPosEventListener
     }
 
     private void completeApproval(TenderType tenderType, BigDecimal amountDue) {
+        Transaction paid;
         try {
-            parent.getTransactionService().tenderCard(tenderType, amountDue);
+            paid = parent.getTransactionService().tenderCard(tenderType, amountDue);
         } catch (RuntimeException ex) {
             // Service already dispatched ERROR — surface it on the dialog and close.
             view.closeDialog();
@@ -131,6 +132,7 @@ public class PayWithCardViewController implements IController, IPosEventListener
         }
         view.showApproved();
         Map<String, Object> props = new HashMap<>();
+        props.put("transaction", paid);
         props.put("tenderType", tenderType);
         props.put("amountTendered", amountDue);
         props.put("changeDue", BigDecimal.ZERO);

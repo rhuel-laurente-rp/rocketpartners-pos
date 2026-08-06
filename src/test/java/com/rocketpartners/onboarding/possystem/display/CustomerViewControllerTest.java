@@ -207,7 +207,7 @@ class CustomerViewControllerTest {
     }
 
     @Test
-    void transactionCompleted_startsFreshTransaction_andResetsInputMode() {
+    void receiptDismissed_startsFreshTransaction_andResetsInputMode() {
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
@@ -216,7 +216,7 @@ class CustomerViewControllerTest {
         pos.getTransactionService().tenderCash(new BigDecimal("10.00"));
         reset(view);
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISSED));
 
         Transaction next = pos.getTransactionService().getCurrentTransaction();
         assertThat(next).isNotNull();
@@ -224,6 +224,23 @@ class CustomerViewControllerTest {
         verify(view).setBasketInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
         verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+    }
+
+    @Test
+    void transactionCompleted_isNotHandledByCustomerViewController() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+        pos.getTransactionService().tenderCash(new BigDecimal("10.00"));
+        reset(view);
+
+        // Reset waits for the receipt to be dismissed — TRANSACTION_COMPLETED alone must not
+        // wipe the basket display out from under the receipt.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
+
+        verify(view, never()).updateBasket(any(), any());
+        verify(view, never()).setBasketInputEnabled(true);
     }
 
     @Test
