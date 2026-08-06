@@ -205,17 +205,6 @@ class ScannerViewControllerTest {
                 .isEqualTo("INVALID_BARCODE");
     }
 
-    @Test
-    void wrongLengthBurst_isRejectedAsInvalidBarcode() {
-        ensureInProgress();
-
-        burst("12345", 5); // 5 digits — neither UPC-A nor EAN-13
-        typed('\n');
-
-        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
-        assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
-                .isEqualTo("INVALID_BARCODE");
-    }
 
     @Test
     void unknownUpc_producesItemNotFoundErrorFromService_leavesTransactionUnchanged() {
@@ -309,7 +298,9 @@ class ScannerViewControllerTest {
     void fieldClearedAndFocusRestored_afterRejectedScan() {
         ensureInProgress();
 
-        burst("12345", 5); // too short — rejected
+        // Non-numeric burst — rejected as INVALID_BARCODE. (Wrong-length is no longer a
+        // rejection reason: the pricebook carries UPCs of assorted lengths.)
+        burst("bananana1234", 5);
         typed('\n');
 
         // Rejected scan: the completed handler still clears & refocuses so the cashier can

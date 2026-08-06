@@ -5,8 +5,6 @@ import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 
 import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -14,87 +12,83 @@ import javax.swing.JTextArea;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Font;
 
 /**
- * Modal receipt dialog: a dumb Swing renderer that shows a preformatted receipt string in a
- * scrollable monospaced text area, with a single {@code Dismiss} button.
+ * Modal receipt dialog.
  *
- * <p>The view does not re-derive or re-format anything — it takes the string produced by
- * {@link com.rocketpartners.onboarding.possystem.service.TransactionService#generateReceipt}
- * verbatim and paints it. Money formatting, column alignment, voided-line filtering, and any
- * other layout decisions live in the service. If the receipt layout needs to change, it changes
- * there, and this view redraws whatever comes back.</p>
+ * <p>Deliberately breaks the plain-surface style used by the other dialogs to render as
+ * <em>receipt tape</em>: {@link PosTheme#PAPER} background, monospaced font, {@link
+ * PosTheme#RULE} hairlines top and bottom of the tape block, and the tape inset from the
+ * dialog edges so it reads as a strip of paper rather than a panel. The rest of the dialog —
+ * header, footer, keyboard bindings — inherits the standard {@link PosDialog} chrome.</p>
  *
- * <p>Outbound: on {@code Dismiss}, dispatches {@link PosEventType#RECEIPT_DISMISS_PRESSED}.</p>
- *
- * <p>Inbound: {@link #setReceiptText(String)}, {@link #openDialog()}, {@link #closeDialog()}
- * for the controller to drive the dialog lifecycle.</p>
+ * <p>The receipt text still comes verbatim from
+ * {@code TransactionService.generateReceipt()} — the view formats nothing.</p>
  */
-public class ReceiptView {
+public class ReceiptView extends PosDialog {
 
-    private static final int PREFERRED_WIDTH = 480;
-    private static final int PREFERRED_HEIGHT = 520;
-
-    private final JDialog dialog;
+    private static final int PREFERRED_WIDTH = 520;
+    private static final int PREFERRED_HEIGHT = 560;
 
     private final JTextArea textArea = new JTextArea();
-    private final JButton dismissButton = new JButton("Dismiss");
 
     /**
      * @param owner      the parent frame; may be {@code null}
      * @param dispatcher target for view-input events; must not be {@code null}
      */
     public ReceiptView(JFrame owner, IPosEventDispatcher dispatcher) {
+        super(owner, "Receipt");
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
-        this.dialog = new JDialog(owner, "Receipt", true);
-        this.dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-        this.dialog.setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
-        JPanel content = new JPanel(new BorderLayout(0, 8));
-        content.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBody(buildBody());
+        setMinimumSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
-        textArea.setEditable(false);
-        textArea.setFocusable(false);
-        textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        textArea.setLineWrap(false);
-
-        JScrollPane scroll = new JScrollPane(textArea);
-        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        content.add(scroll, BorderLayout.CENTER);
-
-        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-        south.add(dismissButton);
-        content.add(south, BorderLayout.SOUTH);
-
-        dismissButton.addActionListener(e ->
+        PosButton startNext = PosButtons.primary("Start next sale");
+        startNext.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED)));
-
-        dialog.getContentPane().add(content);
-        dialog.pack();
-        dialog.setLocationRelativeTo(owner);
+        setPrimary(startNext);
+        setCancelAction(() ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED)));
+        setInitialFocus(startNext);
     }
 
     // ---- Public API called by ReceiptViewController ------------------------
 
-    /**
-     * Replaces the on-screen receipt text. The string is displayed verbatim in a monospaced
-     * text area, so the caller (the service) controls column alignment.
-     */
     public void setReceiptText(String text) {
         textArea.setText(text == null ? "" : text);
         textArea.setCaretPosition(0);
     }
 
-    /** Opens the dialog. Blocks until it is closed (modal). */
-    public void openDialog() {
-        dialog.setVisible(true);
-    }
+    // ---- Layout -----------------------------------------------------------
 
-    /** Hides the dialog. */
-    public void closeDialog() {
-        dialog.setVisible(false);
+    private JPanel buildBody() {
+        JPanel body = new JPanel(new BorderLayout());
+        body.setOpaque(false);
+
+        textArea.setEditable(false);
+        textArea.setFocusable(false);
+        textArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        textArea.setBackground(PosTheme.PAPER);
+        textArea.setForeground(PosTheme.INK);
+        textArea.setLineWrap(false);
+        textArea.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+
+        JScrollPane scroll = new JScrollPane(textArea);
+        scroll.getViewport().setBackground(PosTheme.PAPER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+
+        // Tape block: PAPER surface with RULE hairlines top and bottom; inset from the
+        // dialog edges by leaving a stripe of SURFACE around it.
+        JPanel tape = new JPanel(new BorderLayout());
+        tape.setBackground(PosTheme.PAPER);
+        tape.setBorder(BorderFactory.createMatteBorder(1, 0, 1, 0, PosTheme.RULE));
+        tape.add(scroll, BorderLayout.CENTER);
+
+        body.setBorder(BorderFactory.createEmptyBorder(4, 16, 4, 16));
+        body.add(tape, BorderLayout.CENTER);
+        return body;
     }
 }

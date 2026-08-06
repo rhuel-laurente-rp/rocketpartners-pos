@@ -7,7 +7,6 @@ import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 
 import javax.swing.JFrame;
-import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.util.Collections;
@@ -16,13 +15,14 @@ import java.util.Set;
 
 /**
  * Listens for {@link PosEventType#ERROR} events and shows them to the cashier as a modal
- * {@link JOptionPane}.
+ * {@link ErrorDialog}.
  *
- * <p><strong>No {@code ErrorPopupView} class.</strong> Deliberate exception to the
- * dumb-view/controller pattern the rest of {@code display} follows. {@link JOptionPane} is
- * already a self-contained modal view — wrapping it in a hollow {@code ErrorPopupView} class
- * with no layout, no fields, and one pass-through method would be ceremony. The controller
- * treats {@code JOptionPane} as the view; there is no rendering logic here to separate.</p>
+ * <p><strong>Presenter, not view.</strong> The old design used {@link javax.swing.JOptionPane}
+ * on the argument that it was already a self-contained modal view and wrapping it in a POS
+ * class would be ceremony. That argument no longer holds now that every other surface shares
+ * a design system: the one dialog a cashier sees under stress would be the one that looks
+ * like a different application. This controller now drives an {@link ErrorDialog}, which sits
+ * on {@link PosDialog} like the tender and receipt surfaces.</p>
  *
  * <p><strong>Three requirements the tests pin down:</strong></p>
  * <ol>
@@ -79,9 +79,13 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
     private PosComponent parent;
 
     /**
-     * Production constructor: EDT marshalling via {@link SwingUtilities#invokeLater},
-     * {@link JOptionPane} as the presenter, focus returned to {@code focusOnDismiss} when the
-     * cashier dismisses.
+     * Production constructor: EDT marshalling via {@link SwingUtilities#invokeLater}, an
+     * {@link ErrorDialog} as the presenter (matched to the POS design system), and focus
+     * returned to {@code focusOnDismiss} when the cashier dismisses.
+     *
+     * <p>A single {@link ErrorDialog} instance is reused across errors — it is modal and
+     * blocking, so at most one is on screen at a time, which the coalescing flag guarantees
+     * anyway.</p>
      *
      * @param ownerForDialogs the parent frame; may be {@code null}
      * @param focusOnDismiss  component whose {@link Component#requestFocusInWindow()} is called
@@ -90,9 +94,28 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
     public ErrorPopupViewController(JFrame ownerForDialogs, Component focusOnDismiss) {
         this(ownerForDialogs,
                 SwingUtilities::invokeLater,
-                (owner, title, message) ->
-                        JOptionPane.showMessageDialog(owner, message, title, JOptionPane.ERROR_MESSAGE),
+                new DialogPresenter(ownerForDialogs),
                 focusOnDismiss == null ? null : focusOnDismiss::requestFocusInWindow);
+    }
+
+    /**
+     * Presenter that opens an {@link ErrorDialog}. Lazily constructs one so a headless test
+     * environment doesn't crash simply by loading this class.
+     */
+    private static final class DialogPresenter implements ErrorPresenter {
+        private final JFrame owner;
+        private ErrorDialog dialog;
+
+        DialogPresenter(Component ownerCandidate) {
+            this.owner = ownerCandidate instanceof JFrame f ? f : null;
+        }
+
+        @Override
+        public void show(Component parent, String title, String message) {
+            if (dialog == null) dialog = new ErrorDialog(owner);
+            dialog.configure(title, message);
+            dialog.openDialog();
+        }
     }
 
     /**

@@ -139,17 +139,17 @@ class BarcodeInputBufferTest {
     }
 
     @Test
-    void barcodes_isValidUpc_acceptsUpcaAndEan13() {
-        assertThat(Barcodes.isValidUpc("049000053418")).isTrue();   // 12 digits
-        assertThat(Barcodes.isValidUpc("1234567890123")).isTrue();  // 13 digits
+    void barcodes_isValidUpc_acceptsAnyNonEmptyDigitString() {
+        assertThat(Barcodes.isValidUpc("049000053418")).isTrue();   // 12 digits (UPC-A)
+        assertThat(Barcodes.isValidUpc("1234567890123")).isTrue();  // 13 digits (EAN-13)
+        assertThat(Barcodes.isValidUpc("12345")).isTrue();          // short PLU-style codes
+        assertThat(Barcodes.isValidUpc("12345678901234")).isTrue(); // 14-digit codes
     }
 
     @Test
-    void barcodes_isValidUpc_rejectsInvalidShapes() {
+    void barcodes_isValidUpc_rejectsEmptyAndNonDigitInput() {
         assertThat(Barcodes.isValidUpc(null)).isFalse();
         assertThat(Barcodes.isValidUpc("")).isFalse();
-        assertThat(Barcodes.isValidUpc("12345")).isFalse();
-        assertThat(Barcodes.isValidUpc("12345678901234")).isFalse(); // 14 digits
         assertThat(Barcodes.isValidUpc("banana")).isFalse();
         assertThat(Barcodes.isValidUpc("0490abc53418")).isFalse();
     }
