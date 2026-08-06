@@ -14,10 +14,38 @@ package com.rocketpartners.onboarding.possystem.event;
  *
  * <p>This enum starts with the lifecycle shape the current milestone requires. The finer-grained
  * UI-layer request events named in {@code docs/Phase 1/event-flow.md} (e.g. {@code UPC_ENTERED},
- * {@code REQUEST_ADD_ITEM}, {@code TOTAL_PRESSED}) will be added alongside their views and
- * controllers in a later commit.</p>
+ * {@code REQUEST_ADD_ITEM}) will continue to be added alongside their views and controllers
+ * in later commits.</p>
  */
 public enum PosEventType {
+
+    /**
+     * A quick-add button on a view was pressed. Input event; carries a {@code upc} property
+     * naming the pricebook UPC the button was bound to.
+     */
+    QUICK_ADD_PRESSED,
+
+    /**
+     * The Void Line button on a view was pressed. Input event; carries a {@code lineItem}
+     * property naming the currently selected basket row (may be absent when no row is selected —
+     * consumers should treat that as a no-op).
+     */
+    VOID_LINE_PRESSED,
+
+    /** The Void Basket button on a view was pressed. Input event; no properties. */
+    VOID_BASKET_PRESSED,
+
+    /** The Total button on a view was pressed. Input event; no properties. */
+    TOTAL_PRESSED,
+
+    /** The Pay Cash button was pressed. Input event; no properties (Pay-Next-Dollar semantics). */
+    TENDER_CASH_PRESSED,
+
+    /** The Pay Debit button was pressed. Input event; no properties. */
+    TENDER_DEBIT_PRESSED,
+
+    /** The Pay Credit button was pressed. Input event; no properties. */
+    TENDER_CREDIT_PRESSED,
 
     /** A UPC was scanned or entered on {@code ScannerView}; carries a {@code upc} property. */
     ITEM_SCANNED,
