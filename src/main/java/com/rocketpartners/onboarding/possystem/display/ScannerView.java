@@ -8,30 +8,29 @@ import javax.swing.BorderFactory;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingConstants;
+import javax.swing.border.Border;
+import javax.swing.text.JTextComponent;
 import java.awt.BorderLayout;
-import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * The scan bar mounted at the top of the Basket column.
  *
- * <p>Layout: a {@code Scan} label, an editable field for manual UPC entry, and a small status
- * hint to the right ({@code Ready to scan} / {@code Scanning…} / {@code Locked — press Total
- * to tender}). Everything sits on one row so cause (a barcode arriving) and effect (a line
- * item appearing directly beneath) are visually adjacent.</p>
+ * <p>Layout: a {@code Scan} eyebrow, an editable field for manual UPC entry, and a small
+ * status hint to the right ({@link #STATUS_READY} / {@link #STATUS_SCANNING} /
+ * {@link #STATUS_LOCKED}). Everything sits on one row so cause (a barcode arriving) and effect
+ * (a line item appearing directly beneath) are visually adjacent.</p>
  *
- * <p>The view is deliberately dumb: it does not classify scanner bursts, does not validate
- * UPCs, and does not touch the transaction. The application-wide
- * {@code KeyEventDispatcher} the controller installs is what actually captures scanner input;
- * this view's own text field is the fallback path for slow manual typing. On Enter the field
- * dispatches a {@link PosEventType#SCAN_SUBMIT_PRESSED} event carrying the raw field text.</p>
- *
- * <p>Public API for the controller: {@link #getScanField()} (so the controller can request
- * focus after every user interaction), {@link #getScanText()}, {@link #setScanText(String)},
- * {@link #clearScanField()}, and {@link #setStatusHint(String)}.</p>
+ * <p>Restyled to fit the POS design system: the field has a {@link PosTheme#RULE} border that
+ * turns {@link PosTheme#GO} on focus, {@link PosTheme#MUTED} placeholder text, and the status
+ * hint is right-aligned in {@link PosTheme#EYEBROW} style. Reads as part of the basket panel
+ * it sits inside, not a widget dropped on top.</p>
  */
 public class ScannerView extends JPanel {
 
@@ -42,73 +41,149 @@ public class ScannerView extends JPanel {
     /** Shown when scans are suspended (transaction TOTALED or a modal dialog is open). */
     public static final String STATUS_LOCKED = "Locked — press Total to tender";
 
+    private static final String PLACEHOLDER = "Scan or type a UPC and press Enter";
+
     private final IPosEventDispatcher dispatcher;
 
     private final JTextField scanField = new JTextField();
     private final JLabel statusHint = new JLabel(STATUS_READY);
+    private final JLabel eyebrow = new JLabel("SCAN");
+
+    private final Border idleBorder;
+    private final Border focusBorder;
 
     /**
      * @param dispatcher target for view-input events; must not be {@code null}
      */
     public ScannerView(IPosEventDispatcher dispatcher) {
-        super(new BorderLayout(6, 0));
+        super(new BorderLayout(12, 0));
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         this.dispatcher = dispatcher;
+        setOpaque(false);
 
-        setBorder(BorderFactory.createEmptyBorder(6, 8, 4, 8));
+        eyebrow.setFont(PosTheme.eyebrow());
+        eyebrow.setForeground(PosTheme.MUTED);
+        eyebrow.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 0));
 
-        JLabel scanLabel = new JLabel("Scan:");
-        scanLabel.setFont(scanLabel.getFont().deriveFont(Font.BOLD));
+        idleBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(PosTheme.RULE, 1),
+                BorderFactory.createEmptyBorder(7, 12, 7, 12));
+        focusBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(PosTheme.GO, 2),
+                BorderFactory.createEmptyBorder(6, 11, 6, 11));
 
-        scanField.setColumns(20);
         scanField.setName("scanField");
-        scanField.setPreferredSize(new Dimension(220, scanField.getPreferredSize().height));
+        scanField.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
+        scanField.setPreferredSize(new Dimension(240, 40));
+        scanField.setBorder(idleBorder);
+        installPlaceholder(scanField, PLACEHOLDER);
         scanField.addActionListener(e -> submitCurrentField());
+        scanField.addFocusListener(new FocusAdapter() {
+            @Override public void focusGained(FocusEvent e) {
+                scanField.setBorder(focusBorder);
+            }
+            @Override public void focusLost(FocusEvent e) {
+                scanField.setBorder(idleBorder);
+            }
+        });
 
-        statusHint.setFont(statusHint.getFont().deriveFont(Font.ITALIC));
-        statusHint.setAlignmentX(Component.RIGHT_ALIGNMENT);
+        statusHint.setFont(PosTheme.eyebrow());
+        statusHint.setForeground(PosTheme.MUTED);
+        statusHint.setHorizontalAlignment(SwingConstants.RIGHT);
 
-        add(scanLabel, BorderLayout.WEST);
+        add(eyebrow, BorderLayout.WEST);
         add(scanField, BorderLayout.CENTER);
         add(statusHint, BorderLayout.EAST);
     }
 
     // ---- Public API called by ScannerViewController -----------------------
 
-    /** @return the {@link JTextField} the controller uses to request/return focus */
     public JTextField getScanField() {
         return scanField;
     }
 
-    /** @return the current text in the scan field, never {@code null} */
     public String getScanText() {
         String text = scanField.getText();
-        return text == null ? "" : text;
+        // If the placeholder is showing, treat the field as empty.
+        return isPlaceholderShowing(scanField) || text == null ? "" : text;
     }
 
-    /** Replaces the field's contents. */
     public void setScanText(String text) {
+        clearPlaceholderState(scanField);
         scanField.setText(text == null ? "" : text);
     }
 
-    /** Clears the field. */
     public void clearScanField() {
+        clearPlaceholderState(scanField);
         scanField.setText("");
+        showPlaceholderIfEmpty(scanField);
     }
 
-    /** Restores focus to the scan field. Called after every user interaction. */
     public void requestScanFieldFocus() {
         scanField.requestFocusInWindow();
     }
 
-    /** Updates the small status hint to the right of the field. */
     public void setStatusHint(String message) {
         statusHint.setText(message == null ? " " : message);
+        java.awt.Color colour = PosTheme.MUTED;
+        if (message != null) {
+            if (message.equals(STATUS_LOCKED)) colour = PosTheme.STOP;
+            else if (message.equals(STATUS_SCANNING)) colour = PosTheme.GO;
+        }
+        statusHint.setForeground(colour);
     }
+
+    // ---- Internals --------------------------------------------------------
 
     private void submitCurrentField() {
         Map<String, Object> props = new HashMap<>();
         props.put("raw", getScanText());
         dispatcher.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
+    }
+
+    // ---- Placeholder plumbing ---------------------------------------------
+    // Swing has no native placeholder for JTextField; wire it via focus listeners plus a
+    // client property so getScanText() can distinguish "empty" from "user typed the placeholder
+    // string literally".
+
+    private static final String PLACEHOLDER_ACTIVE = "scanner.placeholder.active";
+
+    private void installPlaceholder(JTextField field, String text) {
+        field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.TRUE);
+        field.setText(text);
+        field.setForeground(PosTheme.MUTED);
+        field.addFocusListener(new FocusAdapter() {
+            @Override public void focusGained(FocusEvent e) {
+                if (Boolean.TRUE.equals(field.getClientProperty(PLACEHOLDER_ACTIVE))) {
+                    field.setText("");
+                    field.setForeground(PosTheme.INK);
+                    field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.FALSE);
+                }
+            }
+            @Override public void focusLost(FocusEvent e) {
+                showPlaceholderIfEmpty(field);
+            }
+        });
+    }
+
+    private static boolean isPlaceholderShowing(JTextComponent field) {
+        return Boolean.TRUE.equals(field.getClientProperty(PLACEHOLDER_ACTIVE));
+    }
+
+    private static void clearPlaceholderState(JTextComponent field) {
+        if (isPlaceholderShowing(field)) {
+            field.setText("");
+        }
+        field.setForeground(PosTheme.INK);
+        field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.FALSE);
+    }
+
+    private static void showPlaceholderIfEmpty(JTextComponent field) {
+        String txt = field.getText();
+        if (txt == null || txt.isEmpty()) {
+            field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.TRUE);
+            field.setText(PLACEHOLDER);
+            field.setForeground(PosTheme.MUTED);
+        }
     }
 }

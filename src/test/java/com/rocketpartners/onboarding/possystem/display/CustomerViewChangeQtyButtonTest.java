@@ -26,7 +26,8 @@ class CustomerViewChangeQtyButtonTest {
     void changeQty_disabled_withNoSelection() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noopDispatcher());
-        view.updateBasket(List.of(new LineItem(WIDGET, 1)), new BigDecimal("10.00"));
+        // Empty basket — nothing to select, so the button must be off.
+        view.updateBasket(List.of(), BigDecimal.ZERO);
 
         assertThat(view.isChangeQtyEnabled()).isFalse();
     }

@@ -46,7 +46,7 @@ public final class Application {
 
     private static final String PRICEBOOK_RESOURCE = "/pricebook.tsv";
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.07");
-    private static final int QUICK_ADD_COUNT = 6;
+    private static final int QUICK_ADD_COUNT = 12;
 
     /**
      * Curated pool of foods and drinks (no tobacco / no lottery / no fuel prepay) drawn from
@@ -68,7 +68,11 @@ public final class Application {
             "786162200433", // GLACEAU SMART WATER 20Z
             "034000004805", // REESES PB CUP KING SZ
             "040000000327", // M&M PNUT REG 1.74Z
-            "611269818994"  // RED BULL ENERGY DRIN
+            "611269818994",  // RED BULL ENERGY DRIN
+            "860006114916",
+            "999991218931",
+            "070847811169",
+            "049000000443"
     );
 
     private Application() {}
