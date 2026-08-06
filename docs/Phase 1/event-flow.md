@@ -14,7 +14,7 @@ sequenceDiagram
     participant SVC as ScannerViewController<br/>(listener + dispatcher)
     participant PC as PosComponent<br/>(main driver, dispatcher)
     participant TS as TransactionService
-    participant PB as PricebookRepository
+    participant PB as ItemRepository
     participant TVC as TransactionViewController<br/>(listener)
     participant TV as TransactionView<br/>(Swing, dumb)
     participant J as JournalClient<br/>(async, best-effort)
@@ -55,7 +55,7 @@ flowchart LR
 
     PC{{PosComponent<br/>main dispatcher + listener}}
     TS[TransactionService]
-    PB[(PricebookRepository)]
+    PB[(ItemRepository)]
 
     SV -- UPC_ENTERED --> SVC
     QAV -- QUICK_ADD_PRESSED --> QAVC
