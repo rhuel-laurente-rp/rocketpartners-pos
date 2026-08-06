@@ -32,6 +32,25 @@ public enum PosEventType {
      */
     VOID_LINE_PRESSED,
 
+    /**
+     * The Change Qty button on a view was pressed. Input event; carries a {@code lineItem}
+     * property naming the currently selected basket row. The
+     * {@code ChangeQuantityViewController} opens a modal spinner dialog in response.
+     */
+    CHANGE_QTY_PRESSED,
+
+    /**
+     * The Confirm button on the change-quantity dialog was pressed. Input event; carries
+     * {@code lineItem} and {@code newQuantity} (Integer) properties.
+     */
+    CHANGE_QTY_CONFIRM_PRESSED,
+
+    /**
+     * The Cancel button on the change-quantity dialog was pressed. Input event; no
+     * properties. Closes the dialog with the line's quantity unchanged.
+     */
+    CHANGE_QTY_CANCEL_PRESSED,
+
     /** The Void Basket button on a view was pressed. Input event; no properties. */
     VOID_BASKET_PRESSED,
 
@@ -94,6 +113,14 @@ public enum PosEventType {
 
     /** A single line item was voided. */
     LINE_VOIDED,
+
+    /**
+     * A line item's quantity was changed. Notification event; carries {@code lineItem} and
+     * {@code newQuantity} (Integer) properties. A change to zero is surfaced as a
+     * {@link #LINE_VOIDED} event instead — the two paths share a single implementation in
+     * {@code TransactionService}.
+     */
+    QUANTITY_CHANGED,
 
     /** The whole transaction was voided (terminal). */
     BASKET_VOIDED,

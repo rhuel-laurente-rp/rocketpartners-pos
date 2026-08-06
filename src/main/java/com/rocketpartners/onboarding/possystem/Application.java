@@ -7,6 +7,8 @@ import com.formdev.flatlaf.FlatLightLaf;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
 import com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer;
+import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
+import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
 import com.rocketpartners.onboarding.possystem.display.CustomerViewController;
 import com.rocketpartners.onboarding.possystem.display.ErrorPopupViewController;
@@ -125,6 +127,11 @@ public final class Application {
             PayWithCardView cardView = new PayWithCardView(view);
             PayWithCardViewController cardController = new PayWithCardViewController(cardView);
 
+            ChangeQuantityView changeQtyView = new ChangeQuantityView(
+                    view, pos, pos.getTransactionService().getMaxLineQuantity());
+            ChangeQuantityViewController changeQtyController =
+                    new ChangeQuantityViewController(changeQtyView);
+
             ReceiptView receiptView = new ReceiptView(view, pos);
             ReceiptViewController receiptController =
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
@@ -154,6 +161,7 @@ public final class Application {
             pos.addController(controller);
             pos.addController(cashController);
             pos.addController(cardController);
+            pos.addController(changeQtyController);
             pos.addController(receiptController);
             pos.addController(errorController);
             pos.addController(scannerController);
