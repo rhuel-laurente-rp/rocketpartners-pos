@@ -204,4 +204,59 @@ class TransactionStateTest {
         Transaction tx = voided();
         assertThatThrownBy(tx::payNextDollar).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    void updateLineItemQuantity_inProgress_setsQuantity() {
+        Transaction tx = inProgress();
+        tx.addLineItem(widget(), 1);
+        LineItem line = tx.getLineItems().get(0);
+        tx.updateLineItemQuantity(line, 5);
+        assertThat(line.getQuantity()).isEqualTo(5);
+    }
+
+    @Test
+    void updateLineItemQuantity_illegalFromTotaled() {
+        Transaction tx = inProgress();
+        tx.addLineItem(widget(), 1);
+        LineItem line = tx.getLineItems().get(0);
+        tx.total();
+        assertThatThrownBy(() -> tx.updateLineItemQuantity(line, 3))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void updateLineItemQuantity_rejectsZero() {
+        Transaction tx = inProgress();
+        tx.addLineItem(widget(), 1);
+        LineItem line = tx.getLineItems().get(0);
+        assertThatThrownBy(() -> tx.updateLineItemQuantity(line, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void updateLineItemQuantity_rejectsNegative() {
+        Transaction tx = inProgress();
+        tx.addLineItem(widget(), 1);
+        LineItem line = tx.getLineItems().get(0);
+        assertThatThrownBy(() -> tx.updateLineItemQuantity(line, -2))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void updateLineItemQuantity_rejectsLineNotOnTransaction() {
+        Transaction tx = inProgress();
+        LineItem foreign = new LineItem(widget(), 1);
+        assertThatThrownBy(() -> tx.updateLineItemQuantity(foreign, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void updateLineItemQuantity_rejectsVoidedLine() {
+        Transaction tx = inProgress();
+        tx.addLineItem(widget(), 1);
+        LineItem line = tx.getLineItems().get(0);
+        tx.voidLine(line);
+        assertThatThrownBy(() -> tx.updateLineItemQuantity(line, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

@@ -136,6 +136,31 @@ public class Transaction {
     }
 
     /**
+     * Updates the quantity of a line item on this transaction. The line must belong to this
+     * transaction and must not be voided; use {@link #voidLine(LineItem)} to remove a line,
+     * not a quantity of zero.
+     *
+     * @param lineItem    a line item on this transaction
+     * @param newQuantity the new quantity; must be at least 1
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#IN_PROGRESS}
+     * @throws IllegalArgumentException if the line is not on this transaction, is voided, or
+     *                                  {@code newQuantity < 1}
+     */
+    public void updateLineItemQuantity(LineItem lineItem, int newQuantity) {
+        requireState("updateLineItemQuantity", TransactionState.IN_PROGRESS);
+        if (!lineItems.contains(lineItem)) {
+            throw new IllegalArgumentException("line item is not part of this transaction");
+        }
+        if (lineItem.isVoided()) {
+            throw new IllegalArgumentException("cannot update quantity of a voided line item");
+        }
+        if (newQuantity < 1) {
+            throw new IllegalArgumentException("quantity must be >= 1, got " + newQuantity);
+        }
+        lineItem.setQuantity(newQuantity);
+    }
+
+    /**
      * Voids the entire transaction. Terminal.
      *
      * @throws IllegalStateException if the transaction is already {@link TransactionState#PAID}
