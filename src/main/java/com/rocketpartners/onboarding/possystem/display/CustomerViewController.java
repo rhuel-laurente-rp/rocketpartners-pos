@@ -47,6 +47,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             PosEventType.VOID_LINE_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.TOTAL_PRESSED,
+            PosEventType.ITEM_SCANNED,
             PosEventType.RECEIPT_DISMISSED));
 
     private final CustomerView view;
@@ -90,6 +91,7 @@ public class CustomerViewController implements IController, IPosEventListener {
     public void onPosEvent(PosEvent event) {
         switch (event.getType()) {
             case QUICK_ADD_PRESSED -> handleQuickAdd(event);
+            case ITEM_SCANNED -> handleScannedItem(event);
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_PRESSED -> handleVoidBasket();
             case TOTAL_PRESSED -> handleTotal();
@@ -101,7 +103,14 @@ public class CustomerViewController implements IController, IPosEventListener {
     // ---- Handlers ---------------------------------------------------------
 
     private void handleQuickAdd(PosEvent event) {
-        String upc = event.getProperty("upc", String.class);
+        addItemByUpc(event.getProperty("upc", String.class));
+    }
+
+    private void handleScannedItem(PosEvent event) {
+        addItemByUpc(event.getProperty("upc", String.class));
+    }
+
+    private void addItemByUpc(String upc) {
         if (upc == null) return;
         LineItem added;
         try {
