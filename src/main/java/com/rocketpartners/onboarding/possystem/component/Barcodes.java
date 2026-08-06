@@ -1,0 +1,30 @@
+package com.rocketpartners.onboarding.possystem.component;
+
+/**
+ * Barcode-shape checks the POS applies before sending a scanned string to the pricebook.
+ *
+ * <p>The pricebook is keyed on UPCs; scans that are obviously not a UPC (letters, wrong
+ * length, empty burst from a stray Enter) should be rejected with a cashier-readable error
+ * rather than dispatched as an item lookup. Kept here as a plain function so both the buffer's
+ * caller and any tests can share the single rule.</p>
+ */
+public final class Barcodes {
+
+    private Barcodes() {}
+
+    /**
+     * @return {@code true} if {@code raw} is a non-empty string of digits. Length is no
+     *         longer constrained to UPC-A (12) or EAN-13 (13) because the sample
+     *         {@code pricebook.tsv} carries UPCs of assorted lengths; the effective validity
+     *         gate is the pricebook lookup itself.
+     */
+    public static boolean isValidUpc(String raw) {
+        if (raw == null || raw.isEmpty()) return false;
+        int len = raw.length();
+        for (int i = 0; i < len; i++) {
+            char c = raw.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+}
