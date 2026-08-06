@@ -1,0 +1,278 @@
+package com.rocketpartners.onboarding.commons.model;
+
+import lombok.Getter;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * A whole sale: its line items, discounts, tender, and lifecycle state.
+ *
+ * <p>{@code Transaction} is the aggregate root of the domain model. It owns the state machine
+ * that decides which operations are legal at any moment; those checks live here and are the
+ * single source of truth. UI concerns like disabling buttons are a nicety, not a guarantee.</p>
+ *
+ * <p><strong>State machine.</strong> Starts in {@link TransactionState#IN_PROGRESS}. See
+ * {@link TransactionState} for the full transition diagram.</p>
+ *
+ * <p><strong>Money.</strong> All monetary computations use {@link BigDecimal}. Intermediate
+ * totals ({@link #subtotal()}, {@link #discountTotal()}, {@link #taxTotal()},
+ * {@link LineItem#extendedTotal()}) are <em>not</em> rounded — precision is preserved so
+ * intermediate rounding errors do not compound. Rounding happens exactly once, at
+ * {@link #grandTotal()}, to scale 2 with {@link RoundingMode#HALF_UP}.</p>
+ *
+ * <p><strong>Tax.</strong> A flat {@code taxRate} is injected via the constructor and applied
+ * after totaling, to {@code subtotal − discountTotal}. Tax is not a per-line concern. Keeping
+ * the rate as a field avoids introducing a service layer prematurely; a more sophisticated tax
+ * model can replace this without changing the aggregate's contract.</p>
+ *
+ * <p>See {@code docs/Phase 1/domain-model.md} for the broader domain model. Note that the
+ * state names here ({@code IN_PROGRESS / TOTALED / PAID / VOIDED}) intentionally differ from
+ * the doc's diagram; docs will be synced separately.</p>
+ */
+@Getter
+public class Transaction {
+
+    /** Stable, unique identifier for this transaction. */
+    private final String transactionId;
+
+    /** Wall-clock time this transaction was opened. */
+    private final Instant createdAt;
+
+    private final List<LineItem> lineItems = new ArrayList<>();
+
+    private final List<Discount> discounts = new ArrayList<>();
+
+    /** Flat sales-tax rate applied to the post-discount subtotal (e.g. {@code 0.07} for 7%). */
+    private final BigDecimal taxRate;
+
+    /** Current lifecycle state. Starts at {@link TransactionState#IN_PROGRESS}. */
+    private TransactionState state;
+
+    /** How the sale was tendered; {@code null} until {@link #tender(TenderType, BigDecimal)}. */
+    private TenderType tenderType;
+
+    /** Cash amount presented by the customer; {@code null} until tendered. */
+    private BigDecimal cashTendered;
+
+    /**
+     * Opens a new transaction with a freshly generated id and the current instant.
+     *
+     * @param taxRate flat sales-tax rate; must not be {@code null}
+     */
+    public Transaction(BigDecimal taxRate) {
+        this(UUID.randomUUID().toString(), Instant.now(), taxRate);
+    }
+
+    /**
+     * Opens a new transaction with an explicit id and creation time; primarily useful for tests.
+     *
+     * @param transactionId non-null id
+     * @param createdAt     non-null creation time
+     * @param taxRate       non-null sales-tax rate
+     */
+    public Transaction(String transactionId, Instant createdAt, BigDecimal taxRate) {
+        if (transactionId == null) throw new IllegalArgumentException("transactionId must not be null");
+        if (createdAt == null) throw new IllegalArgumentException("createdAt must not be null");
+        if (taxRate == null) throw new IllegalArgumentException("taxRate must not be null");
+        this.transactionId = transactionId;
+        this.createdAt = createdAt;
+        this.taxRate = taxRate;
+        this.state = TransactionState.IN_PROGRESS;
+    }
+
+    /** @return an unmodifiable view of the line items on this transaction */
+    public List<LineItem> getLineItems() {
+        return Collections.unmodifiableList(lineItems);
+    }
+
+    /** @return an unmodifiable view of the discounts applied to this transaction */
+    public List<Discount> getDiscounts() {
+        return Collections.unmodifiableList(discounts);
+    }
+
+    /**
+     * Adds a product to the basket. If a non-voided line item for the same UPC already exists,
+     * its quantity is incremented; otherwise a new line item is appended.
+     *
+     * @param item     the pricebook item; must not be {@code null}
+     * @param quantity units to add; must be at least 1
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#IN_PROGRESS}
+     * @throws IllegalArgumentException if {@code item} is null or {@code quantity < 1}
+     */
+    public void addLineItem(Item item, int quantity) {
+        requireState("addLineItem", TransactionState.IN_PROGRESS);
+        if (item == null) throw new IllegalArgumentException("item must not be null");
+        if (quantity < 1) throw new IllegalArgumentException("quantity must be >= 1, got " + quantity);
+        for (LineItem existing : lineItems) {
+            if (!existing.isVoided() && existing.getItem().getUpc().equals(item.getUpc())) {
+                existing.setQuantity(existing.getQuantity() + quantity);
+                return;
+            }
+        }
+        lineItems.add(new LineItem(item, quantity));
+    }
+
+    /**
+     * Voids the given line item (soft-delete: the line remains on the transaction but
+     * contributes zero to totals).
+     *
+     * @param lineItem a line item that belongs to this transaction
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#IN_PROGRESS}
+     * @throws IllegalArgumentException if the given line item is not on this transaction
+     */
+    public void voidLine(LineItem lineItem) {
+        requireState("voidLine", TransactionState.IN_PROGRESS);
+        if (!lineItems.contains(lineItem)) {
+            throw new IllegalArgumentException("line item is not part of this transaction");
+        }
+        lineItem.setVoided(true);
+    }
+
+    /**
+     * Voids the entire transaction. Terminal.
+     *
+     * @throws IllegalStateException if the transaction is already {@link TransactionState#PAID}
+     *                               or {@link TransactionState#VOIDED}
+     */
+    public void voidBasket() {
+        requireState("voidBasket", TransactionState.IN_PROGRESS, TransactionState.TOTALED);
+        this.state = TransactionState.VOIDED;
+    }
+
+    /**
+     * Finalizes the basket: freezes line-item mutation and moves to
+     * {@link TransactionState#TOTALED}. Discounts and tender are legal next.
+     *
+     * @throws IllegalStateException if the transaction is not {@link TransactionState#IN_PROGRESS}
+     */
+    public void total() {
+        requireState("total", TransactionState.IN_PROGRESS);
+        this.state = TransactionState.TOTALED;
+    }
+
+    /**
+     * Applies a discount computed by the discount engine to this transaction.
+     * Legal only between {@link #total()} and {@link #tender(TenderType, BigDecimal)}.
+     *
+     * @param discount the engine-computed discount; must not be {@code null}
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
+     * @throws IllegalArgumentException if {@code discount} is null
+     */
+    public void applyDiscount(Discount discount) {
+        requireState("applyDiscount", TransactionState.TOTALED);
+        if (discount == null) throw new IllegalArgumentException("discount must not be null");
+        discounts.add(discount);
+    }
+
+    /**
+     * Records payment and moves to {@link TransactionState#PAID}. Terminal.
+     *
+     * <p>For {@link TenderType#DEBIT} and {@link TenderType#CREDIT}, callers should pass a
+     * {@code cashTendered} equal to {@link #grandTotal()} (no change due).</p>
+     *
+     * @param type         payment method; must not be {@code null}
+     * @param cashTendered amount presented; must not be {@code null}
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
+     * @throws IllegalArgumentException if either argument is null
+     */
+    public void tender(TenderType type, BigDecimal cashTendered) {
+        requireState("tender", TransactionState.TOTALED);
+        if (type == null) throw new IllegalArgumentException("tender type must not be null");
+        if (cashTendered == null) throw new IllegalArgumentException("cashTendered must not be null");
+        this.tenderType = type;
+        this.cashTendered = cashTendered;
+        this.state = TransactionState.PAID;
+    }
+
+    /**
+     * Cash-tender helper: rounds {@link #grandTotal()} up to the next whole dollar and tenders
+     * that amount as {@link TenderType#CASH}. A whole-dollar total is a no-op (tenders exactly
+     * the total; {@link #changeDue()} is zero).
+     *
+     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
+     */
+    public void payNextDollar() {
+        requireState("payNextDollar", TransactionState.TOTALED);
+        BigDecimal nextDollar = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2);
+        tender(TenderType.CASH, nextDollar);
+    }
+
+    /**
+     * Sum of {@link LineItem#extendedTotal()} across all non-voided line items. Not rounded.
+     *
+     * @return the raw subtotal; never {@code null}
+     */
+    public BigDecimal subtotal() {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (LineItem li : lineItems) {
+            if (!li.isVoided()) {
+                sum = sum.add(li.extendedTotal());
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * Sum of {@link Discount#getAppliedAmount()} across all applied discounts. Not rounded.
+     *
+     * @return the total discount reduction; never {@code null}
+     */
+    public BigDecimal discountTotal() {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (Discount d : discounts) {
+            sum = sum.add(d.getAppliedAmount());
+        }
+        return sum;
+    }
+
+    /**
+     * The transaction-level tax: {@code (subtotal − discountTotal) × taxRate}. Not rounded.
+     * Tax is applied after totaling, on the post-discount subtotal — not per line item.
+     *
+     * @return the tax due on this transaction; never {@code null}
+     */
+    public BigDecimal taxTotal() {
+        return subtotal().subtract(discountTotal()).multiply(taxRate);
+    }
+
+    /**
+     * The customer-facing final total: {@code subtotal − discountTotal + taxTotal}, rounded to
+     * scale 2 with {@link RoundingMode#HALF_UP}. This is the sole rounding site.
+     *
+     * @return the grand total, scale 2; never {@code null}
+     */
+    public BigDecimal grandTotal() {
+        BigDecimal raw = subtotal().subtract(discountTotal()).add(taxTotal());
+        return raw.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Change due to the customer: {@code cashTendered − grandTotal}, rounded to scale 2 with
+     * {@link RoundingMode#HALF_UP}. Returns {@link BigDecimal#ZERO} if the transaction has
+     * not been tendered, or if the tender type is not {@link TenderType#CASH}.
+     *
+     * @return change due, scale 2; never {@code null}
+     */
+    public BigDecimal changeDue() {
+        if (cashTendered == null || tenderType != TenderType.CASH) {
+            return BigDecimal.ZERO;
+        }
+        return cashTendered.subtract(grandTotal()).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private void requireState(String operation, TransactionState... allowed) {
+        for (TransactionState s : allowed) {
+            if (state == s) return;
+        }
+        throw new IllegalStateException(
+                "operation '" + operation + "' is not legal in state " + state
+                        + "; allowed: " + Arrays.toString(allowed));
+    }
+}

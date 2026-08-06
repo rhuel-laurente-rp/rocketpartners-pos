@@ -10,7 +10,6 @@ classDiagram
         +String upc
         +String description
         +BigDecimal unitPrice
-        +boolean taxable
     }
 
     class LineItem {
@@ -36,15 +35,17 @@ classDiagram
         +voidLine(LineItem)
         +voidBasket()
         +total()
+        +applyDiscount(Discount)
         +tender(TenderType, BigDecimal)
+        +payNextDollar()
     }
 
     class TransactionState {
         <<enumeration>>
-        IDLE
         IN_PROGRESS
-        FINALIZED
-        TENDERED
+        TOTALED
+        PAID
+        VOIDED
     }
 
     class TenderType {
@@ -83,24 +84,28 @@ The state field on `Transaction` mirrors the user flow in [user-flow.md](user-fl
 
 ```mermaid
 stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> IN_PROGRESS: addLineItem
+    [*] --> IN_PROGRESS
     IN_PROGRESS --> IN_PROGRESS: addLineItem / voidLine
-    IN_PROGRESS --> IDLE: voidBasket
-    IN_PROGRESS --> FINALIZED: total()
-    FINALIZED --> TENDERED: tender(...)
-    TENDERED --> [*]
+    IN_PROGRESS --> VOIDED: voidBasket
+    IN_PROGRESS --> TOTALED: total()
+    TOTALED --> TOTALED: applyDiscount
+    TOTALED --> VOIDED: voidBasket
+    TOTALED --> PAID: tender(...) / payNextDollar()
+    PAID --> [*]
+    VOIDED --> [*]
 ```
 
-`addLineItem`, `voidLine`, `voidBasket` are illegal in `FINALIZED` and `TENDERED`. `tender` is illegal in `IDLE` and `IN_PROGRESS`. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
+`addLineItem` and `voidLine` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `payNextDollar` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
 
 ## Notes on the shape
 
 - **`Item` vs `LineItem`.** `Item` is the product record from the Pricebook — immutable, one per UPC. `LineItem` is that product's appearance on a specific Transaction with a quantity; two scans of the same UPC produce either two `LineItem`s or one `LineItem` with `quantity = 2` (implementation choice — pick one and be consistent).
 - **`Discount` is a value on a Transaction, not a rule.** The rule that produced it (BOGO, "10% off produce", etc.) lives in the discount engine's database (Phase 3). What the POS holds is the *result* of applying a rule: an amount and a description for the Receipt.
 - **Money is `BigDecimal`.** Never `double`. Rounding happens once, at `grandTotal()`.
-- **`Void`** is captured two ways: `voidBasket()` transitions the whole Transaction back to `IDLE` (or discards it and starts a new one); `voidLine` marks a `LineItem` as `voided` (soft-delete keeps the audit trail for the journal) or removes it outright.
-- **Receipt** is not modeled as a class here — it's a render of a `TENDERED` `Transaction`. If a `Receipt` class emerges later, it's a projection, not a new source of truth.
+- **Tax is a flat, transaction-level rate.** Applied after totaling to the post-discount subtotal — `taxTotal = (subtotal − discountTotal) × taxRate`. Not a per-line concern; `Item` does not carry a taxable flag.
+- **`Void`** is captured two ways: `voidBasket()` transitions the whole Transaction to the terminal `VOIDED` state; `voidLine` marks a `LineItem` as `voided` (soft-delete keeps the audit trail for the journal).
+- **Pay Next Dollar** is a cash-tender helper on `Transaction`: rounds `grandTotal()` up to the next whole dollar and tenders that amount as `CASH`. A whole-dollar total is a no-op (tenders exactly the total).
+- **Receipt** is not modeled as a class here — it's a render of a `PAID` `Transaction`. If a `Receipt` class emerges later, it's a projection, not a new source of truth.
 
 ## Where these live
 
