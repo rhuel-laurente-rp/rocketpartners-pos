@@ -37,8 +37,9 @@ import java.util.Map;
  *       PosEventType#QUICK_ADD_PRESSED} event carrying its bound UPC.</li>
  *   <li><strong>Basket + basket actions.</strong> Center: scrollable line-item list with a running
  *       total. South: {@code Void Line}, {@code Void Basket}, {@code Total}.</li>
- *   <li><strong>Tender.</strong> {@code Pay Cash} (pay-next-dollar semantics), {@code Pay Debit},
- *       {@code Pay Credit}. Disabled until Total is pressed.</li>
+ *   <li><strong>Tender.</strong> {@code Pay Cash}, {@code Pay Debit}, {@code Pay Credit}.
+ *       Disabled until Total is pressed. Pressing one dispatches its tender-pressed event so a
+ *       child controller can open the appropriate modal dialog (cash entry or card processing).</li>
  * </ul>
  *
  * <p>Per {@code docs/Phase 1/event-flow.md}, a {@code *View} class holds no business logic and
@@ -70,7 +71,7 @@ public class CustomerView extends JFrame {
     private final JButton voidBasketButton = new JButton("Void Basket");
     private final JButton totalButton = new JButton("Total");
 
-    private final JButton payCashButton = new JButton("<html><center>Pay Cash<br><small>Next Dollar</small></center></html>");
+    private final JButton payCashButton = new JButton("Pay Cash");
     private final JButton payDebitButton = new JButton("Pay Debit");
     private final JButton payCreditButton = new JButton("Pay Credit");
 

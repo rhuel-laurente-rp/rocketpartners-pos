@@ -2,7 +2,6 @@ package com.rocketpartners.onboarding.possystem.display;
 
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.commons.model.LineItem;
-import com.rocketpartners.onboarding.commons.model.TenderType;
 import com.rocketpartners.onboarding.commons.model.Transaction;
 import com.rocketpartners.onboarding.commons.model.TransactionState;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
@@ -208,60 +207,39 @@ class CustomerViewControllerTest {
     }
 
     @Test
-    void tenderCashPressed_paysAndStartsNextTransaction() {
+    void transactionCompleted_startsFreshTransaction_andResetsInputMode() {
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
         pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
-        Transaction totaled = pos.getTransactionService().getCurrentTransaction();
+        // Simulate a tender-controller completing the sale.
+        pos.getTransactionService().tenderCash(new BigDecimal("10.00"));
         reset(view);
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
 
-        assertThat(totaled.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(totaled.getTenderType()).isEqualTo(TenderType.CASH);
         Transaction next = pos.getTransactionService().getCurrentTransaction();
         assertThat(next).isNotNull();
-        assertThat(next).isNotSameAs(totaled);
         assertThat(next.getState()).isEqualTo(TransactionState.IN_PROGRESS);
-        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isEqualTo(1);
-        assertThat(notifications.countOf(PosEventType.TRANSACTION_COMPLETED)).isEqualTo(1);
         verify(view).setBasketInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
+        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
     }
 
     @Test
-    void tenderDebitPressed_paysWithCardTender_dispatchingCardTendered() {
+    void tenderPressedEvents_areNotHandledByCustomerViewController() {
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
         pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
         Transaction totaled = pos.getTransactionService().getCurrentTransaction();
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+        // No child tender controller registered — a stale TENDER_CASH_PRESSED must not tender
+        // the transaction; the CustomerViewController is deliberately not subscribed.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
 
-        assertThat(totaled.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(totaled.getTenderType()).isEqualTo(TenderType.DEBIT);
-        assertThat(totaled.getCashTendered()).isEqualByComparingTo("10.00");
-        assertThat(notifications.countOf(PosEventType.CARD_TENDERED)).isEqualTo(1);
-        assertThat(notifications.lastOf(PosEventType.CARD_TENDERED)
-                .getProperty("tenderType", TenderType.class)).isEqualTo(TenderType.DEBIT);
-    }
-
-    @Test
-    void tenderCreditPressed_paysWithCreditTender() {
-        pos.addController(controller);
-        pos.start();
-        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
-        Transaction totaled = pos.getTransactionService().getCurrentTransaction();
-
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CREDIT_PRESSED));
-
-        assertThat(totaled.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(totaled.getTenderType()).isEqualTo(TenderType.CREDIT);
-        assertThat(notifications.lastOf(PosEventType.CARD_TENDERED)
-                .getProperty("tenderType", TenderType.class)).isEqualTo(TenderType.CREDIT);
+        assertThat(totaled.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
     }
 
     @Test

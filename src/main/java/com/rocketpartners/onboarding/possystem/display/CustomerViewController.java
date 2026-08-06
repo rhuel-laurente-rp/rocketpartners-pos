@@ -1,7 +1,6 @@
 package com.rocketpartners.onboarding.possystem.display;
 
 import com.rocketpartners.onboarding.commons.model.LineItem;
-import com.rocketpartners.onboarding.commons.model.TenderType;
 import com.rocketpartners.onboarding.commons.model.Transaction;
 import com.rocketpartners.onboarding.possystem.component.IController;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
@@ -23,18 +22,16 @@ import java.util.Set;
  * Handles user input from {@link CustomerView} and mirrors {@link TransactionService} state back
  * to it. No Swing rendering: the view paints, the controller decides.
  *
- * <p>Subscribes to the seven view-input event types (four basket inputs — {@link
- * PosEventType#QUICK_ADD_PRESSED}, {@link PosEventType#VOID_LINE_PRESSED}, {@link
- * PosEventType#VOID_BASKET_PRESSED}, {@link PosEventType#TOTAL_PRESSED} — plus three tender
- * inputs — {@link PosEventType#TENDER_CASH_PRESSED}, {@link PosEventType#TENDER_DEBIT_PRESSED},
- * {@link PosEventType#TENDER_CREDIT_PRESSED}). Each handler invokes the appropriate
- * {@link TransactionService} call, dispatches the corresponding past-tense notification event
- * ({@link PosEventType#ITEM_ADDED}, etc.), and re-renders the view.</p>
+ * <p>Subscribes to the four basket-input event types ({@link PosEventType#QUICK_ADD_PRESSED},
+ * {@link PosEventType#VOID_LINE_PRESSED}, {@link PosEventType#VOID_BASKET_PRESSED},
+ * {@link PosEventType#TOTAL_PRESSED}) and to {@link PosEventType#TRANSACTION_COMPLETED} as a
+ * lifecycle signal. The three tender-input events belong to child controllers
+ * ({@link PayWithCashViewController}, {@link PayWithCardViewController}); this controller
+ * doesn't tender itself.</p>
  *
- * <p>After any terminal transition — {@link PosEventType#VOID_BASKET_PRESSED} or any tender —
- * the controller opens a fresh transaction so the next customer can be rung up without a
- * restart. This is standard POS behavior: a cashier voids or completes a sale and the terminal
- * is immediately ready for the next one.</p>
+ * <p>After any terminal transition — {@link PosEventType#VOID_BASKET_PRESSED} or any tender
+ * (surfaced via {@link PosEventType#TRANSACTION_COMPLETED}) — the controller opens a fresh
+ * transaction so the next customer can be rung up without a restart.</p>
  *
  * <p>Service calls that throw are swallowed at this layer — the service has already dispatched
  * an {@link PosEventType#ERROR} event and the view has not yet been updated for the failed
@@ -48,9 +45,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             PosEventType.VOID_LINE_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.TOTAL_PRESSED,
-            PosEventType.TENDER_CASH_PRESSED,
-            PosEventType.TENDER_DEBIT_PRESSED,
-            PosEventType.TENDER_CREDIT_PRESSED));
+            PosEventType.TRANSACTION_COMPLETED));
 
     private final CustomerView view;
     private PosComponent parent;
@@ -96,9 +91,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_PRESSED -> handleVoidBasket();
             case TOTAL_PRESSED -> handleTotal();
-            case TENDER_CASH_PRESSED -> handleTenderCash();
-            case TENDER_DEBIT_PRESSED -> handleTenderCard(TenderType.DEBIT);
-            case TENDER_CREDIT_PRESSED -> handleTenderCard(TenderType.CREDIT);
+            case TRANSACTION_COMPLETED -> beginNewTransaction();
             default -> { /* not subscribed */ }
         }
     }
@@ -154,33 +147,6 @@ public class CustomerViewController implements IController, IPosEventListener {
         view.setBasketInputEnabled(false);
         view.setTenderInputEnabled(true);
         render();
-    }
-
-    private void handleTenderCash() {
-        try {
-            parent.getTransactionService().tenderPayNextDollar();
-        } catch (RuntimeException ignored) {
-            return;
-        }
-        parent.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED));
-        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
-        beginNewTransaction();
-    }
-
-    private void handleTenderCard(TenderType tenderType) {
-        Transaction tx = parent.getTransactionService().getCurrentTransaction();
-        if (tx == null) return;
-        BigDecimal amount = tx.grandTotal();
-        try {
-            parent.getTransactionService().tenderCard(tenderType, amount);
-        } catch (RuntimeException ignored) {
-            return;
-        }
-        Map<String, Object> props = new HashMap<>();
-        props.put("tenderType", tenderType);
-        parent.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDERED, props));
-        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
-        beginNewTransaction();
     }
 
     // ---- State transitions ------------------------------------------------

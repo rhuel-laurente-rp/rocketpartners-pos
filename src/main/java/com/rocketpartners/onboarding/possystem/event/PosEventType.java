@@ -38,7 +38,10 @@ public enum PosEventType {
     /** The Total button on a view was pressed. Input event; no properties. */
     TOTAL_PRESSED,
 
-    /** The Pay Cash button was pressed. Input event; no properties (Pay-Next-Dollar semantics). */
+    /**
+     * The Pay Cash button was pressed. Input event; no properties. Opens the cash-entry
+     * dialog — actual tender waits for {@link #CASH_CONFIRM_PRESSED}.
+     */
     TENDER_CASH_PRESSED,
 
     /** The Pay Debit button was pressed. Input event; no properties. */
@@ -46,6 +49,33 @@ public enum PosEventType {
 
     /** The Pay Credit button was pressed. Input event; no properties. */
     TENDER_CREDIT_PRESSED,
+
+    /**
+     * The Exact Amount button on the cash dialog was pressed. Input event; no properties.
+     * Sets the total payable ({@code Amount Due}) to the transaction's grand total; does not
+     * tender. Change is computed against the (possibly adjusted) amount due at Confirm time.
+     */
+    CASH_EXACT_PRESSED,
+
+    /**
+     * The Next Dollar button on the cash dialog was pressed. Input event; no properties.
+     * Sets the total payable ({@code Amount Due}) to the transaction's grand total rounded up
+     * to the next whole dollar; does not tender. Change is computed against the adjusted
+     * amount due at Confirm time.
+     */
+    CASH_NEXT_DOLLAR_PRESSED,
+
+    /**
+     * The Confirm button on the cash dialog was pressed. Input event; carries the raw
+     * {@code cashReceived} string entered by the cashier for the controller to validate.
+     */
+    CASH_CONFIRM_PRESSED,
+
+    /**
+     * The Cancel button on the cash dialog was pressed. Input event; no properties. Closes
+     * the dialog; the transaction remains {@code TOTALED} and re-tenderable.
+     */
+    CASH_CANCEL_PRESSED,
 
     /** A UPC was scanned or entered on {@code ScannerView}; carries a {@code upc} property. */
     ITEM_SCANNED,
@@ -62,10 +92,17 @@ public enum PosEventType {
     /** The transaction was totaled — basket is frozen; tender is next. */
     TRANSACTION_TOTALED,
 
-    /** Cash tender recorded (includes Pay Next Dollar). */
+    /**
+     * Cash tender recorded. Carries {@code amountTendered} (BigDecimal, cash presented) and
+     * {@code changeDue} (BigDecimal, change owed to the customer) properties.
+     */
     CASH_TENDERED,
 
-    /** Card tender recorded; {@code tenderType} property distinguishes DEBIT vs CREDIT. */
+    /**
+     * Card tender recorded; {@code tenderType} property distinguishes DEBIT vs CREDIT.
+     * Carries {@code amountTendered} (BigDecimal, always equal to grand total) and
+     * {@code changeDue} (BigDecimal, always zero) properties.
+     */
     CARD_TENDERED,
 
     /** Receipt printed; the transaction is fully complete. Terminal notification. */
