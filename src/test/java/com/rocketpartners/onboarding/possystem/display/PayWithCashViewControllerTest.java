@@ -163,7 +163,7 @@ class PayWithCashViewControllerTest {
                 .isEqualByComparingTo("7.30");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
                 .isEqualByComparingTo("2.70");
-        verify(view).showChangeDue(any());
+        // No standalone change-due popup — change is shown on the receipt instead.
         verify(view).closeDialog();
     }
 
@@ -181,7 +181,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_afterNextDollar_computesChangeAgainstAdjustedAmountDue() {
-        totaledAndOpened(WIDGET); // 7.30
+        Transaction tx = totaledAndOpened(WIDGET); // 7.30
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED)); // amountDue = 8.00
         pos.dispatchPosEvent(cashConfirm("8.00")); // customer hands over exactly $8
@@ -193,6 +193,20 @@ class PayWithCashViewControllerTest {
                 .isEqualByComparingTo("8.00");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
                 .isEqualByComparingTo("0.00");
+        // The adjusted amount is persisted on the transaction so the receipt can render it.
+        assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void confirmPressed_afterExact_persistsGrandTotalAsAmountDue() {
+        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+        pos.dispatchPosEvent(cashConfirm("7.30"));
+
+        assertThat(tx.amountDue()).isEqualByComparingTo("7.30");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
     }
 
     @Test
