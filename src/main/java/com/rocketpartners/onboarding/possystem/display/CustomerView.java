@@ -591,8 +591,22 @@ public class CustomerView extends JFrame {
         minor.setOpaque(false);
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
-        voidBasketButton.addActionListener(e ->
-                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
+        // Void basket wipes everything the cashier has rung up so far — an accidental double-tap
+        // on the wrong button here is the most expensive mistake in this workflow. Interpose a
+        // confirmation modal so the destructive dispatch only fires after an active second
+        // press. On an empty basket the confirmation is skipped (nothing to void), so the flow
+        // is not slowed down when there's no risk.
+        voidBasketButton.addActionListener(e -> {
+            if (basketModel.isEmpty()) {
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
+                return;
+            }
+            int lines = basketModel.getSize();
+            String message = "This will void the whole basket (" + lines + " line"
+                    + (lines == 1 ? "" : "s") + "). This cannot be undone.";
+            showConfirm("Void basket?", message, "Void basket", true,
+                    () -> dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
+        });
         changeQtyButton.setEnabled(false);
         minor.add(changeQtyButton);
         minor.add(voidLineButton);
@@ -638,6 +652,23 @@ public class CustomerView extends JFrame {
         Map<String, Object> props = new HashMap<>();
         if (selected != null) props.put("lineItem", selected);
         dispatcher.dispatchPosEvent(new PosEvent(type, props));
+    }
+
+    /**
+     * Lazy-instantiated confirmation dialog. One instance per view, reused across prompts —
+     * the {@link ConfirmDialog#configure} method rewires the title, message, and callback for
+     * each open. Kept as a field, not created per press, so it inherits its position from the
+     * previous open and doesn't strobe on-screen when it reopens.
+     */
+    private ConfirmDialog confirmDialog;
+
+    private void showConfirm(String title, String message, String confirmText,
+                             boolean destructive, Runnable onConfirm) {
+        if (confirmDialog == null) {
+            confirmDialog = new ConfirmDialog(this);
+        }
+        confirmDialog.configure(title, message, confirmText, destructive, onConfirm);
+        confirmDialog.openDialog();
     }
 
     private JPanel buildTenderColumn() {

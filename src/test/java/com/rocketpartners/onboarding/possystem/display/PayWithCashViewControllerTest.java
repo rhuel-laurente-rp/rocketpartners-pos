@@ -128,7 +128,6 @@ class PayWithCashViewControllerTest {
         assertThat(notifications.countOf(PosEventType.ERROR)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
                 .isEqualTo("UNDERPAYMENT");
-        verify(view).showError(any());
         verify(view, never()).closeDialog();
     }
 

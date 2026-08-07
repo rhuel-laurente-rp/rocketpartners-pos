@@ -46,7 +46,7 @@ public final class Application {
 
     private static final String PRICEBOOK_RESOURCE = "/pricebook.tsv";
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.07");
-    private static final int QUICK_ADD_COUNT = 16;
+    private static final int QUICK_ADD_COUNT = 14;
 
     /**
      * Curated pool of foods and drinks (no tobacco / no lottery / no fuel prepay) drawn from
