@@ -55,6 +55,14 @@ public final class PosTheme {
     public static final Color LIVE = new Color(0xC9, 0x7A, 0x0E);
     /** Tint used on selected basket rows and change-due strip. */
     public static final Color SELECTED = new Color(0xEC, 0xF3, 0xF0);
+    /** Row hover background — one step darker than SURFACE, still lighter than SELECTED. */
+    public static final Color HOVER_ROW = new Color(0xF5, 0xF6, 0xF3);
+    /** Muted rule inside the basket list between rows. */
+    public static final Color ROW_RULE = new Color(0xF1, 0xEF, 0xEA);
+    /** Fill for the compact quantity badge (non-voided). */
+    public static final Color BADGE_BG = new Color(0x0B, 0x6E, 0x4F);
+    /** Text colour on the compact quantity badge. */
+    public static final Color BADGE_FG = Color.WHITE;
     /** Fill for disabled controls. */
     public static final Color DISABLED_BG = new Color(0xF0, 0xEF, 0xEB);
     /** Foreground for disabled control text. */

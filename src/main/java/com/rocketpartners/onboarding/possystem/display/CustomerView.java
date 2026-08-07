@@ -16,9 +16,13 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.ListCellRenderer;
+import javax.swing.JScrollBar;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.plaf.basic.BasicScrollBarUI;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -32,60 +36,88 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The customer-facing basket screen: a dumb Swing renderer laid out as a three-column POS shell.
  *
- * <p>Columns, left to right, weighted 26/48/26 rather than equal thirds — the basket is what
- * the cashier reads, the tender column is three buttons and shouldn't claim a third of the
- * window:</p>
+ * <p>Columns, left to right, weighted 30/46/24 rather than equal thirds — the basket is still
+ * what the cashier reads, but the quick-add grid now carries 16 tiles and needs a bit more
+ * width so the top-line product name doesn't ellipsize:</p>
  * <ul>
  *   <li><strong>Quick Add.</strong> Fixed-height tiles in a scrolling two-column grid; each
  *       dispatches a {@link PosEventType#QUICK_ADD_PRESSED} event carrying its bound UPC.</li>
  *   <li><strong>Basket.</strong> North: scan-bar mount point. Center: line-item list, or an
  *       empty-state prompt when the basket is clear. South: summary tape (subtotal, discount,
- *       tax, total) above the basket actions.</li>
+ *       tax, total) above the basket actions — sticky, never scrolls with the list.</li>
  *   <li><strong>Tender.</strong> Amount due, then {@code Pay Cash}, {@code Pay Debit},
  *       {@code Pay Credit}. Disabled until Total is pressed.</li>
  * </ul>
  *
- * <p>All palette and type tokens live in {@link PosTheme}; button variants live in
- * {@link PosButtons}. This class holds no colour or font literals — if a new shade is needed,
- * it belongs on the theme first.</p>
+ * <p>All palette and type tokens live in {@link PosTheme}; button variants in {@link PosButtons}.
+ * This class holds no colour or font literals — if a new shade is needed, it belongs on the
+ * theme first.</p>
  *
  * <p>Per {@code docs/Phase 1/event-flow.md}, a {@code *View} class holds no business logic and
- * has no {@code TransactionService} reference. Outbound: on any user click, dispatch a
- * {@link PosEvent}. Inbound: the small API the controller uses to keep the screen in sync —
- * {@link #updateBasket(List, BigDecimal)} / {@link #updateBasket(List, BigDecimal, BigDecimal,
- * BigDecimal, BigDecimal)}, {@link #setBasketInputEnabled(boolean)},
- * {@link #setTenderInputEnabled(boolean)}, {@link #getSelectedLineItem()},
- * {@link #isChangeQtyEnabled()}, {@link #installScanBar(JComponent)}.</p>
+ * has no {@code TransactionService} reference. Density mode, highlight flashes, hover state, and
+ * scroll position are pure view state kept here — the domain doesn't know about them and
+ * shouldn't. Duplicate-scan merging is a {@link com.rocketpartners.onboarding.commons.model.Transaction}
+ * concern; this view only <em>animates</em> the quantity change the domain has already made.</p>
  */
 public class CustomerView extends JFrame {
 
-    private static final int PREFERRED_WIDTH = 1280;
-    private static final int PREFERRED_HEIGHT = 760;
+    // ---- Window sizing -----------------------------------------------------
+    // The POS runs full-screen on the register hardware. Opening maximized (rather than at a
+    // fixed size) lets the same build ship to laptops, external monitors, or a kiosk without a
+    // magic-number swap per environment. Resizing stays off so the cashier can't accidentally
+    // drag the frame into a shape the layout wasn't designed for. Layout is proportional
+    // (GridBagLayout weights, not pixel widths), so it scales down cleanly on small displays.
+    // FALLBACK_* is used only in headless test harnesses and as the pre-maximize preferred size
+    // so the frame reports a sane bounds before the WM extends it.
+    private static final int FALLBACK_WIDTH = 1512;
+    private static final int FALLBACK_HEIGHT = 944;
+
     private static final int QUICK_ADD_COLS = 2;
     private static final int QUICK_ADD_TILE_HEIGHT = 92;
-    private static final int BASKET_ROW_HEIGHT = 58;
     private static final int GUTTER = 10;
+
+    // ---- Density animation -------------------------------------------------
+    /** Duration of the row-height glide between Comfortable and Compact. */
+    private static final int DENSITY_ANIM_MS = 150;
+    /** Frame interval for the density animation. 16ms ≈ 60fps. */
+    private static final int DENSITY_FRAME_MS = 16;
+
+    // ---- Flash overlay -----------------------------------------------------
+    /** Duration of the newest-scan green flash. */
+    private static final int FLASH_MS = 400;
+    /** Peak green-tint alpha for the flash (out of 255). ~12% of 255 ≈ 30. */
+    private static final int FLASH_PEAK_ALPHA = 30;
+    /** Frame interval for the flash fade. */
+    private static final int FLASH_FRAME_MS = 16;
 
     private final IPosEventDispatcher dispatcher;
 
     private final DefaultListModel<LineItem> basketModel = new DefaultListModel<>();
     private final JList<LineItem> basketList = new JList<>(basketModel);
+    private final BasketCellRenderer basketRenderer = new BasketCellRenderer();
+    private final FlashLayerPanel basketLayer = new FlashLayerPanel();
+
     private final CardLayout basketCards = new CardLayout();
     private final JPanel basketCenter = new JPanel(basketCards);
 
-    private final JLabel subtotalValue = new JLabel("$0.00", SwingConstants.RIGHT);
-    private final JLabel discountValue = new JLabel("$0.00", SwingConstants.RIGHT);
-    private final JLabel taxValue = new JLabel("$0.00", SwingConstants.RIGHT);
+    private final JLabel inlineSummary = new JLabel();
     private final JLabel totalValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel amountDueValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
@@ -101,14 +133,34 @@ public class CustomerView extends JFrame {
     private final PosButton payCreditButton = PosButtons.tender("Pay credit");
 
     /**
-     * Whether basket mutation is currently permitted. Tracked explicitly rather than read off
-     * a button, because both selection-dependent buttons vary independently of it and no
-     * single button's enabled state is a sound proxy for the transaction phase.
+     * Whether basket mutation is currently permitted. Tracked explicitly rather than read off a
+     * button, because both selection-dependent buttons vary independently of it and no single
+     * button's enabled state is a sound proxy for the transaction phase.
      */
     private boolean basketInputEnabled = true;
 
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
+
+    /**
+     * Snapshot of quantities keyed by {@link LineItem} identity from the last render. Used to
+     * decide whether an incoming update represents a new line ("added") or an existing line's
+     * quantity bumping upward ("merged"). Presentation state, not domain state — the domain
+     * already merged; the view just needs to remember what it saw last time so it can animate
+     * the change.
+     */
+    private final Map<LineItem, Integer> previousQuantities = new LinkedHashMap<>();
+
+    /** The density animation timer, if running. Nulled after completion. */
+    private Timer densityTimer;
+    private int densityFromHeight;
+    private int densityToHeight;
+    private long densityStartNanos;
+
+    /** The flash timer, if running. Nulled after completion. */
+    private Timer flashTimer;
+    private int flashIndex = -1;
+    private long flashStartNanos;
 
     /**
      * @param title         window title (typically {@code "Rocket POS — <store> lane <n>"})
@@ -121,8 +173,14 @@ public class CustomerView extends JFrame {
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         this.dispatcher = dispatcher;
 
-        setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
-        setMinimumSize(new Dimension(1024, 640));
+        // Preferred size gives the layout a target to compute against before the WM has said
+        // anything; the actual on-screen bounds are set by MAXIMIZED_BOTH below. Resizing off
+        // pins whatever the WM hands us — dragging or double-clicking the title bar can't reshape
+        // the frame out from under the layout.
+        setPreferredSize(new Dimension(FALLBACK_WIDTH, FALLBACK_HEIGHT));
+        setSize(new Dimension(FALLBACK_WIDTH, FALLBACK_HEIGHT));
+        setExtendedState(getExtendedState() | JFrame.MAXIMIZED_BOTH);
+        setResizable(false);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
         JPanel root = new JPanel(new BorderLayout());
@@ -132,7 +190,6 @@ public class CustomerView extends JFrame {
         setContentPane(root);
 
         refreshStatusPill();
-        pack();
         setLocationRelativeTo(null);
     }
 
@@ -156,6 +213,24 @@ public class CustomerView extends JFrame {
         if (tax == null) throw new IllegalArgumentException("tax must not be null");
         if (total == null) throw new IllegalArgumentException("total must not be null");
 
+        // Diff against the previous quantities snapshot BEFORE mutating the model so we can
+        // decide which row (if any) to flash. "Newest scan" is the last row whose quantity is
+        // now higher than it was last time we rendered, or the last brand-new line.
+        int flashRow = -1;
+        boolean flashIsBump = false;
+        for (int i = 0; i < lines.size(); i++) {
+            LineItem li = lines.get(i);
+            if (li.isVoided()) continue;
+            Integer prev = previousQuantities.get(li);
+            if (prev == null) {
+                flashRow = i;
+                flashIsBump = false;
+            } else if (li.getQuantity() > prev) {
+                flashRow = i;
+                flashIsBump = true;
+            }
+        }
+
         // Rebuilding the model drops the selection; the "grow → follow, hold → clamp" logic
         // stops the selection-dependent buttons from flickering off on every totals refresh.
         int previousIndex = basketList.getSelectedIndex();
@@ -177,21 +252,36 @@ public class CustomerView extends JFrame {
             }
         }
 
-        subtotalValue.setText(PosTheme.money(subtotal));
-        discountValue.setText(discount.signum() == 0 ? PosTheme.money(discount)
-                : "-" + PosTheme.money(discount));
-        discountValue.setForeground(discount.signum() == 0 ? PosTheme.MUTED : PosTheme.GO);
-        taxValue.setText(PosTheme.money(tax));
+        // Density derives strictly from item count. Voided lines still occupy screen space, so
+        // they count — the cashier still has to scroll past them.
+        BasketCellRenderer.Density target = BasketCellRenderer.densityFor(lines.size());
+        if (target != basketRenderer.getDensity()) {
+            animateDensityTransition(target);
+        }
+
+        renderInlineSummary(subtotal, discount, tax);
         totalValue.setText(PosTheme.money(total));
         amountDueValue.setText(PosTheme.money(total));
+
+        if (flashRow >= 0) {
+            startFlash(flashRow, flashIsBump);
+        }
+
+        // Snapshot AFTER the flash decision so the next call diffs against the state we just
+        // rendered. Identity-keyed so a merged bump on the same LineItem is detected as an
+        // increase, not a new arrival.
+        previousQuantities.clear();
+        for (LineItem li : lines) {
+            previousQuantities.put(li, li.getQuantity());
+        }
 
         refreshSelectionDependentButtons();
     }
 
     /**
      * Enables or disables the basket-input controls. Change-qty and void-line additionally
-     * require a non-voided selection and are re-evaluated by {@link
-     * #refreshSelectionDependentButtons()}.
+     * require a non-voided selection and are re-evaluated by
+     * {@link #refreshSelectionDependentButtons()}.
      */
     public void setBasketInputEnabled(boolean enabled) {
         basketInputEnabled = enabled;
@@ -247,9 +337,14 @@ public class CustomerView extends JFrame {
         return changeQtyButton.isEnabled();
     }
 
+    /** @return {@code true} if the Void Line button is currently enabled */
+    public boolean isVoidLineEnabled() {
+        return voidLineButton.isEnabled();
+    }
+
     /**
-     * Installs the given component as the scan bar at the top of the Basket column.
-     * Idempotent — a subsequent call replaces the previous scan bar.
+     * Installs the given component as the scan bar at the top of the Basket column. Idempotent
+     * — a subsequent call replaces the previous scan bar.
      */
     public void installScanBar(JComponent scanBar) {
         if (scanBar == null) throw new IllegalArgumentException("scanBar must not be null");
@@ -257,6 +352,38 @@ public class CustomerView extends JFrame {
         basketNorthSlot.add(scanBar, BorderLayout.CENTER);
         basketNorthSlot.revalidate();
         basketNorthSlot.repaint();
+    }
+
+    // ---- Test hooks --------------------------------------------------------
+
+    /** For tests: current renderer density. */
+    BasketCellRenderer.Density getBasketDensity() {
+        return basketRenderer.getDensity();
+    }
+
+    /** For tests: current row height of the basket list. */
+    int getBasketRowHeight() {
+        return basketList.getFixedCellHeight();
+    }
+
+    /** For tests: the active flash row, or -1 if none. */
+    int getFlashRowForTest() {
+        return flashIndex;
+    }
+
+    /** For tests: the currently-hovered row, or -1 if none. */
+    int getHoverRowForTest() {
+        return basketRenderer.getHoverIndex();
+    }
+
+    /** For tests: nudge the hover to a given index (simulating a MouseMotionListener event). */
+    void setHoverRowForTest(int index) {
+        setHoverRow(index);
+    }
+
+    /** For tests: the underlying basket list. */
+    JList<LineItem> getBasketListForTest() {
+        return basketList;
     }
 
     // ---- Layout helpers ----------------------------------------------------
@@ -292,16 +419,19 @@ public class CustomerView extends JFrame {
         c.gridy = 0;
         c.insets = new Insets(0, 0, 0, GUTTER);
 
+        // Column weights: give Quick Add a little more room now that it carries 16 tiles rather
+        // than 12 — an extra ~4% of the window keeps two comfortable columns of tiles that don't
+        // ellipsize product names on the first line. Basket and Tender each give up ~2%.
         c.gridx = 0;
-        c.weightx = 0.26;
+        c.weightx = 0.30;
         columns.add(buildQuickAddColumn(quickAddItems), c);
 
         c.gridx = 1;
-        c.weightx = 0.48;
+        c.weightx = 0.46;
         columns.add(buildBasketColumn(), c);
 
         c.gridx = 2;
-        c.weightx = 0.26;
+        c.weightx = 0.24;
         c.insets = new Insets(0, 0, 0, 0);
         columns.add(buildTenderColumn(), c);
         return columns;
@@ -315,7 +445,7 @@ public class CustomerView extends JFrame {
 
         for (Item item : quickAddItems) {
             QuickAddTile tile = new QuickAddTile(
-                    item.getDescription().trim(),
+                    item.getDisplayLabel().trim(),
                     PosTheme.money(item.getUnitPrice()));
             tile.addActionListener(e -> {
                 Map<String, Object> props = new HashMap<>();
@@ -335,6 +465,7 @@ public class CustomerView extends JFrame {
         scroll.getViewport().setBackground(PosTheme.SURFACE);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
+        styleThinScrollBar(scroll.getVerticalScrollBar());
         return PosTheme.card("Quick add", scroll);
     }
 
@@ -348,18 +479,30 @@ public class CustomerView extends JFrame {
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)));
         body.add(basketNorthSlot, BorderLayout.NORTH);
 
-        basketList.setCellRenderer(new LineItemCellRenderer());
-        basketList.setFixedCellHeight(BASKET_ROW_HEIGHT);
+        basketList.setCellRenderer(basketRenderer);
+        basketList.setFixedCellHeight(BasketCellRenderer.COMFORTABLE_ROW_HEIGHT);
         basketList.setBackground(PosTheme.SURFACE);
         basketList.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+        installHoverTracking();
 
         JScrollPane listScroll = new JScrollPane(basketList);
         listScroll.setBorder(BorderFactory.createEmptyBorder());
         listScroll.getViewport().setBackground(PosTheme.SURFACE);
+        listScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         listScroll.getVerticalScrollBar().setUnitIncrement(16);
+        // Hide the scrollbar entirely when everything fits — it's overlaid so it doesn't steal
+        // row width when it does appear.
+        listScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        styleThinScrollBar(listScroll.getVerticalScrollBar());
+
+        // Wrap the scroll pane in a layered panel so the flash overlay can be painted on top of
+        // just the flashed row bounds without touching the renderer or the list background.
+        basketLayer.setSource(basketList);
+        basketLayer.setLayout(new BorderLayout());
+        basketLayer.add(listScroll, BorderLayout.CENTER);
 
         basketCenter.setBackground(PosTheme.SURFACE);
-        basketCenter.add(listScroll, "list");
+        basketCenter.add(basketLayer, "list");
         basketCenter.add(buildEmptyState(), "empty");
         basketCards.show(basketCenter, "empty");
         body.add(basketCenter, BorderLayout.CENTER);
@@ -394,27 +537,51 @@ public class CustomerView extends JFrame {
     }
 
     private JPanel buildSummaryAndActions() {
-        JPanel south = new JPanel(new BorderLayout(0, 12));
+        JPanel south = new JPanel(new BorderLayout(0, 10));
         south.setBackground(PosTheme.SURFACE);
         south.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, PosTheme.RULE),
-                BorderFactory.createEmptyBorder(14, 16, 16, 16)));
+                BorderFactory.createEmptyBorder(12, 16, 14, 16)));
+
+        // Inline summary: Subtotal $X · Discount −$Y · Tax $Z on one row, small. Reclaims ~40px
+        // vs stacked rows without losing any information. HTML lets us paint the GO green on the
+        // discount fragment only, so a non-zero discount jumps out.
+        inlineSummary.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
+        inlineSummary.setForeground(PosTheme.MUTED);
+        renderInlineSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+
+        // Total on its own line, 34pt (down from 40pt) — still the largest thing on screen but
+        // ~50px cheaper. Uppercase eyebrow key on the left, big number on the right.
+        JPanel totalRow = new JPanel(new BorderLayout());
+        totalRow.setOpaque(false);
+        JLabel totalKey = new JLabel("TOTAL");
+        totalKey.setFont(PosTheme.base(Font.BOLD, 12f).deriveFont(PosTheme.trackedAttributes()));
+        totalKey.setForeground(PosTheme.INK);
+        totalValue.setFont(PosTheme.base(Font.BOLD, 34f));
+        totalValue.setForeground(PosTheme.INK);
+        totalRow.add(totalKey, BorderLayout.WEST);
+        totalRow.add(totalValue, BorderLayout.EAST);
 
         JPanel tape = new JPanel();
         tape.setOpaque(false);
         tape.setLayout(new BoxLayout(tape, BoxLayout.Y_AXIS));
-        tape.add(summaryRow("Subtotal", subtotalValue, false));
-        tape.add(summaryRow("Discount", discountValue, false));
-        tape.add(summaryRow("Tax", taxValue, false));
+
+        JPanel inlineWrap = new JPanel(new BorderLayout());
+        inlineWrap.setOpaque(false);
+        inlineWrap.add(inlineSummary, BorderLayout.WEST);
+        inlineWrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        tape.add(inlineWrap);
 
         JPanel hairline = new JPanel();
         hairline.setBackground(PosTheme.RULE);
         hairline.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
         hairline.setPreferredSize(new Dimension(10, 1));
-        tape.add(Box.createVerticalStrut(10));
+        tape.add(Box.createVerticalStrut(6));
         tape.add(hairline);
-        tape.add(Box.createVerticalStrut(8));
-        tape.add(summaryRow("Total", totalValue, true));
+        tape.add(Box.createVerticalStrut(6));
+
+        totalRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+        tape.add(totalRow);
         south.add(tape, BorderLayout.NORTH);
 
         JPanel actions = new JPanel(new BorderLayout(0, 8));
@@ -434,7 +601,9 @@ public class CustomerView extends JFrame {
 
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
-        totalButton.setPreferredSize(new Dimension(10, 52));
+        // 44px is the minimum touch target — do not shrink below this even if pixel budget
+        // gets tight. It plus the SHADOW_INSET the button reserves gives ~47px measured.
+        totalButton.setPreferredSize(new Dimension(10, 44 + PosButton.SHADOW_INSET));
         actions.add(totalButton, BorderLayout.CENTER);
         south.add(actions, BorderLayout.CENTER);
 
@@ -444,33 +613,31 @@ public class CustomerView extends JFrame {
         return south;
     }
 
+    private void renderInlineSummary(BigDecimal subtotal, BigDecimal discount, BigDecimal tax) {
+        // Discount hidden entirely at zero; painted GO green when non-zero. Tax always shown.
+        // Using a JLabel with a small HTML fragment gives us the mixed colour without stacking
+        // three widgets and paying their layout cost every render.
+        StringBuilder html = new StringBuilder("<html>");
+        html.append("Subtotal ").append(escapeHtml(PosTheme.money(subtotal)));
+        if (discount.signum() > 0) {
+            html.append(" &nbsp;·&nbsp; <font color='#0B6E4F'>Discount −")
+                    .append(escapeHtml(PosTheme.money(discount)))
+                    .append("</font>");
+        }
+        html.append(" &nbsp;·&nbsp; Tax ").append(escapeHtml(PosTheme.money(tax)));
+        html.append("</html>");
+        inlineSummary.setText(html.toString());
+    }
+
+    private static String escapeHtml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private void dispatchWithSelection(PosEventType type) {
         LineItem selected = getSelectedLineItem();
         Map<String, Object> props = new HashMap<>();
         if (selected != null) props.put("lineItem", selected);
         dispatcher.dispatchPosEvent(new PosEvent(type, props));
-    }
-
-    private JPanel summaryRow(String label, JLabel value, boolean emphasis) {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setOpaque(false);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, emphasis ? 48 : 22));
-
-        JLabel key = new JLabel(emphasis ? label.toUpperCase() : label);
-        key.setFont(emphasis
-                ? PosTheme.base(Font.BOLD, 12f).deriveFont(PosTheme.trackedAttributes())
-                : PosTheme.base(Font.PLAIN, PosTheme.BODY));
-        key.setForeground(emphasis ? PosTheme.INK : PosTheme.MUTED);
-
-        value.setFont(emphasis
-                ? PosTheme.base(Font.BOLD, PosTheme.DISPLAY)
-                : PosTheme.base(Font.PLAIN, PosTheme.BODY));
-        if (emphasis) value.setForeground(PosTheme.INK);
-        else if (value != discountValue) value.setForeground(PosTheme.MUTED);
-
-        row.add(key, BorderLayout.WEST);
-        row.add(value, BorderLayout.EAST);
-        return row;
     }
 
     private JPanel buildTenderColumn() {
@@ -514,12 +681,141 @@ public class CustomerView extends JFrame {
         return PosTheme.card("Tender", body);
     }
 
+    // ---- Density animation -------------------------------------------------
+
+    private void animateDensityTransition(BasketCellRenderer.Density target) {
+        if (densityTimer != null) densityTimer.stop();
+        densityFromHeight = basketList.getFixedCellHeight();
+        densityToHeight = target == BasketCellRenderer.Density.COMPACT
+                ? BasketCellRenderer.COMPACT_ROW_HEIGHT
+                : BasketCellRenderer.COMFORTABLE_ROW_HEIGHT;
+        basketRenderer.setDensity(target);
+        densityStartNanos = System.nanoTime();
+        densityTimer = new Timer(DENSITY_FRAME_MS, this::onDensityFrame);
+        densityTimer.setInitialDelay(0);
+        densityTimer.start();
+    }
+
+    private void onDensityFrame(ActionEvent e) {
+        double elapsedMs = (System.nanoTime() - densityStartNanos) / 1_000_000.0;
+        double t = Math.min(1.0, elapsedMs / DENSITY_ANIM_MS);
+        // Ease out — starts fast, settles gently. Feels responsive at the top of the animation.
+        double eased = 1 - Math.pow(1 - t, 3);
+        int height = (int) Math.round(densityFromHeight + (densityToHeight - densityFromHeight) * eased);
+        basketList.setFixedCellHeight(height);
+        if (t >= 1.0) {
+            basketList.setFixedCellHeight(densityToHeight);
+            densityTimer.stop();
+            densityTimer = null;
+        }
+    }
+
+    // ---- Flash overlay -----------------------------------------------------
+
+    private void startFlash(int index, boolean isQuantityBump) {
+        if (flashTimer != null) flashTimer.stop();
+        flashIndex = index;
+        flashStartNanos = System.nanoTime();
+        basketRenderer.setFlashIndex(index, isQuantityBump);
+        basketList.ensureIndexIsVisible(index);
+        basketLayer.setFlash(index, 1.0f);
+        flashTimer = new Timer(FLASH_FRAME_MS, e -> {
+            double elapsedMs = (System.nanoTime() - flashStartNanos) / 1_000_000.0;
+            double t = Math.min(1.0, elapsedMs / FLASH_MS);
+            float alpha = (float) (1.0 - t);
+            basketLayer.setFlash(flashIndex, alpha);
+            if (t >= 1.0) {
+                flashTimer.stop();
+                flashTimer = null;
+                flashIndex = -1;
+                basketRenderer.setFlashIndex(-1, false);
+                basketLayer.setFlash(-1, 0f);
+            }
+        });
+        flashTimer.setInitialDelay(0);
+        flashTimer.start();
+    }
+
+    // ---- Hover tracking ----------------------------------------------------
+
+    private void installHoverTracking() {
+        basketList.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override public void mouseMoved(MouseEvent e) {
+                int index = basketList.locationToIndex(e.getPoint());
+                if (index >= 0) {
+                    Rectangle bounds = basketList.getCellBounds(index, index);
+                    if (bounds != null && !bounds.contains(e.getPoint())) {
+                        index = -1;
+                    }
+                }
+                setHoverRow(index);
+            }
+        });
+        basketList.addMouseListener(new MouseAdapter() {
+            @Override public void mouseExited(MouseEvent e) {
+                setHoverRow(-1);
+            }
+        });
+    }
+
+    private void setHoverRow(int index) {
+        int previous = basketRenderer.getHoverIndex();
+        if (previous == index) return;
+        basketRenderer.setHoverIndex(index);
+        // Repaint only the affected row bounds — hovering across the list must not repaint the
+        // whole thing on every mouse move.
+        repaintRow(previous);
+        repaintRow(index);
+    }
+
+    private void repaintRow(int index) {
+        if (index < 0) return;
+        Rectangle bounds = basketList.getCellBounds(index, index);
+        if (bounds != null) basketList.repaint(bounds);
+    }
+
+    // ---- Thin scrollbar ----------------------------------------------------
+
+    private static void styleThinScrollBar(JScrollBar bar) {
+        bar.setPreferredSize(new Dimension(6, 0));
+        bar.setUnitIncrement(16);
+        bar.setUI(new BasicScrollBarUI() {
+            @Override protected void configureScrollBarColors() {
+                this.thumbColor = new Color(0xC7, 0xC5, 0xBF);
+                this.trackColor = PosTheme.SURFACE;
+            }
+            @Override protected javax.swing.JButton createDecreaseButton(int orientation) {
+                return zeroSized();
+            }
+            @Override protected javax.swing.JButton createIncreaseButton(int orientation) {
+                return zeroSized();
+            }
+            private javax.swing.JButton zeroSized() {
+                javax.swing.JButton b = new javax.swing.JButton();
+                b.setPreferredSize(new Dimension(0, 0));
+                b.setMinimumSize(new Dimension(0, 0));
+                b.setMaximumSize(new Dimension(0, 0));
+                return b;
+            }
+            @Override protected void paintThumb(Graphics g, JComponent c, Rectangle thumbBounds) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(this.thumbColor);
+                int pad = 1;
+                g2.fillRoundRect(thumbBounds.x + pad, thumbBounds.y + pad,
+                        thumbBounds.width - pad * 2, thumbBounds.height - pad * 2, 6, 6);
+                g2.dispose();
+            }
+        });
+    }
+
     // ---- Quick-add tile ----------------------------------------------------
 
     /**
      * A quick-add tile: description wrapped to at most two lines above the price. Drawn rather
      * than composed from HTML so the price keeps its accent colour and the whole tile dims
-     * correctly when basket input is disabled.
+     * correctly when basket input is disabled. Inherits {@link PosButton} elevation, so the
+     * tile reads as a pressable card, not a static decoration.
      */
     private static class QuickAddTile extends PosButton {
         private final String description;
@@ -529,27 +825,24 @@ public class CustomerView extends JFrame {
             super("", PosTheme.SURFACE, PosTheme.INK, PosTheme.base(Font.PLAIN, PosTheme.BODY));
             this.description = description;
             this.price = price;
-            setPreferredSize(new Dimension(10, QUICK_ADD_TILE_HEIGHT));
+            setPreferredSize(new Dimension(10, QUICK_ADD_TILE_HEIGHT + SHADOW_INSET));
         }
 
         @Override
         protected void paintComponent(Graphics g) {
+            // Delegate the fill/shadow/pressed-sink chrome to PosButton, then paint our custom
+            // description/price on top so tap-and-hold still visibly compresses.
+            super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                     RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
             boolean on = isEnabled();
-            Color fill = !on ? PosTheme.DISABLED_BG
-                    : getModel().isPressed() ? new Color(0xE8, 0xF0, 0xEC)
-                    : getModel().isRollover() ? new Color(0xF6, 0xF9, 0xF7)
-                    : PosTheme.SURFACE;
-            g2.setColor(fill);
-            g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
-            g2.setColor(on ? PosTheme.RULE : new Color(0xEA, 0xE8, 0xE3));
-            g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 8, 8);
-
+            boolean pressed = on && getModel().isPressed();
             int pad = 10;
+            int sink = pressed ? 1 : 0;
+            int height = getHeight() - SHADOW_INSET;
             int maxWidth = getWidth() - pad * 2;
 
             Font descFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
@@ -557,7 +850,7 @@ public class CustomerView extends JFrame {
             FontMetrics dfm = g2.getFontMetrics();
             List<String> lines = wrap(description, dfm, maxWidth, 2);
             g2.setColor(on ? PosTheme.INK : PosTheme.DISABLED_FG);
-            int y = pad + dfm.getAscent();
+            int y = pad + dfm.getAscent() + sink;
             for (String line : lines) {
                 g2.drawString(line, pad, y);
                 y += dfm.getHeight();
@@ -567,7 +860,7 @@ public class CustomerView extends JFrame {
             g2.setFont(priceFont);
             FontMetrics pfm = g2.getFontMetrics();
             g2.setColor(on ? PosTheme.GO : PosTheme.DISABLED_FG);
-            g2.drawString(price, pad, getHeight() - pad - pfm.getDescent());
+            g2.drawString(price, pad, height - pad - pfm.getDescent() + sink);
 
             g2.dispose();
         }
@@ -603,77 +896,75 @@ public class CustomerView extends JFrame {
         }
     }
 
-    // ---- Basket row --------------------------------------------------------
+    // ---- Flash overlay panel ----------------------------------------------
 
     /**
-     * Renders one basket row: quantity chip, description, unit price, and a right-aligned
-     * extended total. Voided lines are struck through and muted but stay visible — the cashier
-     * and the customer both need to see that a void happened.
+     * Paints a fading green tint over one row of the basket list. Sits above the list in the
+     * z-order so it can overlay the selection tint without touching the renderer or the row's
+     * background. When there is no active flash it paints nothing and costs nothing.
      */
-    private static class LineItemCellRenderer extends JPanel implements ListCellRenderer<LineItem> {
+    private static final class FlashLayerPanel extends JPanel {
+        private JList<?> source;
+        private int index = -1;
+        private float alpha;
 
-        private final JLabel qty = new JLabel("", SwingConstants.CENTER);
-        private final JLabel description = new JLabel();
-        private final JLabel unitPrice = new JLabel();
-        private final JLabel extended = new JLabel("", SwingConstants.RIGHT);
+        FlashLayerPanel() {
+            setOpaque(false);
+        }
 
-        LineItemCellRenderer() {
-            super(new BorderLayout(12, 0));
-            setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(0xF1, 0xEF, 0xEA)),
-                    BorderFactory.createEmptyBorder(9, 14, 9, 14)));
+        void setSource(JList<?> source) {
+            this.source = Objects.requireNonNull(source);
+        }
 
-            qty.setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
-            qty.setOpaque(true);
-            qty.setBackground(new Color(0xF0, 0xEF, 0xEB));
-            qty.setForeground(PosTheme.INK);
-            qty.setBorder(BorderFactory.createEmptyBorder(4, 9, 4, 9));
-            JPanel qtyWrap = new JPanel(new GridBagLayout());
-            qtyWrap.setOpaque(false);
-            qtyWrap.add(qty);
-            add(qtyWrap, BorderLayout.WEST);
-
-            description.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
-            unitPrice.setFont(PosTheme.base(Font.PLAIN, 12f));
-            unitPrice.setForeground(PosTheme.MUTED);
-            JPanel text = new JPanel(new GridLayout(2, 1, 0, 1));
-            text.setOpaque(false);
-            text.add(description);
-            text.add(unitPrice);
-            add(text, BorderLayout.CENTER);
-
-            extended.setFont(PosTheme.base(Font.BOLD, PosTheme.BUTTON));
-            add(extended, BorderLayout.EAST);
+        void setFlash(int index, float alpha) {
+            this.index = index;
+            this.alpha = alpha;
+            if (index < 0 || alpha <= 0f) {
+                repaint();
+                return;
+            }
+            Rectangle bounds = source.getCellBounds(index, index);
+            if (bounds != null) {
+                // Translate into layer space via the scrollpane's viewport by walking the
+                // component hierarchy. Simpler: repaint the whole layer — the overlay itself
+                // is cheap and only paints one row.
+                repaint();
+            }
         }
 
         @Override
-        public Component getListCellRendererComponent(
-                JList<? extends LineItem> list, LineItem value, int index,
-                boolean isSelected, boolean cellHasFocus) {
+        protected void paintChildren(Graphics g) {
+            super.paintChildren(g);
+            if (source == null || index < 0 || alpha <= 0f) return;
+            Rectangle cell = source.getCellBounds(index, index);
+            if (cell == null) return;
 
-            boolean voided = value.isVoided();
-            setBackground(isSelected ? PosTheme.SELECTED : PosTheme.SURFACE);
+            Rectangle visible = source.getVisibleRect();
+            if (!visible.intersects(cell)) return;
 
-            qty.setText(value.getQuantity() + "×");
-            qty.setBackground(voided ? new Color(0xF6, 0xF5, 0xF2) : new Color(0xF0, 0xEF, 0xEB));
-            qty.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
+            // Map from list coordinates into this layer's coordinates by finding the list's
+            // position relative to us.
+            java.awt.Point layerOrigin = SwingUtilities.convertPoint(source, 0, 0, this);
+            Rectangle painted = new Rectangle(
+                    layerOrigin.x + cell.x,
+                    layerOrigin.y + cell.y,
+                    cell.width,
+                    cell.height).intersection(new Rectangle(0, 0, getWidth(), getHeight()));
 
-            String desc = value.getItem().getDescription().trim();
-            description.setText(voided
-                    ? "<html><strike>" + escapeHtml(desc) + "</strike> &nbsp;<font color='#A32A1F'>VOID</font></html>"
-                    : escapeHtml(desc));
-            description.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
+            if (painted.isEmpty()) return;
 
-            unitPrice.setText("@ " + PosTheme.money(value.getItem().getUnitPrice()));
-            unitPrice.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.MUTED);
-
-            extended.setText(PosTheme.money(value.extendedTotal()));
-            extended.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
-            return this;
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int a = Math.max(0, Math.min(255, Math.round(FLASH_PEAK_ALPHA * alpha)));
+            g2.setColor(new Color(PosTheme.GO.getRed(), PosTheme.GO.getGreen(),
+                    PosTheme.GO.getBlue(), a));
+            g2.fillRect(painted.x, painted.y, painted.width, painted.height);
+            // Thin left-edge marker in solid GO for a stronger cue on the merged-into row.
+            g2.setStroke(new BasicStroke(2f));
+            g2.setColor(new Color(PosTheme.GO.getRed(), PosTheme.GO.getGreen(),
+                    PosTheme.GO.getBlue(), Math.min(255, a * 4)));
+            g2.drawLine(painted.x, painted.y, painted.x, painted.y + painted.height);
+            g2.dispose();
         }
-    }
-
-    private static String escapeHtml(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 }
