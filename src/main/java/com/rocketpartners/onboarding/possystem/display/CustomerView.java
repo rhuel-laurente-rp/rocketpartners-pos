@@ -121,6 +121,7 @@ public class CustomerView extends JFrame {
     private final JLabel totalValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel amountDueValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
+    private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
 
     private final List<PosButton> quickAddButtons = new ArrayList<>();
     private final PosButton changeQtyButton = PosButtons.secondary("Change qty");
@@ -401,11 +402,35 @@ public class CustomerView extends JFrame {
         statusPill.setFont(PosTheme.eyebrow());
         statusPill.setOpaque(true);
         statusPill.setBorder(BorderFactory.createEmptyBorder(5, 14, 5, 14));
-        JPanel pillWrap = new JPanel(new BorderLayout());
-        pillWrap.setOpaque(false);
-        pillWrap.add(statusPill, BorderLayout.EAST);
-        header.add(pillWrap, BorderLayout.EAST);
+
+        JPanel rightSide = new JPanel();
+        rightSide.setOpaque(false);
+        rightSide.setLayout(new BoxLayout(rightSide, BoxLayout.X_AXIS));
+        rightSide.add(journalIndicator);
+        rightSide.add(Box.createHorizontalStrut(12));
+        rightSide.add(statusPill);
+        header.add(rightSide, BorderLayout.EAST);
         return header;
+    }
+
+    /**
+     * Updates the header's journal connection indicator. Safe to call from any thread — the
+     * update is marshaled onto the Swing EDT if the caller isn't already on it.
+     *
+     * @param connected {@code true} when the {@link com.rocketpartners.onboarding.possystem.component.RemoteJournal}
+     *                  has an open socket to the virtual journal server; {@code false} otherwise
+     */
+    public void setJournalConnected(boolean connected) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            journalIndicator.setConnected(connected);
+        } else {
+            SwingUtilities.invokeLater(() -> journalIndicator.setConnected(connected));
+        }
+    }
+
+    /** For tests: whether the indicator currently reads as connected. */
+    boolean isJournalConnectedForTest() {
+        return journalIndicator.isConnected();
     }
 
     private JPanel buildColumns(List<Item> quickAddItems) {
@@ -924,6 +949,63 @@ public class CustomerView extends JFrame {
                 }
             }
             return out;
+        }
+    }
+
+    // ---- Journal status indicator -----------------------------------------
+
+    /**
+     * Compact "● Journal connected / disconnected" indicator that lives in the customer-view
+     * header. Painted rather than composed from a bullet character so the dot's colour matches
+     * the theme exactly (green when connected, red when down) and stays crisp at any DPI.
+     *
+     * <p>The label reads {@code "Journal LIVE"} / {@code "Journal OFFLINE"} — clearer than a
+     * lone icon and short enough to sit alongside the transaction-phase pill without crowding.</p>
+     */
+    static final class JournalStatusIndicator extends JLabel {
+
+        /** Diameter of the status dot, in pixels. */
+        private static final int DOT_SIZE = 9;
+        /** Gap between the dot and the label text. */
+        private static final int DOT_GAP = 6;
+
+        /** Header foreground text colour — pale grey, readable on {@link PosTheme#INK}. */
+        private static final Color LABEL_FG = new Color(0xC9, 0xD1, 0xD8);
+
+        private boolean connected;
+
+        JournalStatusIndicator() {
+            super();
+            setOpaque(false);
+            setFont(PosTheme.eyebrow());
+            setForeground(LABEL_FG);
+            // Leave room on the left for the dot painted by paintComponent().
+            setBorder(BorderFactory.createEmptyBorder(0, DOT_SIZE + DOT_GAP, 0, 0));
+            setConnected(false);
+        }
+
+        void setConnected(boolean connected) {
+            this.connected = connected;
+            setText(connected ? "JOURNAL LIVE" : "JOURNAL OFFLINE");
+            setToolTipText(connected
+                    ? "Virtual journal socket is connected."
+                    : "Virtual journal is unreachable. The sale still completes; entries are logged locally.");
+            repaint();
+        }
+
+        boolean isConnected() {
+            return connected;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(connected ? PosTheme.GO : PosTheme.STOP);
+            int y = (getHeight() - DOT_SIZE) / 2;
+            g2.fillOval(0, y, DOT_SIZE, DOT_SIZE);
+            g2.dispose();
         }
     }
 

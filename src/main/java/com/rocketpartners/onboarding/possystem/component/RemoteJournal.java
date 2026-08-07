@@ -6,47 +6,46 @@ import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Ships journal entries to a {@link com.rocketpartners.onboarding.posvirtualjournal.POSVirtualJournal}
+ * Ships journal records to a {@link com.rocketpartners.onboarding.posvirtualjournal.POSVirtualJournal}
  * server over a TCP socket, off the Swing EDT.
  *
  * <h2>Runtime shape</h2>
  * <ul>
- *   <li>A bounded {@link BlockingQueue} ({@link #QUEUE_CAPACITY} entries).</li>
+ *   <li>A bounded {@link BlockingQueue} ({@link #QUEUE_CAPACITY} records).</li>
  *   <li>A single daemon sender thread — one, not a pool, so entries ship in the exact order
- *       they were enqueued. A pool would interleave and produce a journal that lies about
- *       sequence.</li>
- *   <li>{@link #journal(String)} does a non-blocking {@link BlockingQueue#offer offer}: if the
- *       queue is full the entry is dropped and a counter is incremented. When the queue drains,
- *       the sender emits a single {@code JOURNAL_DROPPED n=…} line through the {@link LocalJournal}
+ *       they were enqueued.</li>
+ *   <li>{@link #journal(JournalRecord)} does a non-blocking {@link BlockingQueue#offer offer};
+ *       when the queue is full the record is dropped and a counter is incremented. On recovery
+ *       the sender emits one {@code JOURNAL_DROPPED n=…} record through the {@link LocalJournal}
  *       so the gap is visible. This never blocks the caller.</li>
  * </ul>
+ *
+ * <h2>Wire format</h2>
+ * Each record is serialized via {@link JournalRecord#toPipeDelimited()} and sent as one
+ * UTF-8 line. Records longer than {@link #MAX_ENTRY_CHARS} are truncated with
+ * {@link #TRUNCATION_MARKER}.
  *
  * <h2>Connection lifecycle</h2>
  * <ul>
  *   <li>Lazy connect on the first entry, with an explicit {@link #CONNECT_TIMEOUT_MS 2s}
  *       connect timeout.</li>
  *   <li>On write failure the socket is closed, the connection is marked lost, and the sender
- *       backs off before the next attempt: 1s, 2s, 4s, 8s, 16s, 30s cap. Reconnection is not
- *       attempted per entry — a dead journal would otherwise turn every keystroke into a
- *       connect() call.</li>
- *   <li>The pending entry is held aside across reconnects, so entries never get shipped out
- *       of order because an intermediate one lost its slot.</li>
+ *       backs off before the next attempt: 1s, 2s, 4s, 8s, 16s, 30s cap.</li>
+ *   <li>The pending record is held across reconnect attempts so ordering is preserved even
+ *       through outages.</li>
  *   <li>Transitions are logged once through {@link LocalJournal}
- *       ({@code JOURNAL_CONNECTED} / {@code JOURNAL_UNREACHABLE} / {@code JOURNAL_DISCONNECTED}),
- *       never per attempt.</li>
- *   <li>No replay buffer, no disk spool: entries dropped while disconnected stay dropped.</li>
+ *       ({@code JOURNAL_CONNECTED} / {@code JOURNAL_UNREACHABLE} / {@code JOURNAL_DISCONNECTED}).</li>
+ *   <li>No replay buffer, no disk spool: records dropped while disconnected stay dropped.</li>
  * </ul>
- *
- * <h2>Sanitization</h2>
- * {@link #journal(String)} folds embedded {@code \n} and {@code \r} into spaces so a
- * description containing a newline cannot split into two entries and desynchronize the stream.
- * Entries longer than {@link #MAX_ENTRY_CHARS} are truncated with a {@link #TRUNCATION_MARKER}.
  */
 public class RemoteJournal implements Journal {
 
@@ -66,21 +65,40 @@ public class RemoteJournal implements Journal {
     static final String TRUNCATION_MARKER = "…TRUNCATED";
 
     /** Poison-pill sentinel enqueued by {@link #close()} to signal the sender to exit. */
-    private static final String POISON = "__POISON_PILL__";
+    private static final JournalRecord POISON =
+            new JournalRecord(Instant.EPOCH, "?", 0, "-", "__POISON_PILL__", new LinkedHashMap<>());
 
     /**
      * Opens a TCP {@link Socket} to the given host/port with an explicit connect timeout.
-     * Injected so tests can supply a mock without touching real sockets.
      */
     @FunctionalInterface
     public interface Connector {
         Socket connect(String host, int port, int timeoutMs) throws IOException;
     }
 
-    /** Sleeps the current thread for {@code ms} milliseconds. Tests replace with a no-op. */
+    /** Sleeps the current thread for {@code ms} milliseconds. */
     @FunctionalInterface
     public interface Sleeper {
         void sleep(long ms) throws InterruptedException;
+    }
+
+    /**
+     * Coarse-grained connection state exposed to observers (typically a status indicator in
+     * the UI). The {@link #DISCONNECTED} state covers both "never connected" and "lost the
+     * connection" — callers rendering it should say things like "journal offline" and rely on
+     * the connect/disconnect transitions rather than trying to distinguish sub-states.
+     */
+    public enum ConnectionState {
+        /** Not currently connected — either never was, or lost the socket. */
+        DISCONNECTED,
+        /** Socket is open and the last write succeeded. */
+        CONNECTED
+    }
+
+    /** Notified whenever {@link RemoteJournal} transitions between {@link ConnectionState}s. */
+    @FunctionalInterface
+    public interface ConnectionListener {
+        void onStateChanged(ConnectionState state);
     }
 
     private final String host;
@@ -88,19 +106,16 @@ public class RemoteJournal implements Journal {
     private final LocalJournal local;
     private final Connector connector;
     private final Sleeper sleeper;
-    private final BlockingQueue<String> queue;
+    private final BlockingQueue<JournalRecord> queue;
     private final Thread sender;
 
     private final AtomicLong droppedSinceLastReport = new AtomicLong();
     private volatile boolean running = true;
+    private volatile ConnectionState currentState = ConnectionState.DISCONNECTED;
+    private volatile ConnectionListener connectionListener;
 
     /**
      * Production ctor: real {@link Socket} connect + {@link Thread#sleep} backoff.
-     *
-     * @param host  journal server hostname; must not be {@code null}
-     * @param port  TCP port
-     * @param local a {@link LocalJournal} used for transition and drop-count reports;
-     *              must not be {@code null}
      */
     public RemoteJournal(String host, int port, LocalJournal local) {
         this(host, port, local, RemoteJournal::defaultConnect, Thread::sleep, QUEUE_CAPACITY);
@@ -132,15 +147,53 @@ public class RemoteJournal implements Journal {
     }
 
     @Override
-    public void journal(String entry) {
-        if (entry == null || entry.isEmpty()) return;
-        String sanitized = sanitize(entry);
-        if (!queue.offer(sanitized)) {
+    public void journal(JournalRecord record) {
+        if (record == null) return;
+        if (!queue.offer(record)) {
             droppedSinceLastReport.incrementAndGet();
         }
     }
 
-    /** Sanitizes a raw entry to a single-line, at-most-{@link #MAX_ENTRY_CHARS} string. */
+    /**
+     * Registers a listener that will be notified whenever the underlying socket transitions
+     * between {@link ConnectionState#CONNECTED} and {@link ConnectionState#DISCONNECTED}.
+     * The listener is invoked on the sender thread — implementations that touch Swing must
+     * marshal onto the EDT themselves. Setting to {@code null} unsubscribes.
+     *
+     * <p>On registration the listener is immediately invoked with the current state, so the
+     * UI can paint the correct pill even if it subscribes after a transition has already
+     * happened.</p>
+     */
+    public void setConnectionListener(ConnectionListener listener) {
+        this.connectionListener = listener;
+        if (listener != null) {
+            try {
+                listener.onStateChanged(currentState);
+            } catch (RuntimeException e) {
+                System.err.println("[journal] connection listener threw on register: "
+                        + e.getMessage());
+            }
+        }
+    }
+
+    /** @return the last state the sender observed */
+    public ConnectionState getConnectionState() {
+        return currentState;
+    }
+
+    private void setState(ConnectionState newState) {
+        if (currentState == newState) return;
+        currentState = newState;
+        ConnectionListener l = connectionListener;
+        if (l == null) return;
+        try {
+            l.onStateChanged(newState);
+        } catch (RuntimeException e) {
+            System.err.println("[journal] connection listener threw on notify: " + e.getMessage());
+        }
+    }
+
+    /** Sanitizes a rendered line: folds newlines and truncates past {@link #MAX_ENTRY_CHARS}. */
     static String sanitize(String raw) {
         String flat = raw.replace('\n', ' ').replace('\r', ' ');
         if (flat.length() <= MAX_ENTRY_CHARS) return flat;
@@ -169,7 +222,7 @@ public class RemoteJournal implements Journal {
         Writer writer = null;
         int backoffIndex = 0;
         boolean everConnected = false;
-        String pending = null; // held across reconnect attempts so order is preserved
+        JournalRecord pending = null;
 
         while (running) {
             if (pending == null) {
@@ -179,7 +232,7 @@ public class RemoteJournal implements Journal {
                     break;
                 }
                 if (pending == null) continue;
-                if (POISON.equals(pending)) break;
+                if (pending == POISON) break;
             }
 
             if (socket == null || writer == null) {
@@ -202,45 +255,55 @@ public class RemoteJournal implements Journal {
                     everConnected = true;
                     backoffIndex = 0;
                     if (firstEver || afterOutage) {
-                        local.journal("JOURNAL_CONNECTED host=" + host + " port=" + port);
+                        local.journal(system("JOURNAL_CONNECTED", "host", host, "port", port));
                     }
+                    setState(ConnectionState.CONNECTED);
                 } catch (IOException e) {
                     if (backoffIndex == 0) {
-                        local.journal("JOURNAL_UNREACHABLE host=" + host + " port=" + port
-                                + " reason=" + e.getClass().getSimpleName() + ":" + e.getMessage());
+                        local.journal(system("JOURNAL_UNREACHABLE",
+                                "host", host, "port", port,
+                                "reason", e.getClass().getSimpleName() + ":" + e.getMessage()));
                     }
                     backoffIndex++;
                     socket = null;
                     writer = null;
-                    // pending stays put; try again next iteration
+                    setState(ConnectionState.DISCONNECTED);
                     continue;
                 }
             }
 
             long dropped = droppedSinceLastReport.getAndSet(0);
             if (dropped > 0) {
-                local.journal("JOURNAL_DROPPED n=" + dropped);
+                local.journal(system("JOURNAL_DROPPED", "n", dropped));
             }
 
             try {
-                writer.write(pending);
+                writer.write(sanitize(pending.toPipeDelimited()));
                 writer.write('\n');
                 writer.flush();
                 pending = null;
             } catch (IOException e) {
-                local.journal("JOURNAL_DISCONNECTED reason=" + e.getClass().getSimpleName()
-                        + ":" + e.getMessage());
+                local.journal(system("JOURNAL_DISCONNECTED",
+                        "reason", e.getClass().getSimpleName() + ":" + e.getMessage()));
                 closeQuietly(socket);
                 socket = null;
                 writer = null;
                 backoffIndex = 1;
-                // pending stays put — reconnect and retry
-                // Put drop count back since we didn't successfully report it.
+                setState(ConnectionState.DISCONNECTED);
                 if (dropped > 0) droppedSinceLastReport.addAndGet(dropped);
             }
         }
 
         closeQuietly(socket);
+    }
+
+    /** Builds a system-labeled JournalRecord for connection-state transitions. */
+    private static JournalRecord system(String event, Object... kv) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < kv.length; i += 2) {
+            fields.put(String.valueOf(kv[i]), kv[i + 1]);
+        }
+        return new JournalRecord(Instant.now(), "?", 0, "-", event, fields);
     }
 
     private static void closeQuietly(Socket s) {

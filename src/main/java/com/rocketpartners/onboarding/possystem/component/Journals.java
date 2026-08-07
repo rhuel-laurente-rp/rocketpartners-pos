@@ -5,14 +5,14 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * A composite {@link Journal} that fans one entry out to every wrapped journal. Used to send
- * every entry to both {@link LocalJournal} (unconditional) and {@link RemoteJournal}
- * (best-effort) at once.
+ * A composite {@link Journal} that fans one record out to every wrapped journal. Used to send
+ * every entry to {@link LocalJournal} (unconditional stdout), {@link FileJournal} (JSONL on
+ * disk), and {@link RemoteJournal} (best-effort socket) at once.
  *
- * <p>Each delegate's {@link Journal#journal(String)} is invoked in order; a RuntimeException
- * from one delegate is caught and logged so it does not stop the others. This never happens in
- * practice — the {@link Journal} contract forbids throwing — but the wrapper is the last line
- * of defense between the journal system and the Swing EDT.</p>
+ * <p>Each delegate's {@link Journal#journal(JournalRecord)} is invoked in order; a
+ * RuntimeException from one delegate is caught and logged so it does not stop the others. This
+ * should never happen — the {@link Journal} contract forbids throwing — but the wrapper is the
+ * last line of defense between the journal system and the Swing EDT.</p>
  */
 public class Journals implements Journal {
 
@@ -27,10 +27,10 @@ public class Journals implements Journal {
     }
 
     @Override
-    public void journal(String entry) {
+    public void journal(JournalRecord record) {
         for (Journal j : delegates) {
             try {
-                j.journal(entry);
+                j.journal(record);
             } catch (RuntimeException e) {
                 System.err.println("[journal] delegate " + j.getClass().getSimpleName()
                         + " threw: " + e.getMessage());

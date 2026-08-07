@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.net.ConnectException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -54,11 +55,9 @@ class JournalCrossPhaseTest {
                     new InMemoryItemRepository(items),
                     new TaxService(new BigDecimal("0.07")),
                     "STORE-01", 1, false);
-            JournalListener listener = new JournalListener(composite);
-            pos.addController(listener);
+            pos.addController(new JournalListener(composite));
             pos.start();
 
-            // Full sale, no exceptions must escape.
             pos.getTransactionService().startTransaction();
             LineItem li = pos.getTransactionService().addItemByUpc(WIDGET.getUpc(), 2);
             Map<String, Object> props = new HashMap<>();
@@ -68,7 +67,7 @@ class JournalCrossPhaseTest {
             Transaction paid = pos.getTransactionService().tenderCash(new BigDecimal("6.00"));
 
             assertThat(paid.getState()).isEqualTo(TransactionState.PAID);
-            assertThat(paid.grandTotal()).isEqualByComparingTo("5.35"); // 5.00 + 7% tax
+            assertThat(paid.grandTotal()).isEqualByComparingTo("5.35");
             assertThat(paid.changeDue()).isEqualByComparingTo("0.65");
         } finally {
             remote.close();
@@ -76,7 +75,7 @@ class JournalCrossPhaseTest {
     }
 
     @Test
-    void journalDown_neverRaisesOnAnyHop() throws Exception {
+    void journalDown_neverRaisesOnAnyHop() {
         RemoteJournal.Connector everFail = (h, p, t) -> {
             throw new IOException("nope");
         };
@@ -84,8 +83,11 @@ class JournalCrossPhaseTest {
                 StandardCharsets.UTF_8));
         RemoteJournal remote = new RemoteJournal("localhost", 65535, local, everFail, ms -> {}, 5);
         try {
-            for (int i = 0; i < 20; i++) remote.journal("burst-" + i);
-            // Wait a small window; nothing should throw and the sender must still be alive.
+            for (int i = 0; i < 20; i++) {
+                Map<String, Object> f = new LinkedHashMap<>();
+                f.put("burst", i);
+                remote.journal(new JournalRecord(Instant.now(), "S", 1, "t", "ITEM_ADDED", f));
+            }
             Awaitility.await().atMost(Duration.ofSeconds(1)).until(remote::isSenderAlive);
             assertThat(remote.isSenderAlive()).isTrue();
         } finally {

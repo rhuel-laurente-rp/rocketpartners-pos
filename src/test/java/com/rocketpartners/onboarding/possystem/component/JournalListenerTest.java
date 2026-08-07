@@ -11,7 +11,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,7 +27,6 @@ class JournalListenerTest {
 
     private PosComponent pos;
     private CapturingJournal journal;
-    private JournalListener listener;
 
     @BeforeEach
     void setUp() {
@@ -39,15 +37,16 @@ class JournalListenerTest {
                 new TaxService(BigDecimal.ZERO),
                 "STORE-01", 1, false);
         journal = new CapturingJournal();
-        listener = new JournalListener(journal);
-        pos.addController(listener);
+        pos.addController(new JournalListener(journal));
         pos.start();
     }
 
     @Test
     void posStarted_isJournaledOnStart() {
-        assertThat(journal.entries).anyMatch(e -> e.contains("POS_STARTED"));
-        assertThat(journal.entries.get(0)).contains("STORE-01").contains("LANE-1");
+        JournalRecord first = journal.records.get(0);
+        assertThat(first.getEvent()).isEqualTo("POS_STARTED");
+        assertThat(first.getStore()).isEqualTo("STORE-01");
+        assertThat(first.getLane()).isEqualTo(1);
     }
 
     @Test
@@ -58,11 +57,11 @@ class JournalListenerTest {
         props.put("lineItem", li);
         pos.dispatchPosEvent(new PosEvent(PosEventType.ITEM_ADDED, props));
 
-        String entry = journal.lastMatching("ITEM_ADDED");
-        assertThat(entry).contains("upc=\"012345678905\"");
-        assertThat(entry).contains("qty=2");
-        assertThat(entry).contains("desc=\"Widget\"");
-        assertThat(entry).contains("ext=5.00");
+        JournalRecord r = journal.lastOf("ITEM_ADDED");
+        assertThat(r.getFields()).containsEntry("upc", "012345678905");
+        assertThat(r.getFields()).containsEntry("qty", 2);
+        assertThat(r.getFields()).containsEntry("desc", "Widget");
+        assertThat(r.getFields()).containsEntry("ext", "5.00");
     }
 
     @Test
@@ -73,16 +72,14 @@ class JournalListenerTest {
         props.put("changeDue", new BigDecimal("2.50"));
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED, props));
 
-        String entry = journal.lastMatching("CASH_TENDERED");
-        assertThat(entry).contains("tender=CASH");
-        assertThat(entry).contains("amount=20.00");
-        assertThat(entry).contains("change=2.50");
+        JournalRecord r = journal.lastOf("CASH_TENDERED");
+        assertThat(r.getFields()).containsEntry("tender", "CASH");
+        assertThat(r.getFields()).containsEntry("amount", "20.00");
+        assertThat(r.getFields()).containsEntry("change", "2.50");
     }
 
     @Test
     void cardTenderedEvent_doesNotContainPaymentInstrumentPropertiesEvenIfSupplied() {
-        // Even if the event carried spurious card data (it shouldn't, and this event type
-        // does not), the listener must not journal it.
         Map<String, Object> props = new HashMap<>();
         props.put("tenderType", TenderType.CREDIT);
         props.put("amountTendered", new BigDecimal("100.00"));
@@ -90,10 +87,13 @@ class JournalListenerTest {
         props.put("cardNumber", "4111-1111-1111-1111"); // never journaled
         pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDERED, props));
 
-        String entry = journal.lastMatching("CARD_TENDERED");
-        assertThat(entry).contains("tender=CREDIT").contains("amount=100.00");
-        assertThat(entry).doesNotContain("4111");
-        assertThat(entry).doesNotContain("cardNumber");
+        JournalRecord r = journal.lastOf("CARD_TENDERED");
+        assertThat(r.getFields()).containsEntry("tender", "CREDIT")
+                .containsEntry("amount", "100.00");
+        assertThat(r.getFields()).doesNotContainKey("cardNumber");
+        // And it can't leak via any other channel:
+        assertThat(r.toPipeDelimited()).doesNotContain("4111");
+        assertThat(r.toJsonLine()).doesNotContain("4111");
     }
 
     @Test
@@ -105,11 +105,10 @@ class JournalListenerTest {
         props.put("upc", "xyz");
         pos.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
 
-        String entry = journal.lastMatching("ERROR");
-        assertThat(entry).contains("code=UPC_NOT_FOUND");
-        assertThat(entry).contains("operation=addItemByUpc");
-        assertThat(entry).contains("message=");
-        assertThat(entry).contains("upc=\"xyz\"");
+        JournalRecord r = journal.lastOf("ERROR");
+        assertThat(r.getFields()).containsEntry("code", "UPC_NOT_FOUND");
+        assertThat(r.getFields()).containsEntry("operation", "addItemByUpc");
+        assertThat(r.getFields()).containsEntry("upc", "xyz");
     }
 
     @Test
@@ -124,17 +123,14 @@ class JournalListenerTest {
         manual.put("source", "manualScan");
         pos.dispatchPosEvent(new PosEvent(PosEventType.ITEM_SCANNED, manual));
 
-        List<String> scans = new ArrayList<>();
-        for (String e : journal.entries) if (e.contains("ITEM_SCANNED")) scans.add(e);
+        List<JournalRecord> scans = journal.allOf("ITEM_SCANNED");
         assertThat(scans).hasSize(2);
-        assertThat(scans.get(0)).contains("source=scan");
-        assertThat(scans.get(1)).contains("source=manualScan");
+        assertThat(scans.get(0).getFields()).containsEntry("source", "scan");
+        assertThat(scans.get(1).getFields()).containsEntry("source", "manualScan");
     }
 
     @Test
     void remoteJournalSender_neverRunsOnTheEdt_evenWhenEnqueuedFromTheEdt() throws Exception {
-        // A stubbed sender that captures whether it was called on the Swing EDT. Because
-        // RemoteJournal offloads to a single daemon thread, this must always be false.
         java.util.concurrent.atomic.AtomicBoolean sawEdt = new java.util.concurrent.atomic.AtomicBoolean(false);
         java.util.concurrent.atomic.AtomicBoolean sawWrite = new java.util.concurrent.atomic.AtomicBoolean(false);
         RemoteJournal.Connector edtChecking = (h, p, t) -> new java.net.Socket() {
@@ -162,11 +158,9 @@ class JournalListenerTest {
             PosComponent local2 = new PosComponent(
                     new InMemoryItemRepository(Map.of(WIDGET.getUpc(), WIDGET)),
                     new TaxService(BigDecimal.ZERO), "STORE", 1, false);
-            JournalListener l = new JournalListener(remote);
-            local2.addController(l);
+            local2.addController(new JournalListener(remote));
             local2.start();
 
-            // Dispatch an event on the EDT — the classic "cashier presses button" path.
             SwingUtilities.invokeAndWait(() -> {
                 local2.getTransactionService().startTransaction();
                 LineItem li = local2.getTransactionService().addItemByUpc(WIDGET.getUpc(), 1);
@@ -187,19 +181,24 @@ class JournalListenerTest {
     // ---- test helpers ----
 
     private static final class CapturingJournal implements Journal {
-        final List<String> entries = new CopyOnWriteArrayList<>();
+        final List<JournalRecord> records = new CopyOnWriteArrayList<>();
 
         @Override
-        public void journal(String entry) {
-            entries.add(entry);
+        public void journal(JournalRecord record) {
+            records.add(record);
         }
 
-        String lastMatching(String needle) {
-            String last = null;
-            for (String e : entries) if (e.contains(needle)) last = e;
-            assertThat(last).as("no entry matches " + needle + "; entries=" + entries).isNotNull();
+        JournalRecord lastOf(String event) {
+            JournalRecord last = null;
+            for (JournalRecord r : records) if (event.equals(r.getEvent())) last = r;
+            assertThat(last).as("no record with event " + event).isNotNull();
             return last;
         }
-    }
 
+        List<JournalRecord> allOf(String event) {
+            List<JournalRecord> out = new java.util.ArrayList<>();
+            for (JournalRecord r : records) if (event.equals(r.getEvent())) out.add(r);
+            return out;
+        }
+    }
 }
