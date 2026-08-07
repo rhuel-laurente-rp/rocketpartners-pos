@@ -2,8 +2,6 @@
 build/
 .gradle/
 gradle-app.setting
-!gradle-wrapper.jar
-!gradle-wrapper.properties
 
 # Java
 *.class
@@ -12,6 +10,9 @@ gradle-app.setting
 *.ear
 hs_err_pid*
 replay_pid*
+
+# Keep the Gradle wrapper jar tracked despite the *.jar rule above — CI needs it to bootstrap.
+!gradle/wrapper/gradle-wrapper.jar
 
 # IntelliJ IDEA
 out/
