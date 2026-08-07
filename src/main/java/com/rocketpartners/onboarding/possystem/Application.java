@@ -7,6 +7,11 @@ import com.formdev.flatlaf.FlatLightLaf;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
 import com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer;
+import com.rocketpartners.onboarding.possystem.component.Journal;
+import com.rocketpartners.onboarding.possystem.component.JournalListener;
+import com.rocketpartners.onboarding.possystem.component.Journals;
+import com.rocketpartners.onboarding.possystem.component.LocalJournal;
+import com.rocketpartners.onboarding.possystem.component.RemoteJournal;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
@@ -117,9 +122,14 @@ public final class Application {
 
         List<Item> quickAddItems = pickQuickAddItems(itemRepository);
 
+        LocalJournal localJournal = new LocalJournal();
+        RemoteJournal remoteJournal = new RemoteJournal(args.journalHost, args.journalPort, localJournal);
+        Journal journal = new Journals(localJournal, remoteJournal);
+
         SwingUtilities.invokeLater(() -> {
             PosComponent pos = new PosComponent(
                     itemRepository, taxService, args.storeName, args.laneNumber, args.debug);
+            JournalListener journalListener = new JournalListener(journal);
 
             String title = "Rocket POS — " + args.storeName + " lane " + args.laneNumber;
             CustomerView view = new CustomerView(title, quickAddItems, pos);
@@ -162,6 +172,9 @@ public final class Application {
                 }
             });
 
+            // JournalListener first so it captures the POS_STARTED entry before any
+            // controller-initiated startup event.
+            pos.addController(journalListener);
             pos.addController(controller);
             pos.addController(cashController);
             pos.addController(cardController);
