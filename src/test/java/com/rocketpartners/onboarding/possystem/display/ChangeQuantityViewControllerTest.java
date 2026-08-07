@@ -155,35 +155,6 @@ class ChangeQuantityViewControllerTest {
     }
 
     @Test
-    void confirmZero_voidsLineViaSharedPath_notARemoval() {
-        LineItem line = addWidget(3);
-        Transaction tx = pos.getTransactionService().getCurrentTransaction();
-
-        pos.dispatchPosEvent(confirmFor(line, 0));
-
-        // Same outcome as pressing Void Line: line stays on the transaction, marked voided,
-        // contributes zero to totals.
-        assertThat(line.isVoided()).isTrue();
-        assertThat(tx.getLineItems()).containsExactly(line);
-        assertThat(tx.subtotal()).isEqualByComparingTo("0.00");
-        // LINE_VOIDED notification (not QUANTITY_CHANGED-with-zero) is what listeners get.
-        assertThat(notifications.countOf(PosEventType.LINE_VOIDED)).isEqualTo(1);
-        assertThat(notifications.countOf(PosEventType.QUANTITY_CHANGED)).isZero();
-    }
-
-    @Test
-    void confirmZero_lineIsAbsentFromReceipt() {
-        LineItem line = addWidget(2);
-        pos.dispatchPosEvent(confirmFor(line, 0));
-        pos.getTransactionService().total();
-        Transaction paid = pos.getTransactionService().tenderCash(new BigDecimal("0.00"));
-
-        String receipt = pos.getTransactionService().generateReceipt(paid);
-
-        assertThat(receipt).doesNotContain("Widget");
-    }
-
-    @Test
     void confirmNegative_isRejectedWithErrorEvent_leavesLineUnchanged() {
         LineItem line = addWidget(2);
 

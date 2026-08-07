@@ -242,8 +242,12 @@ public class ScannerViewController implements IController, IPosEventListener {
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
                  CHANGE_QTY_PRESSED, TRANSACTION_COMPLETED -> suspendCapture();
             case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
-                 CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
-                 RECEIPT_DISMISSED -> resumeCapture();
+                 CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED -> resumeCapture();
+            // Receipt dismissal semantically starts a fresh sale: force STATUS_READY
+            // unconditionally, independent of the transaction-state check resumeCapture
+            // uses, so a lingering TOTALED state (or a late TRANSACTION_COMPLETED handler
+            // firing after this) cannot leave the scan bar showing "Locked — press Total".
+            case RECEIPT_DISMISSED -> resumeReady();
 
             case TRANSACTION_TOTALED -> view.setStatusHint(ScannerView.STATUS_LOCKED);
 
@@ -302,6 +306,22 @@ public class ScannerViewController implements IController, IPosEventListener {
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
         boolean totaled = tx != null && tx.getState() == TransactionState.TOTALED;
         view.setStatusHint(totaled ? ScannerView.STATUS_LOCKED : ScannerView.STATUS_READY);
+        restoreScanFocus();
+    }
+
+    /**
+     * As {@link #resumeCapture()} but forces {@link ScannerView#STATUS_READY} regardless of
+     * transaction state. Called on {@link PosEventType#RECEIPT_DISMISSED} — the receipt was
+     * shown for the just-paid transaction, and the very next thing the {@link
+     * CustomerViewController} does is open a fresh IN_PROGRESS transaction, so the correct
+     * end-state hint is always "Ready to scan". Avoids a race where the still-TOTALED old
+     * transaction (or a re-delivery of the outer TRANSACTION_COMPLETED event that opened the
+     * receipt in the first place) leaves the hint stuck on STATUS_LOCKED.
+     */
+    private void resumeReady() {
+        suspended = false;
+        buffer.reset();
+        view.setStatusHint(ScannerView.STATUS_READY);
         restoreScanFocus();
     }
 

@@ -83,5 +83,5 @@ A new interaction between components means a **new `PosEvent` type** — never a
 
 ## What crosses the wire on this scan
 
-- **Journal (Phase 2):** one line, async, off the Swing EDT. See [architecture.md](architecture.md) for the socket hop.
+- **Journal (Phase 2):** one line, async, off the Swing EDT. Actual mechanism: a `JournalListener` subscribes to *every* `PosEventType`; each event is formatted as a pipe-delimited entry and handed to a composite `Journal` (`LocalJournal` + `RemoteJournal`). The remote half enqueues into a bounded queue that a single daemon sender ships over the socket at `:12345`. Delivery is one-way and unacknowledged. See [architecture.md](architecture.md) for the socket hop.
 - **Discount engine (Phase 3):** *not on scan.* The engine is called once, when **Total** is pressed. Scans stay local.

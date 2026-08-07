@@ -47,8 +47,12 @@ import java.util.List;
  */
 class PosDialog extends JDialog {
 
-    /** Height of the primary footer button, per the design brief. */
-    protected static final int PRIMARY_HEIGHT = 48;
+    /**
+     * Height of the primary footer button, per the design brief. Kept aligned with
+     * {@link PosTheme#BUTTON_HEIGHT_PRIMARY} so touch targets stay uniform across dialogs and
+     * the main window.
+     */
+    protected static final int PRIMARY_HEIGHT = PosTheme.BUTTON_HEIGHT_PRIMARY;
 
     /** Content root; body slot is at BorderLayout.CENTER. */
     private final JPanel content = new JPanel(new BorderLayout());
@@ -127,11 +131,14 @@ class PosDialog extends JDialog {
     protected void setPrimary(PosButton button) {
         if (button == null) throw new IllegalArgumentException("primary must not be null");
         this.primaryButton = button;
-        button.setPreferredSize(new Dimension(button.getPreferredSize().width, PRIMARY_HEIGHT));
+        // Preferred height = fill (PRIMARY_HEIGHT) + PosButton.SHADOW_INSET so the visible face
+        // measures the design brief's touch target rather than 3 px shorter.
+        button.setPreferredSize(new Dimension(button.getPreferredSize().width,
+                PRIMARY_HEIGHT + PosButton.SHADOW_INSET));
         footerRight.removeAll();
         footerRight.add(button, BorderLayout.EAST);
-        footerRight.revalidate();
         footerRight.repaint();
+        footerRight.revalidate();
     }
 
     /** @return the primary button, or {@code null} if none has been configured */
@@ -206,7 +213,7 @@ class PosDialog extends JDialog {
                 BorderFactory.createEmptyBorder(14, 20, 16, 20)));
 
         footerLeft.setOpaque(false);
-        footerLeft.setLayout(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 0));
+        footerLeft.setLayout(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, PosTheme.BUTTON_GAP, 0));
         footer.add(footerLeft, BorderLayout.WEST);
 
         footerRight.setOpaque(false);
