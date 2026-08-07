@@ -68,6 +68,35 @@ public final class PosTheme {
     /** Foreground for disabled control text. */
     public static final Color DISABLED_FG = new Color(0xA8, 0xAB, 0xAF);
 
+    // ---- Button elevation tokens ------------------------------------------
+    // The resting state of every {@link PosButton} composes shadow + fill + lip + top-highlight
+    // in a fixed order. The paint code reads these tokens rather than computing shades ad hoc,
+    // so a change to the elevation vocabulary — softer shadow, taller lip — is one edit here
+    // rather than five across variants.
+
+    /** Vertical offset of the drop shadow below the body fill. Fixed; do not animate. */
+    public static final int BUTTON_SHADOW_OFFSET = 2;
+    /** Alpha of the tighter inner drop-shadow stamp, layered closest to the fill. */
+    public static final int BUTTON_SHADOW_ALPHA_INNER = 10;
+    /** Alpha of the softer outer drop-shadow stamp, one pixel further out than the inner. */
+    public static final int BUTTON_SHADOW_ALPHA_OUTER = 6;
+    /** Thickness of the bottom lip band, in pixels. The lip is what reads as physical depth. */
+    public static final int BUTTON_LIP_HEIGHT = 3;
+    /** Multiplier applied to the base fill to derive the lip colour: ~12% darker. */
+    public static final float BUTTON_LIP_SHADE = 0.88f;
+    /** Alpha of the 1px inside-top-edge highlight painted only on dark-fill buttons. */
+    public static final int BUTTON_TOP_HIGHLIGHT_ALPHA = 38;
+    /** Corner radius of every rounded button rect. */
+    public static final int BUTTON_CORNER_RADIUS = 10;
+    /** Touch-target minimum height for primary and tender buttons. */
+    public static final int BUTTON_HEIGHT_PRIMARY = 48;
+    /** Touch-target minimum height for secondary and danger (dialog) buttons. */
+    public static final int BUTTON_HEIGHT_SECONDARY = 44;
+    /** Minimum horizontal/vertical gap between adjacent tap targets. */
+    public static final int BUTTON_GAP = 8;
+    /** Luminance below which a button counts as "dark" and paints a top highlight. */
+    public static final int BUTTON_DARK_LUMINANCE = 140;
+
     // ---- Type scale --------------------------------------------------------
     // Kept as float because Font.deriveFont(int, float) is the only signature that takes size.
 
@@ -121,6 +150,31 @@ public final class PosTheme {
      */
     public static String money(BigDecimal amount) {
         return "$" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    // ---- Colour helpers ---------------------------------------------------
+
+    /**
+     * Multiplies each RGB channel of {@code c} by {@code factor}, clamped to {@code [0, 255]}.
+     * Alpha is preserved. Kept package-private and static so button constructors can precompute
+     * their lip/pressed shades once and cache them as fields.
+     */
+    static Color shade(Color c, float factor) {
+        return new Color(
+                Math.min(255, Math.max(0, Math.round(c.getRed() * factor))),
+                Math.min(255, Math.max(0, Math.round(c.getGreen() * factor))),
+                Math.min(255, Math.max(0, Math.round(c.getBlue() * factor))),
+                c.getAlpha());
+    }
+
+    /**
+     * @return true if the base fill is dark enough that a translucent-white top-edge highlight
+     *         will register. Applied to primary and tender buttons; secondary/danger tints are
+     *         too pale for the highlight to read and it would just look like a paint smear.
+     */
+    static boolean isDarkFill(Color c) {
+        int luminance = (int) (0.299 * c.getRed() + 0.587 * c.getGreen() + 0.114 * c.getBlue());
+        return luminance < BUTTON_DARK_LUMINANCE;
     }
 
     // ---- Layout primitives ------------------------------------------------

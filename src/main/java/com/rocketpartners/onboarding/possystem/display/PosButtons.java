@@ -8,35 +8,55 @@ import java.awt.Font;
  *
  * <ul>
  *   <li>{@link #primary(String)} — the pay-forward action on a surface (Total, Confirm,
- *       Dismiss). Solid {@link PosTheme#GO} fill, white text, {@link PosTheme#BUTTON} type.</li>
+ *       Dismiss). Solid {@link PosTheme#GO} fill, white text, {@link PosTheme#BUTTON} type,
+ *       {@link PosTheme#BUTTON_HEIGHT_PRIMARY} px touch target.</li>
  *   <li>{@link #secondary(String)} — a supporting action (Cancel, Change qty). Warm-grey fill,
- *       {@link PosTheme#INK} text, {@link PosTheme#BODY} type.</li>
+ *       {@link PosTheme#INK} text, {@link PosTheme#BODY} type,
+ *       {@link PosTheme#BUTTON_HEIGHT_SECONDARY} px touch target.</li>
  *   <li>{@link #danger(String)} — a destructive action (Void basket, Void line). Tinted fill,
- *       {@link PosTheme#STOP} text.</li>
+ *       {@link PosTheme#STOP} text, {@link PosTheme#BUTTON_HEIGHT_SECONDARY} px touch target.</li>
  *   <li>{@link #tender(String)} — the tender-column trio. Solid ink fill so it reads as
- *       hardware, not a body-copy button.</li>
+ *       hardware, not a body-copy button. {@link PosTheme#BUTTON_HEIGHT_PRIMARY} px touch target.</li>
  * </ul>
+ *
+ * <p>Touch minimums are enforced by {@link PosButton#getPreferredSize()}, so a caller cannot
+ * accidentally shrink a live button below the fingertip target by setting a smaller preferred
+ * size — the minimum is a floor, not a starting hint.</p>
  */
 final class PosButtons {
 
     private PosButtons() {}
 
+    /** Warm-grey secondary fill. */
+    static final Color SECONDARY_FILL = new Color(0xF2, 0xF1, 0xED);
+    /** Pale STOP tint used on danger buttons. */
+    static final Color DANGER_FILL = new Color(0xFD, 0xF1, 0xEF);
+
     static PosButton primary(String text) {
-        return new PosButton(text, PosTheme.GO, Color.WHITE, PosTheme.base(Font.BOLD, PosTheme.BUTTON));
+        PosButton b = new PosButton(text, PosTheme.GO, Color.WHITE,
+                PosTheme.base(Font.BOLD, PosTheme.BUTTON));
+        b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_PRIMARY);
+        return b;
     }
 
     static PosButton secondary(String text) {
-        return new PosButton(text, new Color(0xF2, 0xF1, 0xED), PosTheme.INK,
+        PosButton b = new PosButton(text, SECONDARY_FILL, PosTheme.INK,
                 PosTheme.base(Font.PLAIN, PosTheme.BODY));
+        b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
+        return b;
     }
 
     static PosButton danger(String text) {
-        return new PosButton(text, new Color(0xFD, 0xF1, 0xEF), PosTheme.STOP,
+        PosButton b = new PosButton(text, DANGER_FILL, PosTheme.STOP,
                 PosTheme.base(Font.PLAIN, PosTheme.BODY));
+        b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
+        return b;
     }
 
     static PosButton tender(String text) {
-        return new PosButton(text, PosTheme.INK, Color.WHITE,
+        PosButton b = new PosButton(text, PosTheme.INK, Color.WHITE,
                 PosTheme.base(Font.BOLD, PosTheme.BUTTON - 1f));
+        b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_PRIMARY);
+        return b;
     }
 }

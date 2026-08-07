@@ -141,7 +141,7 @@ public class PayWithCashView extends PosDialog {
         body.add(Box.createVerticalStrut(10));
 
         // Chips row.
-        JPanel chips = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel chips = new JPanel(new GridLayout(1, 2, PosTheme.BUTTON_GAP, 0));
         chips.setOpaque(false);
         PosButton exactChip = PosButtons.secondary("Exact amount");
         exactChip.addActionListener(e ->

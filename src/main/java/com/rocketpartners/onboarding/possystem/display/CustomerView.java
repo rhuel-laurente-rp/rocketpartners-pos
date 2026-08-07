@@ -464,7 +464,8 @@ public class CustomerView extends JFrame {
 
     private JPanel buildQuickAddColumn(List<Item> quickAddItems) {
         int rows = Math.max(1, (int) Math.ceil(quickAddItems.size() / (double) QUICK_ADD_COLS));
-        JPanel grid = new JPanel(new GridLayout(rows, QUICK_ADD_COLS, 8, 8));
+        JPanel grid = new JPanel(new GridLayout(rows, QUICK_ADD_COLS,
+                PosTheme.BUTTON_GAP, PosTheme.BUTTON_GAP));
         grid.setOpaque(false);
         grid.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
@@ -612,7 +613,7 @@ public class CustomerView extends JFrame {
         JPanel actions = new JPanel(new BorderLayout(0, 8));
         actions.setOpaque(false);
 
-        JPanel minor = new JPanel(new GridLayout(1, 3, 8, 0));
+        JPanel minor = new JPanel(new GridLayout(1, 3, PosTheme.BUTTON_GAP, 0));
         minor.setOpaque(false);
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
@@ -640,9 +641,8 @@ public class CustomerView extends JFrame {
 
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
-        // 44px is the minimum touch target — do not shrink below this even if pixel budget
-        // gets tight. It plus the SHADOW_INSET the button reserves gives ~47px measured.
-        totalButton.setPreferredSize(new Dimension(10, 44 + PosButton.SHADOW_INSET));
+        // The primary factory already enforces BUTTON_HEIGHT_PRIMARY + SHADOW_INSET via
+        // PosButton.getPreferredSize(); no override needed here.
         actions.add(totalButton, BorderLayout.CENTER);
         south.add(actions, BorderLayout.CENTER);
 
@@ -874,6 +874,10 @@ public class CustomerView extends JFrame {
      * tile reads as a pressable card, not a static decoration.
      */
     private static class QuickAddTile extends PosButton {
+        private static final int PAD = 10;
+        private static final Font DESC_FONT = PosTheme.base(Font.PLAIN, PosTheme.BODY);
+        private static final Font PRICE_FONT = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
+
         private final String description;
         private final String price;
 
@@ -886,7 +890,7 @@ public class CustomerView extends JFrame {
 
         @Override
         protected void paintComponent(Graphics g) {
-            // Delegate the fill/shadow/pressed-sink chrome to PosButton, then paint our custom
+            // Delegate shadow/fill/lip/highlight chrome to PosButton, then paint our custom
             // description/price on top so tap-and-hold still visibly compresses.
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g.create();
@@ -896,27 +900,27 @@ public class CustomerView extends JFrame {
 
             boolean on = isEnabled();
             boolean pressed = on && getModel().isPressed();
-            int pad = 10;
-            int sink = pressed ? 1 : 0;
+            // Match the PosButton label sink exactly so the tile's text moves with the button's
+            // label — otherwise the description slides 1 px while the label slides 2 and the
+            // press feels loose.
+            int sink = pressed ? PRESSED_SINK : 0;
             int height = getHeight() - SHADOW_INSET;
-            int maxWidth = getWidth() - pad * 2;
+            int maxWidth = getWidth() - PAD * 2;
 
-            Font descFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
-            g2.setFont(descFont);
+            g2.setFont(DESC_FONT);
             FontMetrics dfm = g2.getFontMetrics();
             List<String> lines = wrap(description, dfm, maxWidth, 2);
             g2.setColor(on ? PosTheme.INK : PosTheme.DISABLED_FG);
-            int y = pad + dfm.getAscent() + sink;
+            int y = PAD + dfm.getAscent() + sink;
             for (String line : lines) {
-                g2.drawString(line, pad, y);
+                g2.drawString(line, PAD, y);
                 y += dfm.getHeight();
             }
 
-            Font priceFont = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
-            g2.setFont(priceFont);
+            g2.setFont(PRICE_FONT);
             FontMetrics pfm = g2.getFontMetrics();
             g2.setColor(on ? PosTheme.GO : PosTheme.DISABLED_FG);
-            g2.drawString(price, pad, height - pad - pfm.getDescent() + sink);
+            g2.drawString(price, PAD, height - PAD - pfm.getDescent() + sink);
 
             g2.dispose();
         }
