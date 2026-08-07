@@ -22,10 +22,10 @@ import java.awt.RenderingHints;
 /**
  * Renders one basket row in one of two density modes.
  *
- * <p><strong>Comfortable</strong> (≤ 10 items, ~52px rows). Two lines: description, then a muted
+ * <p><strong>Comfortable</strong> (≤ 9 items, ~52px rows). Two lines: description, then a muted
  * {@code @ $unit} line beneath. Reads calmly when the basket is short.</p>
  *
- * <p><strong>Compact</strong> (&gt; 10 items, ~42px rows). One line: description on the left,
+ * <p><strong>Compact</strong> (&gt; 9 items, ~42px rows). One line: description on the left,
  * {@code @ $unit} and extended total right-aligned. Font sizes are identical to Comfortable —
  * only the row height and vertical stacking change.</p>
  *

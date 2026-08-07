@@ -31,10 +31,10 @@ class CustomerViewBasketDensityTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noopDispatcher());
 
-        view.updateBasket(build(10), new BigDecimal("10.00"));
+        view.updateBasket(build(9), new BigDecimal("9.00"));
         assertThat(view.getBasketDensity()).isEqualTo(BasketCellRenderer.Density.COMFORTABLE);
 
-        view.updateBasket(build(11), new BigDecimal("11.00"));
+        view.updateBasket(build(10), new BigDecimal("10.00"));
         // The renderer flips density synchronously; row height is animated, so allow a beat for
         // the timer to converge on the target height.
         assertThat(view.getBasketDensity()).isEqualTo(BasketCellRenderer.Density.COMPACT);
