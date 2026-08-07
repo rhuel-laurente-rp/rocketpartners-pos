@@ -7,6 +7,12 @@ import com.formdev.flatlaf.FlatLightLaf;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
 import com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer;
+import com.rocketpartners.onboarding.possystem.component.FileJournal;
+import com.rocketpartners.onboarding.possystem.component.Journal;
+import com.rocketpartners.onboarding.possystem.component.JournalListener;
+import com.rocketpartners.onboarding.possystem.component.Journals;
+import com.rocketpartners.onboarding.possystem.component.LocalJournal;
+import com.rocketpartners.onboarding.possystem.component.RemoteJournal;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
@@ -31,6 +37,8 @@ import javax.swing.UnsupportedLookAndFeelException;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.math.BigDecimal;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -117,13 +125,26 @@ public final class Application {
 
         List<Item> quickAddItems = pickQuickAddItems(itemRepository);
 
+        LocalJournal localJournal = new LocalJournal();
+        Path logDir = Paths.get(args.logDir).toAbsolutePath();
+        FileJournal fileJournal = new FileJournal(logDir);
+        RemoteJournal remoteJournal = new RemoteJournal(args.journalHost, args.journalPort, localJournal);
+        Journal journal = new Journals(localJournal, fileJournal, remoteJournal);
+        System.err.println("[POS] journal log dir: " + logDir);
+
         SwingUtilities.invokeLater(() -> {
             PosComponent pos = new PosComponent(
                     itemRepository, taxService, args.storeName, args.laneNumber, args.debug);
+            JournalListener journalListener = new JournalListener(journal);
 
             String title = "Rocket POS — " + args.storeName + " lane " + args.laneNumber;
             CustomerView view = new CustomerView(title, quickAddItems, pos);
             CustomerViewController controller = new CustomerViewController(view);
+            // Header journal-status indicator: reflect the RemoteJournal's connection state.
+            // The listener fires on the sender thread; CustomerView.setJournalConnected marshals
+            // onto the EDT.
+            remoteJournal.setConnectionListener(state ->
+                    view.setJournalConnected(state == RemoteJournal.ConnectionState.CONNECTED));
 
             PayWithCashView cashView = new PayWithCashView(view, pos);
             PayWithCashViewController cashController = new PayWithCashViewController(cashView);
@@ -162,6 +183,9 @@ public final class Application {
                 }
             });
 
+            // JournalListener first so it captures the POS_STARTED entry before any
+            // controller-initiated startup event.
+            pos.addController(journalListener);
             pos.addController(controller);
             pos.addController(cashController);
             pos.addController(cardController);
@@ -230,6 +254,11 @@ public final class Application {
                 description = "Max inter-character gap (ms) inside a scanner burst; input arriving "
                         + "beyond this gap is treated as human typing. Default 50.")
         public long scanBurstGapMs = BarcodeInputBuffer.DEFAULT_BURST_GAP_MS;
+
+        @Parameter(names = "--log-dir",
+                description = "Directory to write on-disk JSONL journal files into. "
+                        + "Each run appends to journal-YYYY-MM-DD.jsonl.")
+        public String logDir = "logs";
 
         @Parameter(names = {"--help", "-h"}, description = "Print this usage and exit", help = true)
         public boolean help = false;

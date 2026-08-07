@@ -18,7 +18,7 @@ flowchart LR
         ENGINE["posdiscountengine.Application<br/>Spring Boot REST :8080"]
     end
 
-    POS -- "TCP socket<br/>fire-and-forget log lines<br/>off Swing EDT" --> JOURNAL
+    POS -- "TCP socket :12345<br/>UTF-8 newline-delimited<br/>fire-and-forget, one-way<br/>no ACK, off Swing EDT" --> JOURNAL
     POS -- "HTTP POST /discounts/calculate<br/>request/response, times out<br/>on Total press" --> ENGINE
 
     classDef initiator stroke-width:2px,stroke:#2b6cb0
@@ -28,6 +28,13 @@ flowchart LR
 **Direction of dependency.** The POS is the only process that initiates anything. The journal server and the discount engine know nothing about each other and nothing about the POS.
 
 **Both hops are optional at runtime.** Journal sends fail silently. Discount calls time out and the sale completes with no discount. This is a hard requirement, not a nicety — the POS must ring up sales with either or both peers down.
+
+**Journal hop specifics (Phase 2).** The POS → journal socket is:
+- **One-way and unacknowledged.** The server never writes back; the client never expects to hear anything. Delivery is best-effort. No ACK protocol.
+- **UTF-8 newline-delimited.** Pipe-delimited fields; entries are capped at 4096 characters and truncated with a marker. Descriptions with embedded newlines are sanitized at the client so one entry stays one line.
+- **Off the Swing EDT.** All work happens on a single daemon `remote-journal-sender` thread. Journal calls from the EDT do a non-blocking `offer()` into a bounded queue and return immediately.
+- **Reconnecting under back-pressure.** Connect timeout 2s. On any write failure the sender backs off (`1s → 2s → 4s → 8s → 16s → 30s` cap) rather than reconnecting per entry. Dropped-while-full entries are counted, and one `JOURNAL_DROPPED n=…` line is emitted on recovery so the gap is visible.
+- **Unconditional local copy.** Every entry is also written to a `LocalJournal` (stdout by default), so there is always a record even when the remote journal has never been reachable.
 
 ## Ring-up, end to end
 

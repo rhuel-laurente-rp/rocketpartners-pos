@@ -82,3 +82,13 @@ tasks.register('runJournal', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.rocketpartners.onboarding.posvirtualjournal.Driver'
 }
+
+tasks.register('tailJournalLog', JavaExec) {
+    group = 'application'
+    description = 'Tail the on-disk JSONL journal log (logs/journal-YYYY-MM-DD.jsonl)'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rocketpartners.onboarding.possystem.tools.TailJournal'
+    // Pass -Plog.dir=… on the command line to override.
+    systemProperty 'log.dir', project.findProperty('log.dir') ?: 'logs'
+    standardInput = System.in
+}
