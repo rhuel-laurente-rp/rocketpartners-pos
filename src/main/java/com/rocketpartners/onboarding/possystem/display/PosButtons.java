@@ -53,9 +53,16 @@ final class PosButtons {
         return b;
     }
 
-    static PosButton tender(String text) {
-        PosButton b = new PosButton(text, PosTheme.INK, Color.WHITE,
-                PosTheme.base(Font.BOLD, PosTheme.BUTTON - 1f));
+    /**
+     * A tender button in the given fill. Every tender in the tender column carries its own
+     * colour — cash green, debit blue, credit indigo — so a cashier can distinguish them by
+     * pattern rather than reading. Label type is {@link PosTheme#AMOUNT}: these buttons fill
+     * the tender column and are the largest touch targets on screen, so their labels need to
+     * scale with them rather than sit small in a big box.
+     */
+    static PosButton tender(String text, Color fill) {
+        PosButton b = new PosButton(text, fill, Color.WHITE,
+                PosTheme.base(Font.BOLD, PosTheme.AMOUNT));
         b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_PRIMARY);
         return b;
     }

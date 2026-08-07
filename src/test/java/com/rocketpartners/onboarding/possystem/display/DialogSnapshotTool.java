@@ -1,14 +1,18 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
+
 import javax.imageio.ImageIO;
 import javax.swing.ButtonModel;
 import javax.swing.JPanel;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -56,13 +60,25 @@ public final class DialogSnapshotTool {
         variants.add(new Variant("primary", () -> PosButtons.primary("Total")));
         variants.add(new Variant("secondary", () -> PosButtons.secondary("Cancel")));
         variants.add(new Variant("danger", () -> PosButtons.danger("Void basket")));
-        variants.add(new Variant("tender", () -> PosButtons.tender("Pay cash")));
+        variants.add(new Variant("tender-cash", () -> PosButtons.tender("Pay cash", PosTheme.GO)));
+        variants.add(new Variant("tender-debit",
+                () -> PosButtons.tender("Pay debit", PosTheme.CARD_DEBIT)));
+        variants.add(new Variant("tender-credit",
+                () -> PosButtons.tender("Pay credit", PosTheme.CARD_CREDIT)));
         variants.add(new Variant("quickadd", DialogSnapshotTool::buildQuickAddTile));
         for (Variant v : variants) {
             File file = new File(out, "button-" + v.name + ".png");
             ImageIO.write(compose(v), "PNG", file);
             System.out.println("wrote " + file.getName());
         }
+
+        // Full tender column: enabled left, disabled right. Renders the actual CustomerView so
+        // what you see is the shipping layout — column proportions, amount-due readout, and
+        // three fills side by side.
+        File columnFile = new File(out, "tender-column.png");
+        ImageIO.write(composeTenderColumn(), "PNG", columnFile);
+        System.out.println("wrote " + columnFile.getName());
+
         System.exit(0);
     }
 
@@ -129,6 +145,85 @@ public final class DialogSnapshotTool {
         } finally {
             sub.dispose();
         }
+    }
+
+    /**
+     * Renders the actual tender column from a fresh {@link CustomerView}, once with the trio
+     * disabled (the state before Total is pressed) and once enabled (post-Total), side by side.
+     * Uses the shipping layout — column proportions, DISPLAY amount-due readout, full-height
+     * button stack — so the snapshot mirrors what a cashier sees.
+     */
+    private static BufferedImage composeTenderColumn() {
+        int columnW = 380;
+        int columnH = 640;
+        int gap = 40;
+        int labelH = 26;
+        int pad = 24;
+        int totalW = columnW * 2 + gap + pad * 2;
+        int totalH = columnH + labelH + pad * 2;
+
+        BufferedImage img = new BufferedImage(totalW, totalH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(PosTheme.PAPER);
+            g.fillRect(0, 0, totalW, totalH);
+            g.setFont(PosTheme.base(Font.BOLD, PosTheme.EYEBROW));
+            g.setColor(PosTheme.MUTED);
+
+            paintTenderColumn(g, pad, pad, columnW, columnH, false, new BigDecimal("42.17"));
+            String lbl1 = "DISABLED (before Total)";
+            g.drawString(lbl1, pad + (columnW - g.getFontMetrics().stringWidth(lbl1)) / 2,
+                    pad + columnH + labelH - 8);
+
+            int x2 = pad + columnW + gap;
+            paintTenderColumn(g, x2, pad, columnW, columnH, true, new BigDecimal("42.17"));
+            String lbl2 = "ENABLED (after Total)";
+            g.drawString(lbl2, x2 + (columnW - g.getFontMetrics().stringWidth(lbl2)) / 2,
+                    pad + columnH + labelH - 8);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    private static void paintTenderColumn(Graphics2D dst, int x, int y, int w, int h,
+                                          boolean enabled, BigDecimal amountDue) {
+        CustomerView view = new CustomerView("snapshot", List.of(), noop());
+        try {
+            view.setSize(new Dimension(1412, 882));
+            view.doLayout();
+            view.updateBasket(List.of(), amountDue);
+            view.setTenderInputEnabled(enabled);
+
+            JPanel column = view.getTenderColumnForTest();
+            column.setSize(w, h);
+            column.doLayout();
+            // Force a bottom-up layout so nested cards, grids, and card containers all report
+            // their new bounds before we paint. Without this the buttons render at their
+            // pre-resize sizes and the composite gets a squashed column.
+            layoutAll(column);
+
+            Graphics2D sub = (Graphics2D) dst.create(x, y, w, h);
+            try {
+                column.paint(sub);
+            } finally {
+                sub.dispose();
+            }
+        } finally {
+            view.dispose();
+        }
+    }
+
+    private static void layoutAll(java.awt.Container c) {
+        c.doLayout();
+        for (java.awt.Component child : c.getComponents()) {
+            if (child instanceof java.awt.Container ct) layoutAll(ct);
+        }
+    }
+
+    private static IPosEventDispatcher noop() {
+        return event -> {};
     }
 
     private static PosButton buildQuickAddTile() {

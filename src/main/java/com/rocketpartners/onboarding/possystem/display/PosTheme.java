@@ -68,6 +68,19 @@ public final class PosTheme {
     /** Foreground for disabled control text. */
     public static final Color DISABLED_FG = new Color(0xA8, 0xAB, 0xAF);
 
+    // ---- Tender palette ---------------------------------------------------
+    // Each tender type carries its own fill so a cashier can hit the right button by colour
+    // without reading the label. Green for cash (the most common tender in a convenience store,
+    // and the pay-forward colour the rest of the system already speaks in), deep blue for debit,
+    // indigo for credit — separated at the hue level so they read cleanly even at a glance
+    // through fluorescent glare. All three exceed WCAG 4.5:1 contrast against white text.
+
+    /** Deep blue for {@link com.rocketpartners.onboarding.commons.model.TenderType#DEBIT}. */
+    public static final Color CARD_DEBIT = new Color(0x1E, 0x40, 0xAF);
+    /** Indigo for {@link com.rocketpartners.onboarding.commons.model.TenderType#CREDIT}. Kept a
+     *  full step off {@link #CARD_DEBIT} in hue so debit and credit don't blur under glare. */
+    public static final Color CARD_CREDIT = new Color(0x6D, 0x28, 0xD9);
+
     // ---- Button elevation tokens ------------------------------------------
     // The resting state of every {@link PosButton} composes shadow + fill + lip + top-highlight
     // in a fixed order. The paint code reads these tokens rather than computing shades ad hoc,

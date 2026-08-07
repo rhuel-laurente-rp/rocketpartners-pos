@@ -134,7 +134,7 @@ class PosButtonPaintTest {
 
         assertThat(PosButtons.primary("x").getPreferredSize().height)
                 .isGreaterThanOrEqualTo(PosTheme.BUTTON_HEIGHT_PRIMARY + PosButton.SHADOW_INSET);
-        assertThat(PosButtons.tender("x").getPreferredSize().height)
+        assertThat(PosButtons.tender("x", PosTheme.GO).getPreferredSize().height)
                 .isGreaterThanOrEqualTo(PosTheme.BUTTON_HEIGHT_PRIMARY + PosButton.SHADOW_INSET);
         assertThat(PosButtons.secondary("x").getPreferredSize().height)
                 .isGreaterThanOrEqualTo(PosTheme.BUTTON_HEIGHT_SECONDARY + PosButton.SHADOW_INSET);

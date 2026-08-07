@@ -92,6 +92,12 @@ public class CustomerView extends JFrame {
     private static final int QUICK_ADD_COLS = 2;
     private static final int QUICK_ADD_TILE_HEIGHT = 92;
     private static final int GUTTER = 10;
+    /** Gap between the amount-due readout and the tender stack. Sized to breathe, not to
+     *  minimise; the tender buttons carry the column now. */
+    private static final int TENDER_TOP_GAP = 20;
+    /** Vertical gap between the three tender buttons. Larger than the standard button gap
+     *  because these are the biggest targets in the app and shouldn't crowd each other. */
+    private static final int TENDER_VERTICAL_GAP = 14;
 
     // ---- Density animation -------------------------------------------------
     /** Duration of the row-height glide between Comfortable and Compact. */
@@ -129,9 +135,9 @@ public class CustomerView extends JFrame {
     private final PosButton voidBasketButton = PosButtons.danger("Void basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
-    private final PosButton payCashButton = PosButtons.tender("Pay cash");
-    private final PosButton payDebitButton = PosButtons.tender("Pay debit");
-    private final PosButton payCreditButton = PosButtons.tender("Pay credit");
+    private final PosButton payCashButton = PosButtons.tender("Pay cash", PosTheme.GO);
+    private final PosButton payDebitButton = PosButtons.tender("Pay debit", PosTheme.CARD_DEBIT);
+    private final PosButton payCreditButton = PosButtons.tender("Pay credit", PosTheme.CARD_CREDIT);
 
     /**
      * Whether basket mutation is currently permitted. Tracked explicitly rather than read off a
@@ -142,6 +148,10 @@ public class CustomerView extends JFrame {
 
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
+
+    /** Reference to the built tender column, kept so tests and the snapshot harness can render
+     *  the column standalone without cropping the whole frame. Assigned during layout. */
+    private JPanel tenderColumn;
 
     /**
      * Snapshot of quantities keyed by {@link LineItem} identity from the last render. Used to
@@ -387,6 +397,19 @@ public class CustomerView extends JFrame {
         return basketList;
     }
 
+    /** For tests: the three tender buttons in cash / debit / credit order. */
+    PosButton[] getTenderButtonsForTest() {
+        return new PosButton[]{payCashButton, payDebitButton, payCreditButton};
+    }
+
+    /**
+     * For the snapshot harness: the outermost tender-column card in the shown frame, so a
+     * caller can render the column standalone without cropping by pixel proportion.
+     */
+    JPanel getTenderColumnForTest() {
+        return tenderColumn;
+    }
+
     // ---- Layout helpers ----------------------------------------------------
 
     private JPanel buildHeader(String title) {
@@ -458,7 +481,8 @@ public class CustomerView extends JFrame {
         c.gridx = 2;
         c.weightx = 0.24;
         c.insets = new Insets(0, 0, 0, 0);
-        columns.add(buildTenderColumn(), c);
+        this.tenderColumn = buildTenderColumn();
+        columns.add(tenderColumn, c);
         return columns;
     }
 
@@ -701,13 +725,15 @@ public class CustomerView extends JFrame {
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
 
+        // Amount due — pinned at the top, DISPLAY weight so the number reads at register scale
+        // now that the column no longer trails off into empty space.
         JPanel due = new JPanel(new BorderLayout());
         due.setOpaque(false);
         JLabel dueLabel = new JLabel("AMOUNT DUE");
         dueLabel.setFont(PosTheme.eyebrow());
         dueLabel.setForeground(PosTheme.MUTED);
-        amountDueValue.setFont(PosTheme.base(Font.BOLD, PosTheme.HEADLINE));
-        amountDueValue.setForeground(PosTheme.MUTED);
+        amountDueValue.setFont(PosTheme.base(Font.BOLD, PosTheme.DISPLAY));
+        amountDueValue.setForeground(PosTheme.INK);
         amountDueValue.setHorizontalAlignment(SwingConstants.LEFT);
         due.add(dueLabel, BorderLayout.NORTH);
         due.add(amountDueValue, BorderLayout.CENTER);
@@ -716,9 +742,13 @@ public class CustomerView extends JFrame {
                 BorderFactory.createEmptyBorder(0, 0, 14, 0)));
         body.add(due, BorderLayout.NORTH);
 
-        JPanel stack = new JPanel(new GridLayout(3, 1, 0, 10));
+        // Three tender buttons, equal-height, filling the column's full remaining height rather
+        // than pinned to the north with dead space beneath. The vertical gap is oversized on
+        // purpose — the tender trio are the largest touch targets in the app and get the widest
+        // spacing to match.
+        JPanel stack = new JPanel(new GridLayout(3, 1, 0, TENDER_VERTICAL_GAP));
         stack.setOpaque(false);
-        stack.setBorder(BorderFactory.createEmptyBorder(14, 0, 0, 0));
+        stack.setBorder(BorderFactory.createEmptyBorder(TENDER_TOP_GAP, 0, 0, 0));
         payCashButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED)));
         payDebitButton.addActionListener(e ->
@@ -730,10 +760,7 @@ public class CustomerView extends JFrame {
             stack.add(b);
         }
 
-        JPanel top = new JPanel(new BorderLayout());
-        top.setOpaque(false);
-        top.add(stack, BorderLayout.NORTH);
-        body.add(top, BorderLayout.CENTER);
+        body.add(stack, BorderLayout.CENTER);
         return PosTheme.card("Tender", body);
     }
 

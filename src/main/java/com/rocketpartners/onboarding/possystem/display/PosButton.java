@@ -135,6 +135,14 @@ class PosButton extends JButton {
         paintComponent(g);
     }
 
+    /**
+     * @return the base fill colour supplied to the constructor. Tender-column tests read this
+     *         to verify each of the three buttons carries its own hue.
+     */
+    Color getFillColor() {
+        return bg;
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
