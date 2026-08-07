@@ -58,13 +58,13 @@ public class PayWithCashView extends PosDialog {
      * @param dispatcher target for view-input events; must not be {@code null}
      */
     public PayWithCashView(JFrame owner, IPosEventDispatcher dispatcher) {
-        super(owner, "Pay cash");
+        super(owner, "Pay Cash");
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         this.dispatcher = dispatcher;
 
         setBody(buildBody());
 
-        PosButton confirm = PosButtons.primary("Confirm payment");
+        PosButton confirm = PosButtons.primary("Confirm Payment");
         confirm.addActionListener(e -> {
             Map<String, Object> props = new HashMap<>();
             props.put("cashReceived", getCashReceivedText());
@@ -141,12 +141,12 @@ public class PayWithCashView extends PosDialog {
         body.add(Box.createVerticalStrut(10));
 
         // Chips row.
-        JPanel chips = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel chips = new JPanel(new GridLayout(1, 2, PosTheme.BUTTON_GAP, 0));
         chips.setOpaque(false);
-        PosButton exactChip = PosButtons.secondary("Exact amount");
+        PosButton exactChip = PosButtons.secondary("Exact Amount");
         exactChip.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED)));
-        PosButton nextDollarChip = PosButtons.secondary("Next dollar");
+        PosButton nextDollarChip = PosButtons.secondary("Next Dollar");
         nextDollarChip.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED)));
         chips.add(exactChip);

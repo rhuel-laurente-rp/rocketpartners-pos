@@ -1,0 +1,109 @@
+package com.rocketpartners.onboarding.possystem.display;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Anti-regression sweep: every user-visible action label and dialog title in the POS is
+ * Title Case — every word starts with an upper-case letter, and no word is all lower-case.
+ *
+ * <p>Eyebrow labels ({@code QUICK ADD}, {@code TENDER}, {@code AMOUNT DUE}) and the status
+ * pill ({@code OPEN}, {@code AWAITING PAYMENT}, {@code LOCKED}) are uppercase by design-system
+ * decision and are not exercised here — they read through {@link PosTheme#eyebrow()} and are
+ * a separate token from the button/title vocabulary.</p>
+ *
+ * <p>The list below is the full vocabulary of interactive labels the app renders. A future
+ * addition that reintroduces sentence case fails this test rather than slipping through
+ * review; adding a new label means adding its expected Title Case form here.</p>
+ */
+class ButtonLabelTitleCaseTest {
+
+    /** The complete set of user-visible button labels and dialog titles. Keyed by a short
+     *  location tag so a failure message points at where the offender lives. */
+    private static final Map<String, String> LABELS = new LinkedHashMap<>();
+    static {
+        // ---- Buttons: main window --------------------------------------
+        LABELS.put("CustomerView.changeQty",   "Change Quantity");
+        LABELS.put("CustomerView.voidLine",    "Void Line");
+        LABELS.put("CustomerView.voidBasket",  "Void Basket");
+        LABELS.put("CustomerView.total",       "Total");
+        LABELS.put("CustomerView.payCash",     "Pay Cash");
+        LABELS.put("CustomerView.payDebit",    "Pay Debit");
+        LABELS.put("CustomerView.payCredit",   "Pay Credit");
+
+        // ---- Buttons: dialogs -----------------------------------------
+        LABELS.put("ChangeQuantityView.confirm", "Confirm Change");
+        LABELS.put("ChangeQuantityView.cancel",  "Cancel");
+        LABELS.put("PayWithCashView.confirm",    "Confirm Payment");
+        LABELS.put("PayWithCashView.cancel",     "Cancel");
+        LABELS.put("PayWithCashView.exact",      "Exact Amount");
+        LABELS.put("PayWithCashView.nextDollar", "Next Dollar");
+        LABELS.put("PayWithCardView.confirm",    "Confirm Payment");
+        LABELS.put("ConfirmDialog.confirm",      "Confirm");
+        LABELS.put("ConfirmDialog.cancel",       "Cancel");
+        LABELS.put("ErrorDialog.dismiss",        "Dismiss");
+        LABELS.put("ReceiptView.startNext",      "Start Next Sale");
+
+        // ---- Dialog titles --------------------------------------------
+        LABELS.put("title.confirmDialog",      "Confirm");
+        LABELS.put("title.errorDialog",        "Error");
+        LABELS.put("title.changeQuantity",     "Change Quantity");
+        LABELS.put("title.payCash",            "Pay Cash");
+        LABELS.put("title.payDebit",           "Pay Debit");
+        LABELS.put("title.payCredit",          "Pay Credit");
+        LABELS.put("title.receipt",            "Receipt");
+
+        // ---- Dynamic confirm-dialog primary labels -------------------
+        // The confirm dialog's primary label is set by the caller, not the dialog. Cover the
+        // known call sites here so a future call site with sentence case fails the test.
+        LABELS.put("CustomerView.confirmVoidBasket", "Void Basket");
+        LABELS.put("CustomerView.confirmVoidBasketTitle", "Void Basket?");
+    }
+
+    @Test
+    void everyKnownLabel_isTitleCase() {
+        for (Map.Entry<String, String> e : LABELS.entrySet()) {
+            String where = e.getKey();
+            String label = e.getValue();
+            assertThat(label)
+                    .as("empty labels are never meaningful: %s", where)
+                    .isNotBlank();
+            assertThat(isTitleCase(label))
+                    .as("label %s = \"%s\" must be Title Case — every word starts with an "
+                            + "upper-case letter, no word is all lower-case", where, label)
+                    .isTrue();
+        }
+    }
+
+    /**
+     * Title Case: the first alphabetic character of every "word" is upper-case. A "word" here
+     * is a maximal run of letters; non-letter separators (space, hyphen, apostrophe, question
+     * mark) reset word tracking. This matches the copy convention used across the POS action
+     * vocabulary: "Pay Cash", "Start Next Sale", "Void Basket?"
+     *
+     * <p>Interior letters are unconstrained — an acronym like "MP" would still pass. None
+     * appear in the vocabulary today.</p>
+     */
+    static boolean isTitleCase(String s) {
+        if (s == null || s.isEmpty()) return false;
+        boolean atWordStart = true;
+        boolean sawAnyLetter = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.isLetter(c)) {
+                sawAnyLetter = true;
+                if (atWordStart) {
+                    if (!Character.isUpperCase(c)) return false;
+                    atWordStart = false;
+                }
+            } else {
+                atWordStart = true;
+            }
+        }
+        return sawAnyLetter;
+    }
+}

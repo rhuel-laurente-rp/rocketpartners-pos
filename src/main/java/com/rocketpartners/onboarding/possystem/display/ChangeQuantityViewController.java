@@ -17,13 +17,18 @@ import java.util.Set;
  * Owns the change-quantity flow. Opens a modal {@link ChangeQuantityView} when
  * {@link PosEventType#CHANGE_QTY_PRESSED} arrives with a selected line, and on Confirm calls
  * {@link com.rocketpartners.onboarding.possystem.service.TransactionService#updateLineItemQuantity(LineItem, int)}
- * — which is the same recompute path as add-item and void-line, and which routes a zero to
- * {@link com.rocketpartners.onboarding.possystem.service.TransactionService#voidLine(LineItem)}
- * so a change to zero and an explicit Void Line produce byte-identical state.
+ * — the same recompute path as add-item.
  *
- * <p>All validation lives in the service. This controller only opens the dialog, forwards the
- * chosen quantity, and dispatches {@link PosEventType#QUANTITY_CHANGED} (or nothing, when the
- * service rejected the input — the service has already dispatched an ERROR).</p>
+ * <p><strong>No zero path.</strong> The dialog cannot emit a quantity below 1: its spinner
+ * model floor is 1 and its digit-only editor rejects minus signs. Void Line is the sole way
+ * to remove a line — two dialogs routing to the same terminal state would be two sets of bugs.
+ * The service continues to validate independently, but the "changing to zero voids the line"
+ * translation that used to live here is gone.</p>
+ *
+ * <p>All server-side validation lives in the service. This controller only opens the dialog,
+ * forwards the chosen quantity, and dispatches {@link PosEventType#QUANTITY_CHANGED} (or
+ * nothing, when the service rejected the input — the service has already dispatched an
+ * ERROR).</p>
  *
  * <p><strong>Scanner suspension.</strong> Opening this dialog dispatches
  * {@code CHANGE_QTY_PRESSED}, which {@link ScannerViewController} listens for and treats as
@@ -116,14 +121,8 @@ public class ChangeQuantityViewController implements IController, IPosEventListe
         }
         Map<String, Object> props = new HashMap<>();
         props.put("lineItem", selected);
-        if (newQuantity == 0) {
-            // Zero routed through voidLine; the standard LINE_VOIDED notification is more
-            // useful to downstream listeners than a QUANTITY_CHANGED with newQuantity=0.
-            parent.dispatchPosEvent(new PosEvent(PosEventType.LINE_VOIDED, props));
-        } else {
-            props.put("newQuantity", newQuantity);
-            parent.dispatchPosEvent(new PosEvent(PosEventType.QUANTITY_CHANGED, props));
-        }
+        props.put("newQuantity", newQuantity);
+        parent.dispatchPosEvent(new PosEvent(PosEventType.QUANTITY_CHANGED, props));
         view.closeDialog();
     }
 }

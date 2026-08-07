@@ -184,15 +184,21 @@ public final class Application {
             });
 
             // JournalListener first so it captures the POS_STARTED entry before any
-            // controller-initiated startup event.
+            // controller-initiated startup event. ScannerViewController is registered BEFORE
+            // ReceiptViewController so that on TRANSACTION_COMPLETED the scanner suspends
+            // BEFORE the modal receipt dialog opens: openDialog() blocks the outer dispatch
+            // loop, so any listener sitting after receiptController in registration order
+            // would only receive TRANSACTION_COMPLETED after the receipt was dismissed — which
+            // would re-suspend the scanner and stomp on the STATUS_READY set by the nested
+            // RECEIPT_DISMISSED handler.
             pos.addController(journalListener);
             pos.addController(controller);
             pos.addController(cashController);
             pos.addController(cardController);
             pos.addController(changeQtyController);
-            pos.addController(receiptController);
             pos.addController(errorController);
             pos.addController(scannerController);
+            pos.addController(receiptController);
             pos.start();
 
             if (args.debug) {

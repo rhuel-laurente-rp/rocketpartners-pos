@@ -92,6 +92,12 @@ public class CustomerView extends JFrame {
     private static final int QUICK_ADD_COLS = 2;
     private static final int QUICK_ADD_TILE_HEIGHT = 92;
     private static final int GUTTER = 10;
+    /** Gap between the amount-due readout and the tender stack. Sized to breathe, not to
+     *  minimise; the tender buttons carry the column now. */
+    private static final int TENDER_TOP_GAP = 20;
+    /** Vertical gap between the three tender buttons. Larger than the standard button gap
+     *  because these are the biggest targets in the app and shouldn't crowd each other. */
+    private static final int TENDER_VERTICAL_GAP = 14;
 
     // ---- Density animation -------------------------------------------------
     /** Duration of the row-height glide between Comfortable and Compact. */
@@ -124,14 +130,14 @@ public class CustomerView extends JFrame {
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
 
     private final List<PosButton> quickAddButtons = new ArrayList<>();
-    private final PosButton changeQtyButton = PosButtons.secondary("Change qty");
-    private final PosButton voidLineButton = PosButtons.secondary("Void line");
-    private final PosButton voidBasketButton = PosButtons.danger("Void basket");
+    private final PosButton changeQtyButton = PosButtons.secondary("Change Quantity");
+    private final PosButton voidLineButton = PosButtons.secondary("Void Line");
+    private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
-    private final PosButton payCashButton = PosButtons.tender("Pay cash");
-    private final PosButton payDebitButton = PosButtons.tender("Pay debit");
-    private final PosButton payCreditButton = PosButtons.tender("Pay credit");
+    private final PosButton payCashButton = PosButtons.tender("Pay Cash", PosTheme.GO);
+    private final PosButton payDebitButton = PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT);
+    private final PosButton payCreditButton = PosButtons.tender("Pay Credit", PosTheme.CARD_CREDIT);
 
     /**
      * Whether basket mutation is currently permitted. Tracked explicitly rather than read off a
@@ -142,6 +148,10 @@ public class CustomerView extends JFrame {
 
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
+
+    /** Reference to the built tender column, kept so tests and the snapshot harness can render
+     *  the column standalone without cropping the whole frame. Assigned during layout. */
+    private JPanel tenderColumn;
 
     /**
      * Snapshot of quantities keyed by {@link LineItem} identity from the last render. Used to
@@ -387,6 +397,19 @@ public class CustomerView extends JFrame {
         return basketList;
     }
 
+    /** For tests: the three tender buttons in cash / debit / credit order. */
+    PosButton[] getTenderButtonsForTest() {
+        return new PosButton[]{payCashButton, payDebitButton, payCreditButton};
+    }
+
+    /**
+     * For the snapshot harness: the outermost tender-column card in the shown frame, so a
+     * caller can render the column standalone without cropping by pixel proportion.
+     */
+    JPanel getTenderColumnForTest() {
+        return tenderColumn;
+    }
+
     // ---- Layout helpers ----------------------------------------------------
 
     private JPanel buildHeader(String title) {
@@ -458,13 +481,15 @@ public class CustomerView extends JFrame {
         c.gridx = 2;
         c.weightx = 0.24;
         c.insets = new Insets(0, 0, 0, 0);
-        columns.add(buildTenderColumn(), c);
+        this.tenderColumn = buildTenderColumn();
+        columns.add(tenderColumn, c);
         return columns;
     }
 
     private JPanel buildQuickAddColumn(List<Item> quickAddItems) {
         int rows = Math.max(1, (int) Math.ceil(quickAddItems.size() / (double) QUICK_ADD_COLS));
-        JPanel grid = new JPanel(new GridLayout(rows, QUICK_ADD_COLS, 8, 8));
+        JPanel grid = new JPanel(new GridLayout(rows, QUICK_ADD_COLS,
+                PosTheme.BUTTON_GAP, PosTheme.BUTTON_GAP));
         grid.setOpaque(false);
         grid.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
@@ -612,7 +637,7 @@ public class CustomerView extends JFrame {
         JPanel actions = new JPanel(new BorderLayout(0, 8));
         actions.setOpaque(false);
 
-        JPanel minor = new JPanel(new GridLayout(1, 3, 8, 0));
+        JPanel minor = new JPanel(new GridLayout(1, 3, PosTheme.BUTTON_GAP, 0));
         minor.setOpaque(false);
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
@@ -629,7 +654,7 @@ public class CustomerView extends JFrame {
             int lines = basketModel.getSize();
             String message = "This will void the whole basket (" + lines + " line"
                     + (lines == 1 ? "" : "s") + "). This cannot be undone.";
-            showConfirm("Void basket?", message, "Void basket", true,
+            showConfirm("Void Basket?", message, "Void Basket", true,
                     () -> dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
         });
         changeQtyButton.setEnabled(false);
@@ -640,9 +665,8 @@ public class CustomerView extends JFrame {
 
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
-        // 44px is the minimum touch target — do not shrink below this even if pixel budget
-        // gets tight. It plus the SHADOW_INSET the button reserves gives ~47px measured.
-        totalButton.setPreferredSize(new Dimension(10, 44 + PosButton.SHADOW_INSET));
+        // The primary factory already enforces BUTTON_HEIGHT_PRIMARY + SHADOW_INSET via
+        // PosButton.getPreferredSize(); no override needed here.
         actions.add(totalButton, BorderLayout.CENTER);
         south.add(actions, BorderLayout.CENTER);
 
@@ -701,13 +725,15 @@ public class CustomerView extends JFrame {
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
 
+        // Amount due — pinned at the top, DISPLAY weight so the number reads at register scale
+        // now that the column no longer trails off into empty space.
         JPanel due = new JPanel(new BorderLayout());
         due.setOpaque(false);
         JLabel dueLabel = new JLabel("AMOUNT DUE");
         dueLabel.setFont(PosTheme.eyebrow());
         dueLabel.setForeground(PosTheme.MUTED);
-        amountDueValue.setFont(PosTheme.base(Font.BOLD, PosTheme.HEADLINE));
-        amountDueValue.setForeground(PosTheme.MUTED);
+        amountDueValue.setFont(PosTheme.base(Font.BOLD, PosTheme.DISPLAY));
+        amountDueValue.setForeground(PosTheme.INK);
         amountDueValue.setHorizontalAlignment(SwingConstants.LEFT);
         due.add(dueLabel, BorderLayout.NORTH);
         due.add(amountDueValue, BorderLayout.CENTER);
@@ -716,9 +742,13 @@ public class CustomerView extends JFrame {
                 BorderFactory.createEmptyBorder(0, 0, 14, 0)));
         body.add(due, BorderLayout.NORTH);
 
-        JPanel stack = new JPanel(new GridLayout(3, 1, 0, 10));
+        // Three tender buttons, equal-height, filling the column's full remaining height rather
+        // than pinned to the north with dead space beneath. The vertical gap is oversized on
+        // purpose — the tender trio are the largest touch targets in the app and get the widest
+        // spacing to match.
+        JPanel stack = new JPanel(new GridLayout(3, 1, 0, TENDER_VERTICAL_GAP));
         stack.setOpaque(false);
-        stack.setBorder(BorderFactory.createEmptyBorder(14, 0, 0, 0));
+        stack.setBorder(BorderFactory.createEmptyBorder(TENDER_TOP_GAP, 0, 0, 0));
         payCashButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED)));
         payDebitButton.addActionListener(e ->
@@ -730,10 +760,7 @@ public class CustomerView extends JFrame {
             stack.add(b);
         }
 
-        JPanel top = new JPanel(new BorderLayout());
-        top.setOpaque(false);
-        top.add(stack, BorderLayout.NORTH);
-        body.add(top, BorderLayout.CENTER);
+        body.add(stack, BorderLayout.CENTER);
         return PosTheme.card("Tender", body);
     }
 
@@ -874,6 +901,10 @@ public class CustomerView extends JFrame {
      * tile reads as a pressable card, not a static decoration.
      */
     private static class QuickAddTile extends PosButton {
+        private static final int PAD = 10;
+        private static final Font DESC_FONT = PosTheme.base(Font.PLAIN, PosTheme.BODY);
+        private static final Font PRICE_FONT = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
+
         private final String description;
         private final String price;
 
@@ -886,7 +917,7 @@ public class CustomerView extends JFrame {
 
         @Override
         protected void paintComponent(Graphics g) {
-            // Delegate the fill/shadow/pressed-sink chrome to PosButton, then paint our custom
+            // Delegate shadow/fill/lip/highlight chrome to PosButton, then paint our custom
             // description/price on top so tap-and-hold still visibly compresses.
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g.create();
@@ -896,27 +927,27 @@ public class CustomerView extends JFrame {
 
             boolean on = isEnabled();
             boolean pressed = on && getModel().isPressed();
-            int pad = 10;
-            int sink = pressed ? 1 : 0;
+            // Match the PosButton label sink exactly so the tile's text moves with the button's
+            // label — otherwise the description slides 1 px while the label slides 2 and the
+            // press feels loose.
+            int sink = pressed ? PRESSED_SINK : 0;
             int height = getHeight() - SHADOW_INSET;
-            int maxWidth = getWidth() - pad * 2;
+            int maxWidth = getWidth() - PAD * 2;
 
-            Font descFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
-            g2.setFont(descFont);
+            g2.setFont(DESC_FONT);
             FontMetrics dfm = g2.getFontMetrics();
             List<String> lines = wrap(description, dfm, maxWidth, 2);
             g2.setColor(on ? PosTheme.INK : PosTheme.DISABLED_FG);
-            int y = pad + dfm.getAscent() + sink;
+            int y = PAD + dfm.getAscent() + sink;
             for (String line : lines) {
-                g2.drawString(line, pad, y);
+                g2.drawString(line, PAD, y);
                 y += dfm.getHeight();
             }
 
-            Font priceFont = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
-            g2.setFont(priceFont);
+            g2.setFont(PRICE_FONT);
             FontMetrics pfm = g2.getFontMetrics();
             g2.setColor(on ? PosTheme.GO : PosTheme.DISABLED_FG);
-            g2.drawString(price, pad, height - pad - pfm.getDescent() + sink);
+            g2.drawString(price, PAD, height - PAD - pfm.getDescent() + sink);
 
             g2.dispose();
         }
