@@ -53,7 +53,7 @@ public class ReceiptView extends PosDialog {
         setBody(buildBody());
         setMinimumSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
-        PosButton startNext = PosButtons.primary("Start next sale");
+        PosButton startNext = PosButtons.primary("Start Next Sale");
         startNext.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED)));
         setPrimary(startNext);

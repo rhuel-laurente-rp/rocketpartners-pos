@@ -45,13 +45,13 @@ public class PayWithCardView extends PosDialog {
     private final JLabel statusLabel = new JLabel("Contacting processor…", SwingConstants.CENTER);
     private final JProgressBar progress = new JProgressBar();
     private final CheckMark checkMark = new CheckMark();
-    private final PosButton confirm = PosButtons.primary("Confirm payment");
+    private final PosButton confirm = PosButtons.primary("Confirm Payment");
 
     /**
      * @param owner the parent frame; may be {@code null}
      */
     public PayWithCardView(JFrame owner) {
-        super(owner, "Pay debit");
+        super(owner, "Pay Debit");
         setBody(buildBody());
         confirm.setEnabled(false);
         setPrimary(confirm);
@@ -63,7 +63,7 @@ public class PayWithCardView extends PosDialog {
     public void configure(TenderType tenderType, BigDecimal amount) {
         if (tenderType == null) throw new IllegalArgumentException("tenderType must not be null");
         if (amount == null) throw new IllegalArgumentException("amount must not be null");
-        String title = tenderType == TenderType.DEBIT ? "Pay debit" : "Pay credit";
+        String title = tenderType == TenderType.DEBIT ? "Pay Debit" : "Pay Credit";
         setDialogTitle(title);
         amountValue.setText("$" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString());
     }

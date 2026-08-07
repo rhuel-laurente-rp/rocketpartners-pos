@@ -130,14 +130,14 @@ public class CustomerView extends JFrame {
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
 
     private final List<PosButton> quickAddButtons = new ArrayList<>();
-    private final PosButton changeQtyButton = PosButtons.secondary("Change qty");
-    private final PosButton voidLineButton = PosButtons.secondary("Void line");
-    private final PosButton voidBasketButton = PosButtons.danger("Void basket");
+    private final PosButton changeQtyButton = PosButtons.secondary("Change Quantity");
+    private final PosButton voidLineButton = PosButtons.secondary("Void Line");
+    private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
-    private final PosButton payCashButton = PosButtons.tender("Pay cash", PosTheme.GO);
-    private final PosButton payDebitButton = PosButtons.tender("Pay debit", PosTheme.CARD_DEBIT);
-    private final PosButton payCreditButton = PosButtons.tender("Pay credit", PosTheme.CARD_CREDIT);
+    private final PosButton payCashButton = PosButtons.tender("Pay Cash", PosTheme.GO);
+    private final PosButton payDebitButton = PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT);
+    private final PosButton payCreditButton = PosButtons.tender("Pay Credit", PosTheme.CARD_CREDIT);
 
     /**
      * Whether basket mutation is currently permitted. Tracked explicitly rather than read off a
@@ -654,7 +654,7 @@ public class CustomerView extends JFrame {
             int lines = basketModel.getSize();
             String message = "This will void the whole basket (" + lines + " line"
                     + (lines == 1 ? "" : "s") + "). This cannot be undone.";
-            showConfirm("Void basket?", message, "Void basket", true,
+            showConfirm("Void Basket?", message, "Void Basket", true,
                     () -> dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
         });
         changeQtyButton.setEnabled(false);

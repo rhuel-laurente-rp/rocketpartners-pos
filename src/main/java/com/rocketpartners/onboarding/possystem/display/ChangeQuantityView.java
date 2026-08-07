@@ -102,7 +102,7 @@ public class ChangeQuantityView extends PosDialog {
      * @param maxQuantity upper bound wired to the spinner model
      */
     public ChangeQuantityView(JFrame owner, IPosEventDispatcher dispatcher, int maxQuantity) {
-        super(owner, "Change quantity");
+        super(owner, "Change Quantity");
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         if (maxQuantity < MIN_QUANTITY) {
             throw new IllegalArgumentException(
@@ -114,7 +114,7 @@ public class ChangeQuantityView extends PosDialog {
 
         this.quantitySpinner = new JSpinner(
                 new SpinnerNumberModel(MIN_QUANTITY, MIN_QUANTITY, maxQuantity, 1));
-        this.confirmButton = PosButtons.primary("Confirm change");
+        this.confirmButton = PosButtons.primary("Confirm Change");
         this.cancelButton = PosButtons.danger("Cancel");
 
         setBody(buildBody());

@@ -59,12 +59,12 @@ public final class DialogSnapshotTool {
         List<Variant> variants = new ArrayList<>();
         variants.add(new Variant("primary", () -> PosButtons.primary("Total")));
         variants.add(new Variant("secondary", () -> PosButtons.secondary("Cancel")));
-        variants.add(new Variant("danger", () -> PosButtons.danger("Void basket")));
-        variants.add(new Variant("tender-cash", () -> PosButtons.tender("Pay cash", PosTheme.GO)));
+        variants.add(new Variant("danger", () -> PosButtons.danger("Void Basket")));
+        variants.add(new Variant("tender-cash", () -> PosButtons.tender("Pay Cash", PosTheme.GO)));
         variants.add(new Variant("tender-debit",
-                () -> PosButtons.tender("Pay debit", PosTheme.CARD_DEBIT)));
+                () -> PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT)));
         variants.add(new Variant("tender-credit",
-                () -> PosButtons.tender("Pay credit", PosTheme.CARD_CREDIT)));
+                () -> PosButtons.tender("Pay Credit", PosTheme.CARD_CREDIT)));
         variants.add(new Variant("quickadd", DialogSnapshotTool::buildQuickAddTile));
         for (Variant v : variants) {
             File file = new File(out, "button-" + v.name + ".png");
