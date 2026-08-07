@@ -31,6 +31,9 @@ final class PosButtons {
     static final Color SECONDARY_FILL = new Color(0xF2, 0xF1, 0xED);
     /** Pale STOP tint used on danger buttons. */
     static final Color DANGER_FILL = new Color(0xFD, 0xF1, 0xEF);
+    /** Pale GO tint used on affirmative-secondary buttons — the same treatment as
+     *  {@link #DANGER_FILL} but in the pay-forward hue. */
+    static final Color GO_TINT_FILL = new Color(0xE8, 0xF4, 0xEE);
 
     static PosButton primary(String text) {
         PosButton b = new PosButton(text, PosTheme.GO, Color.WHITE,
@@ -50,6 +53,20 @@ final class PosButtons {
         PosButton b = new PosButton(text, DANGER_FILL, PosTheme.STOP,
                 PosTheme.base(Font.PLAIN, PosTheme.BODY));
         b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
+        return b;
+    }
+
+    /**
+     * A "tinted-green secondary": pale {@link PosTheme#GO} background with saturated GO text,
+     * matched typographically to {@link #primary(String)} so it can pair with a primary at
+     * equal weight in a dialog footer. Used where the cancel action is affirmative-neutral
+     * rather than destructive — the same tinting move as {@link #danger(String)} but in the
+     * pay-forward hue.
+     */
+    static PosButton secondaryGreen(String text) {
+        PosButton b = new PosButton(text, GO_TINT_FILL, PosTheme.GO,
+                PosTheme.base(Font.BOLD, PosTheme.BUTTON));
+        b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_PRIMARY);
         return b;
     }
 

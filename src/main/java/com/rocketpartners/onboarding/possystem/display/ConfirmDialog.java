@@ -46,7 +46,7 @@ class ConfirmDialog extends PosDialog {
         super(owner, "Confirm");
         setBody(buildBody());
 
-        cancelButton = PosButtons.secondary("Cancel");
+        cancelButton = PosButtons.danger("Cancel");
         cancelButton.addActionListener(e -> closeDialog());
         addSecondary(cancelButton);
         setCancelAction(this::closeDialog);
