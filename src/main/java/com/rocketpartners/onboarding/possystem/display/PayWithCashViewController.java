@@ -168,8 +168,6 @@ public class PayWithCashViewController implements IController, IPosEventListener
         if (cashReceived.compareTo(amountDue) < 0) {
             dispatchTenderError("UNDERPAYMENT",
                     "cash received " + cashReceived + " is less than amount due " + amountDue);
-            view.showError("Underpayment — enter at least $"
-                    + amountDue.toPlainString() + ".");
             return;
         }
 

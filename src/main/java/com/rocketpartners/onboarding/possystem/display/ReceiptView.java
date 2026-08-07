@@ -30,6 +30,15 @@ public class ReceiptView extends PosDialog {
 
     private static final int PREFERRED_WIDTH = 520;
     private static final int PREFERRED_HEIGHT = 560;
+    /**
+     * Cap the visible receipt tape at this height regardless of receipt length. Without a cap,
+     * pack() would grow the dialog to the JTextArea's full preferred height and a long basket
+     * would push the primary button off the bottom of the screen — the scroll pane exists but
+     * only engages when the viewport can't hold the text. Chosen so a ~30-line receipt
+     * (well past a typical convenience-store sale) still shows a slice big enough to read
+     * without scrolling.
+     */
+    private static final int TAPE_MAX_HEIGHT = 460;
 
     private final JTextArea textArea = new JTextArea();
 
@@ -79,6 +88,13 @@ public class ReceiptView extends PosDialog {
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        // Cap and clamp the tape height. pack() would otherwise honour the text area's full
+        // preferred height for a long receipt; the maximum size stops the layout from growing
+        // past the cap, and the preferred size gives pack() something sane to aim for when the
+        // receipt is short.
+        scroll.setPreferredSize(new Dimension(PREFERRED_WIDTH - 40, TAPE_MAX_HEIGHT));
+        scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, TAPE_MAX_HEIGHT));
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
 
         // Tape block: PAPER surface with RULE hairlines top and bottom; inset from the
         // dialog edges by leaving a stripe of SURFACE around it.
