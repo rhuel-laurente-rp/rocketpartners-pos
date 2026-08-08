@@ -27,6 +27,8 @@ import com.rocketpartners.onboarding.possystem.display.ReceiptView;
 import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
 import com.rocketpartners.onboarding.possystem.display.ScannerView;
 import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
+import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
+import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
 import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
@@ -160,6 +162,10 @@ public final class Application {
             ChangeQuantityViewController changeQtyController =
                     new ChangeQuantityViewController(changeQtyView);
 
+            VoidBasketConfirmView voidBasketConfirmView = new VoidBasketConfirmView(view, pos);
+            VoidBasketConfirmViewController voidBasketController =
+                    new VoidBasketConfirmViewController(voidBasketConfirmView);
+
             ReceiptView receiptView = new ReceiptView(view, pos);
             ReceiptViewController receiptController =
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
@@ -199,6 +205,7 @@ public final class Application {
             pos.addController(cashController);
             pos.addController(cardController);
             pos.addController(changeQtyController);
+            pos.addController(voidBasketController);
             pos.addController(errorController);
             pos.addController(scannerController);
             pos.addController(receiptController);

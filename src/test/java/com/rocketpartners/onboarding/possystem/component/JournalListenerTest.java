@@ -112,6 +112,59 @@ class JournalListenerTest {
     }
 
     @Test
+    void basketVoidedEvent_journalsItemCountGrandTotalAndPriorState() {
+        Map<String, Object> props = new HashMap<>();
+        props.put("itemCount", 3);
+        props.put("grandTotal", new BigDecimal("17.70"));
+        props.put("priorState", "IN_PROGRESS");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.BASKET_VOIDED, props));
+
+        JournalRecord r = journal.lastOf("BASKET_VOIDED");
+        assertThat(r.getFields()).containsEntry("itemCount", 3);
+        assertThat(r.getFields()).containsEntry("grandTotal", "17.70");
+        assertThat(r.getFields()).containsEntry("priorState", "IN_PROGRESS");
+    }
+
+    @Test
+    void basketVoidedFromTotaled_isDistinguishableFromInProgress() {
+        Map<String, Object> inProgress = new HashMap<>();
+        inProgress.put("itemCount", 1);
+        inProgress.put("grandTotal", new BigDecimal("5.00"));
+        inProgress.put("priorState", "IN_PROGRESS");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.BASKET_VOIDED, inProgress));
+
+        Map<String, Object> totaled = new HashMap<>();
+        totaled.put("itemCount", 2);
+        totaled.put("grandTotal", new BigDecimal("10.00"));
+        totaled.put("priorState", "TOTALED");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.BASKET_VOIDED, totaled));
+
+        List<JournalRecord> voids = journal.allOf("BASKET_VOIDED");
+        assertThat(voids).hasSize(2);
+        assertThat(voids.get(0).getFields()).containsEntry("priorState", "IN_PROGRESS");
+        assertThat(voids.get(1).getFields()).containsEntry("priorState", "TOTALED");
+    }
+
+    @Test
+    void declinedVoid_journalsDistinctEvent_withCountAndTotal() {
+        // A cashier who opened the confirmation and backed out is exactly the pattern a shrink
+        // review looks for. Costs one line to capture and must be distinguishable from the
+        // confirmed-void record.
+        Map<String, Object> props = new HashMap<>();
+        props.put("itemCount", 2);
+        props.put("grandTotal", new BigDecimal("4.50"));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_DECLINED, props));
+
+        JournalRecord r = journal.lastOf("VOID_BASKET_DECLINED");
+        assertThat(r.getEvent()).isEqualTo("VOID_BASKET_DECLINED");
+        assertThat(r.getFields()).containsEntry("itemCount", 2);
+        assertThat(r.getFields()).containsEntry("grandTotal", "4.50");
+        // Confirmed voids and declined voids sit under different event names so they can be
+        // separated by grep alone — that is the whole point of the two-line vocabulary.
+        assertThat(journal.allOf("BASKET_VOIDED")).isEmpty();
+    }
+
+    @Test
     void scanEvents_areDistinguishedByEventTypeAndSource() {
         Map<String, Object> scan = new HashMap<>();
         scan.put("upc", "012345678905");

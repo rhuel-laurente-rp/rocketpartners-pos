@@ -51,8 +51,28 @@ public enum PosEventType {
      */
     CHANGE_QTY_CANCEL_PRESSED,
 
-    /** The Void Basket button on a view was pressed. Input event; no properties. */
+    /**
+     * The Void Basket button on the main window was pressed. Input event; no properties.
+     * Opens {@link com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView}. Voiding
+     * is deferred until the cashier confirms via {@link #VOID_BASKET_CONFIRM_PRESSED}; this event
+     * alone must not mutate transaction state.
+     */
     VOID_BASKET_PRESSED,
+
+    /**
+     * The Void basket confirm button on the confirmation dialog was pressed. Input event; no
+     * properties. The controller reacts by calling voidBasket and starting a fresh transaction.
+     */
+    VOID_BASKET_CONFIRM_PRESSED,
+
+    /**
+     * The cashier declined the void-basket confirmation (Keep basket, ESC, or window close).
+     * Notification event; carries {@code itemCount} (Integer, sum of non-voided quantities at
+     * the moment of the prompt) and {@code grandTotal} (BigDecimal, grand total at the moment
+     * of the prompt) properties. Captured explicitly — a lane racking up near-voids is exactly
+     * the pattern a shrink review looks for.
+     */
+    VOID_BASKET_DECLINED,
 
     /** The Total button on a view was pressed. Input event; no properties. */
     TOTAL_PRESSED,
@@ -125,7 +145,16 @@ public enum PosEventType {
      */
     QUANTITY_CHANGED,
 
-    /** The whole transaction was voided (terminal). */
+    /**
+     * The whole transaction was voided (terminal).
+     *
+     * <p>Standard properties on a confirmed void: {@code itemCount} (Integer, sum of non-voided
+     * quantities), {@code grandTotal} (BigDecimal, grand total at the moment of the void), and
+     * {@code priorState} (String, the {@link com.rocketpartners.onboarding.commons.model.TransactionState}
+     * name the transaction was in before {@code voidBasket()} — {@code IN_PROGRESS} or
+     * {@code TOTALED}). Voiding after Total is the more interesting case operationally and is
+     * distinguishable via {@code priorState}.</p>
+     */
     BASKET_VOIDED,
 
     /** The transaction was totaled — basket is frozen; tender is next. */

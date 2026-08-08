@@ -90,11 +90,14 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.TENDER_DEBIT_PRESSED,
             PosEventType.TENDER_CREDIT_PRESSED,
             PosEventType.CHANGE_QTY_PRESSED,
+            PosEventType.VOID_BASKET_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED,
             PosEventType.CASH_TENDERED,
             PosEventType.CARD_TENDERED,
             PosEventType.CHANGE_QTY_CONFIRM_PRESSED,
             PosEventType.CHANGE_QTY_CANCEL_PRESSED,
+            PosEventType.VOID_BASKET_CONFIRM_PRESSED,
+            PosEventType.VOID_BASKET_DECLINED,
             PosEventType.TRANSACTION_COMPLETED,
             PosEventType.RECEIPT_DISMISSED,
             // Focus-restore triggers.
@@ -240,9 +243,11 @@ public class ScannerViewController implements IController, IPosEventListener {
             // change-qty dialog opens on CHANGE_QTY_PRESSED and closes on the confirm/cancel
             // events.
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
-                 CHANGE_QTY_PRESSED, TRANSACTION_COMPLETED -> suspendCapture();
+                 CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
+                 TRANSACTION_COMPLETED -> suspendCapture();
             case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
-                 CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED -> resumeCapture();
+                 CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
+                 VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
             // Receipt dismissal semantically starts a fresh sale: force STATUS_READY
             // unconditionally, independent of the transaction-state check resumeCapture
             // uses, so a lingering TOTALED state (or a late TRANSACTION_COMPLETED handler
