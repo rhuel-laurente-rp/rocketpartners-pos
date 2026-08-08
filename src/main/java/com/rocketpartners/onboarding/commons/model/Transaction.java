@@ -243,21 +243,6 @@ public class Transaction {
     }
 
     /**
-     * Cash-tender helper: rounds {@link #grandTotal()} up to the next whole dollar and tenders
-     * that amount as {@link TenderType#CASH}. A whole-dollar total is a no-op (tenders exactly
-     * the total; {@link #changeDue()} is zero).
-     *
-     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
-     */
-    public void payNextDollar() {
-        requireState("payNextDollar", TransactionState.TOTALED);
-        BigDecimal nextDollar = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2);
-        // The customer pays the rounded-up amount and receives no change; the receipt should
-        // show that adjusted total, not the raw grand total.
-        tender(TenderType.CASH, nextDollar, nextDollar);
-    }
-
-    /**
      * Sum of {@link LineItem#extendedTotal()} across all non-voided line items. Not rounded.
      *
      * @return the raw subtotal; never {@code null}

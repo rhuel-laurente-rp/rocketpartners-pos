@@ -406,49 +406,6 @@ class TransactionServiceTest {
     }
 
     @Test
-    void tenderPayNextDollar_roundsUpAndClearsCurrent() {
-        Map<String, Item> items = new LinkedHashMap<>();
-        Item penny = new Item("UPC-P", "PennyGoods", new BigDecimal("7.01"));
-        items.put(penny.getUpc(), penny);
-        TransactionService svc = new TransactionService(
-                new InMemoryItemRepository(items),
-                new TaxService(NO_TAX),
-                new RecordingDispatcher());
-        svc.startTransaction();
-        svc.addItemByUpc(penny.getUpc(), 1);
-        svc.total();
-        Transaction paid = svc.tenderPayNextDollar();
-        assertThat(paid.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(paid.getTenderType()).isEqualTo(TenderType.CASH);
-        assertThat(paid.getCashTendered()).isEqualByComparingTo("8.00");
-        // Next Dollar settles at the rounded amount — no change to the customer.
-        assertThat(paid.amountDue()).isEqualByComparingTo("8.00");
-        assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
-        assertThat(svc.getCurrentTransaction()).isNull();
-    }
-
-    @Test
-    void tenderPayNextDollar_beforeTotal_dispatchesErrorAndThrows() {
-        RecordingDispatcher dispatcher = new RecordingDispatcher();
-        TransactionService svc = service(NO_TAX, dispatcher);
-        svc.startTransaction();
-        svc.addItemByUpc(WIDGET.getUpc(), 1);
-        dispatcher.clear();
-        assertThatThrownBy(svc::tenderPayNextDollar).isInstanceOf(IllegalStateException.class);
-        PosEvent error = dispatcher.onlyError();
-        assertThat(error.getProperty("code", String.class)).isEqualTo("TOTALED_INVARIANT");
-        assertThat(error.getProperty("operation", String.class)).isEqualTo("tenderPayNextDollar");
-    }
-
-    @Test
-    void tenderPayNextDollar_beforeStart_dispatchesErrorAndThrows() {
-        RecordingDispatcher dispatcher = new RecordingDispatcher();
-        TransactionService svc = service(NO_TAX, dispatcher);
-        assertThatThrownBy(svc::tenderPayNextDollar).isInstanceOf(IllegalStateException.class);
-        assertThat(dispatcher.onlyError().getProperty("code", String.class)).isEqualTo("NO_TRANSACTION");
-    }
-
-    @Test
     void tenderCard_debit_setsPaidAndClearsCurrent() {
         TransactionService svc = service(NO_TAX);
         svc.startTransaction();
@@ -631,25 +588,6 @@ class TransactionServiceTest {
         assertThat(receipt).contains("Amount Due (Next Dollar):");
         assertThat(receipt).contains("8.00");                 // settled amount
         // No change: the customer paid the settled amount.
-        assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
-    }
-
-    @Test
-    void generateReceipt_payNextDollarHelper_showsNextDollarLine() {
-        Item penny = new Item("UPC-P", "PennyGoods", new BigDecimal("7.30"));
-        Map<String, Item> items = new LinkedHashMap<>();
-        items.put(penny.getUpc(), penny);
-        TransactionService svc = new TransactionService(
-                new InMemoryItemRepository(items),
-                new TaxService(NO_TAX),
-                new RecordingDispatcher());
-        svc.startTransaction();
-        svc.addItemByUpc(penny.getUpc(), 1);
-        svc.total();
-        Transaction paid = svc.tenderPayNextDollar();
-        String receipt = svc.generateReceipt(paid);
-        assertThat(receipt).contains("Amount Due (Next Dollar):");
-        assertThat(receipt).contains("8.00");
         assertThat(paid.changeDue()).isEqualByComparingTo("0.00");
     }
 
