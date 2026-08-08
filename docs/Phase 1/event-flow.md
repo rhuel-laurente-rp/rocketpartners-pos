@@ -50,7 +50,7 @@ Every constant on `PosEventType` appears below, grouped by phase of the sale.
 | `VOID_BASKET_PRESSED` | `CustomerView` → `CustomerViewController` | Opens the confirm dialog. This event alone must not mutate transaction state. |
 | `VOID_BASKET_CONFIRM_PRESSED` | `VoidBasketConfirmView` → `VoidBasketConfirmViewController` | Only this event actually voids. |
 | `VOID_BASKET_DECLINED` | `VoidBasketConfirmView` → all listeners | Cashier chose *Keep basket*, hit ESC, or closed the window. Carries `itemCount` and `grandTotal` at prompt time. Captured explicitly so a lane racking up near-voids is legible in the shrink review. |
-| `BASKET_VOIDED` | `VoidBasketConfirmViewController` → all listeners | Terminal. Carries `itemCount`, `grandTotal`, and `priorState` (`IN_PROGRESS` or `TOTALED`) — post-Total voids are the more interesting case operationally and are distinguishable via `priorState`. |
+| `BASKET_VOIDED` | `CustomerViewController` → all listeners | Terminal. Carries `itemCount`, `grandTotal`, and `priorState` (`IN_PROGRESS` or `TOTALED`) — post-Total voids are the more interesting case operationally and are distinguishable via `priorState`. `VoidBasketConfirmViewController` only owns the dialog; `CustomerViewController.handleVoidBasketConfirmed()` snapshots the props, calls `voidBasket()`, dispatches this event, and resets. |
 
 ### Total and tender
 
@@ -155,13 +155,11 @@ flowchart LR
 
     CVC --> TS
     QC --> TS
-    VC --> TS
     CashC --> TS
     CardC --> TS
 
-    CVC -- ITEM_ADDED / LINE_VOIDED /<br/>TRANSACTION_TOTALED --> PC
+    CVC -- ITEM_ADDED / LINE_VOIDED /<br/>TRANSACTION_TOTALED /<br/>BASKET_VOIDED --> PC
     QC -- QUANTITY_CHANGED --> PC
-    VC -- BASKET_VOIDED --> PC
     CashC -- CASH_TENDERED /<br/>TRANSACTION_COMPLETED --> PC
     CardC -- CARD_TENDERED /<br/>TRANSACTION_COMPLETED --> PC
     RC -- RECEIPT_DISMISSED --> PC
