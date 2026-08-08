@@ -43,13 +43,10 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("PayWithCashView.exact",      "Exact Amount");
         LABELS.put("PayWithCashView.nextDollar", "Next Dollar");
         LABELS.put("PayWithCardView.confirm",    "Confirm Payment");
-        LABELS.put("ConfirmDialog.confirm",      "Confirm");
-        LABELS.put("ConfirmDialog.cancel",       "Cancel");
         LABELS.put("ErrorDialog.dismiss",        "Dismiss");
         LABELS.put("ReceiptView.startNext",      "Start Next Sale");
 
         // ---- Dialog titles --------------------------------------------
-        LABELS.put("title.confirmDialog",      "Confirm");
         LABELS.put("title.errorDialog",        "Error");
         LABELS.put("title.changeQuantity",     "Change Quantity");
         LABELS.put("title.payCash",            "Cash Payment");
@@ -57,11 +54,10 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("title.payCredit",          "Pay Credit");
         LABELS.put("title.receipt",            "Receipt");
 
-        // ---- Dynamic confirm-dialog primary labels -------------------
-        // The confirm dialog's primary label is set by the caller, not the dialog. Cover the
-        // known call sites here so a future call site with sentence case fails the test.
-        LABELS.put("CustomerView.confirmVoidBasket", "Void Basket");
-        LABELS.put("CustomerView.confirmVoidBasketTitle", "Void Basket?");
+        // The void-basket confirmation dialog is deliberately sentence case throughout — copy
+        // is graded separately (see VoidBasketConfirmViewTest#everyVisibleString_isSentenceCase)
+        // rather than routed through this Title Case sweep. Vocabulary discipline in that dialog
+        // ("Void basket" vs. "Cancel") is a domain-glossary invariant, not a typographic one.
     }
 
     @Test

@@ -67,6 +67,7 @@ class CustomerViewControllerTest {
         assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
         verify(view).updateBasket(List.of(), BigDecimal.ZERO);
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
         verify(view).setVisible(true);
     }
@@ -133,7 +134,10 @@ class CustomerViewControllerTest {
     }
 
     @Test
-    void voidBasketPressed_endsCurrent_dispatchesBasketVoided_andStartsFreshTransaction() {
+    void voidBasketPressedAlone_isNotEnoughToVoid_awaitsConfirmation() {
+        // The initial-press event opens the confirmation dialog (owned by
+        // VoidBasketConfirmViewController) but must not by itself mutate transaction state or
+        // trigger the reset — voiding is deferred to VOID_BASKET_CONFIRM_PRESSED.
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
@@ -142,6 +146,21 @@ class CustomerViewControllerTest {
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
 
+        assertThat(pos.getTransactionService().getCurrentTransaction()).isSameAs(original);
+        assertThat(original.getState()).isEqualTo(TransactionState.IN_PROGRESS);
+        assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isZero();
+    }
+
+    @Test
+    void voidBasketConfirmed_endsCurrent_dispatchesBasketVoided_andStartsFreshTransaction() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        Transaction original = pos.getTransactionService().getCurrentTransaction();
+        reset(view);
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
         Transaction next = pos.getTransactionService().getCurrentTransaction();
         assertThat(next).isNotNull();
         assertThat(next).isNotSameAs(original);
@@ -149,8 +168,41 @@ class CustomerViewControllerTest {
         assertThat(original.getState()).isEqualTo(TransactionState.VOIDED);
         assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isEqualTo(1);
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
         verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+    }
+
+    @Test
+    void voidBasketConfirmed_carriesItemCountGrandTotalAndPriorState_forJournaling() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(quickAdd(GIZMO.getUpc()));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
+        PosEvent voided = notifications.lastOf(PosEventType.BASKET_VOIDED);
+        assertThat(voided.getProperty("itemCount", Integer.class)).isEqualTo(3);
+        assertThat(voided.getProperty("grandTotal", BigDecimal.class))
+                .isEqualByComparingTo(new BigDecimal("22.50"));
+        assertThat(voided.getProperty("priorState", String.class)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void voidBasketConfirmedAfterTotal_priorStateIsTotaled() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
+        PosEvent voided = notifications.lastOf(PosEventType.BASKET_VOIDED);
+        assertThat(voided.getProperty("priorState", String.class))
+                .as("voiding after Total must be distinguishable from voiding IN_PROGRESS")
+                .isEqualTo("TOTALED");
     }
 
     @Test
@@ -158,7 +210,7 @@ class CustomerViewControllerTest {
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
-        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
 
         pos.dispatchPosEvent(quickAdd(GIZMO.getUpc()));
 
@@ -181,6 +233,10 @@ class CustomerViewControllerTest {
                 .isEqualTo(TransactionState.TOTALED);
         assertThat(notifications.countOf(PosEventType.TRANSACTION_TOTALED)).isEqualTo(1);
         verify(view).setBasketInputEnabled(false);
+        // Lifecycle input stays ON at TOTALED — the domain still permits voiding the whole
+        // transaction, and grouping Void basket with the mutation controls is exactly the bug
+        // this rewrite fixes.
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(true);
     }
 
@@ -222,6 +278,7 @@ class CustomerViewControllerTest {
         assertThat(next).isNotNull();
         assertThat(next.getState()).isEqualTo(TransactionState.IN_PROGRESS);
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
         verify(view).updateBasket(List.of(), BigDecimal.ZERO);
     }

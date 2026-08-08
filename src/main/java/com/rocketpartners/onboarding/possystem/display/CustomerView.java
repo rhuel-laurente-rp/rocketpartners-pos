@@ -146,6 +146,19 @@ public class CustomerView extends JFrame {
      */
     private boolean basketInputEnabled = true;
 
+    /**
+     * Whether lifecycle-ending actions (today: void basket) are currently permitted. Tracked
+     * separately from {@link #basketInputEnabled} because the two rules disagree at TOTALED:
+     * basket input is off (no more scans, quantity edits, or line voids), but voiding the whole
+     * transaction is still legal in the domain and must remain reachable. Additionally gated on
+     * the basket holding at least one non-voided line — nothing to discard, no confirmation
+     * dialog worth opening.
+     */
+    private boolean lifecycleInputEnabled = true;
+
+    /** Sum of non-voided line-item quantities from the last render. Used to gate Void basket. */
+    private int lastNonVoidedQuantitySum;
+
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
 
@@ -282,25 +295,66 @@ public class CustomerView extends JFrame {
         // rendered. Identity-keyed so a merged bump on the same LineItem is detected as an
         // increase, not a new arrival.
         previousQuantities.clear();
+        int qtySum = 0;
         for (LineItem li : lines) {
             previousQuantities.put(li, li.getQuantity());
+            if (!li.isVoided()) qtySum += li.getQuantity();
         }
+        lastNonVoidedQuantitySum = qtySum;
 
         refreshSelectionDependentButtons();
+        refreshVoidBasketButton();
     }
 
     /**
-     * Enables or disables the basket-input controls. Change-qty and void-line additionally
-     * require a non-voided selection and are re-evaluated by
-     * {@link #refreshSelectionDependentButtons()}.
+     * @return sum of quantities across non-voided line items from the last render. Note this is
+     *         the sum of quantities, not the line count — a single line at quantity 12 counts as
+     *         twelve items to re-scan.
+     */
+    public int getBasketItemCount() {
+        return lastNonVoidedQuantitySum;
+    }
+
+    /**
+     * Enables or disables the basket-input controls — quick-add tiles, Change qty, Void line,
+     * and Total. Deliberately does <em>not</em> touch the Void basket button: the domain state
+     * machine legalises {@code voidBasket()} in both {@code IN_PROGRESS} and {@code TOTALED},
+     * so grouping Void basket with the mutation controls disables it exactly where cashiers
+     * most need it (a customer changing their mind at the card reader after Total was pressed).
+     * Void basket has its own gate via {@link #setLifecycleInputEnabled(boolean)}.
      */
     public void setBasketInputEnabled(boolean enabled) {
         basketInputEnabled = enabled;
         for (PosButton b : quickAddButtons) b.setEnabled(enabled);
-        voidBasketButton.setEnabled(enabled);
         totalButton.setEnabled(enabled);
         refreshSelectionDependentButtons();
         refreshStatusPill();
+    }
+
+    /**
+     * Enables or disables lifecycle-ending controls — today, only Void basket. Kept separate
+     * from {@link #setBasketInputEnabled(boolean)} so the two rules cannot drift back together:
+     * disabling basket input at TOTALED must leave Void basket alone, because the domain still
+     * permits it. Callers should pass {@code false} only for terminal states ({@code PAID},
+     * {@code VOIDED}), matching {@link com.rocketpartners.onboarding.commons.model.Transaction#voidBasket()}.
+     *
+     * <p>Void basket is additionally hidden when the basket holds no non-voided line items —
+     * there is nothing to discard, and it keeps the confirmation dialog from ever opening with
+     * an empty summary. That secondary gate is applied by {@link #refreshVoidBasketButton()}
+     * and does not require callers to know the item count.</p>
+     */
+    public void setLifecycleInputEnabled(boolean enabled) {
+        lifecycleInputEnabled = enabled;
+        refreshVoidBasketButton();
+        refreshStatusPill();
+    }
+
+    private void refreshVoidBasketButton() {
+        // Void basket is legal in IN_PROGRESS and TOTALED (the caller sets lifecycleInputEnabled
+        // accordingly). It also requires at least one non-voided line — an all-voided basket has
+        // nothing to discard, and opening the confirmation dialog on an empty summary is
+        // meaningless. Both gates together produce the final enabled state.
+        voidBasketButton.setEnabled(lifecycleInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     private void refreshSelectionDependentButtons() {
@@ -351,6 +405,16 @@ public class CustomerView extends JFrame {
     /** @return {@code true} if the Void Line button is currently enabled */
     public boolean isVoidLineEnabled() {
         return voidLineButton.isEnabled();
+    }
+
+    /** @return {@code true} if the Void basket button is currently enabled */
+    public boolean isVoidBasketEnabled() {
+        return voidBasketButton.isEnabled();
+    }
+
+    /** @return {@code true} if the Total button is currently enabled */
+    public boolean isTotalEnabled() {
+        return totalButton.isEnabled();
     }
 
     /**
@@ -641,22 +705,12 @@ public class CustomerView extends JFrame {
         minor.setOpaque(false);
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
-        // Void basket wipes everything the cashier has rung up so far — an accidental double-tap
-        // on the wrong button here is the most expensive mistake in this workflow. Interpose a
-        // confirmation modal so the destructive dispatch only fires after an active second
-        // press. On an empty basket the confirmation is skipped (nothing to void), so the flow
-        // is not slowed down when there's no risk.
-        voidBasketButton.addActionListener(e -> {
-            if (basketModel.isEmpty()) {
-                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
-                return;
-            }
-            int lines = basketModel.getSize();
-            String message = "This will void the whole basket (" + lines + " line"
-                    + (lines == 1 ? "" : "s") + "). This cannot be undone.";
-            showConfirm("Void Basket?", message, "Void Basket", true,
-                    () -> dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
-        });
+        // Void basket is destructive and one tap away on a touchscreen. Dispatch the "pressed"
+        // event and let the controller open the {@link VoidBasketConfirmView} — the view stays
+        // dumb, and the confirmation dialog owns the two-step commit through its own event
+        // vocabulary (VOID_BASKET_CONFIRM_PRESSED / VOID_BASKET_DECLINED).
+        voidBasketButton.addActionListener(e ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
         changeQtyButton.setEnabled(false);
         minor.add(changeQtyButton);
         minor.add(voidLineButton);
@@ -701,23 +755,6 @@ public class CustomerView extends JFrame {
         Map<String, Object> props = new HashMap<>();
         if (selected != null) props.put("lineItem", selected);
         dispatcher.dispatchPosEvent(new PosEvent(type, props));
-    }
-
-    /**
-     * Lazy-instantiated confirmation dialog. One instance per view, reused across prompts —
-     * the {@link ConfirmDialog#configure} method rewires the title, message, and callback for
-     * each open. Kept as a field, not created per press, so it inherits its position from the
-     * previous open and doesn't strobe on-screen when it reopens.
-     */
-    private ConfirmDialog confirmDialog;
-
-    private void showConfirm(String title, String message, String confirmText,
-                             boolean destructive, Runnable onConfirm) {
-        if (confirmDialog == null) {
-            confirmDialog = new ConfirmDialog(this);
-        }
-        confirmDialog.configure(title, message, confirmText, destructive, onConfirm);
-        confirmDialog.openDialog();
     }
 
     private JPanel buildTenderColumn() {
