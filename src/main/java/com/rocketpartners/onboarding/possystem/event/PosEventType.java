@@ -58,8 +58,9 @@ public enum PosEventType {
     TOTAL_PRESSED,
 
     /**
-     * The Pay Cash button was pressed. Input event; no properties. Opens the cash-entry
-     * dialog — actual tender waits for {@link #CASH_CONFIRM_PRESSED}.
+     * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
+     * dialog (step one of the two-step cash flow). Actual tender waits for
+     * {@link #CASH_CONFIRM_PRESSED} in step two.
      */
     TENDER_CASH_PRESSED,
 
@@ -70,17 +71,18 @@ public enum PosEventType {
     TENDER_CREDIT_PRESSED,
 
     /**
-     * The Exact Amount button on the cash dialog was pressed. Input event; no properties.
-     * Sets the total payable ({@code Amount Due}) to the transaction's grand total; does not
-     * tender. Change is computed against the (possibly adjusted) amount due at Confirm time.
+     * The Exact Amount button on the cash-mode-choice dialog was pressed. Input event; carries
+     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total) that the
+     * entry dialog is opened with pre-filled. Does not tender; the cashier still has to confirm
+     * the amount in step two.
      */
     CASH_EXACT_PRESSED,
 
     /**
-     * The Next Dollar button on the cash dialog was pressed. Input event; no properties.
-     * Sets the total payable ({@code Amount Due}) to the transaction's grand total rounded up
-     * to the next whole dollar; does not tender. Change is computed against the adjusted
-     * amount due at Confirm time.
+     * The Next Dollar button on the cash-mode-choice dialog was pressed. Input event; carries
+     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total rounded up
+     * to the next whole dollar) that the entry dialog is opened with pre-filled. Does not
+     * tender.
      */
     CASH_NEXT_DOLLAR_PRESSED,
 
@@ -91,8 +93,9 @@ public enum PosEventType {
     CASH_CONFIRM_PRESSED,
 
     /**
-     * The Cancel button on the cash dialog was pressed. Input event; no properties. Closes
-     * the dialog; the transaction remains {@code TOTALED} and re-tenderable.
+     * The Cancel button on either cash dialog (mode-choice or entry) was pressed. Input event;
+     * no properties. Closes both dialogs; the transaction remains {@code TOTALED} and
+     * re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}.
      */
     CASH_CANCEL_PRESSED,
 

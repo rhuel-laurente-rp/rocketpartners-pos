@@ -64,7 +64,7 @@ public class Transaction {
     /**
      * The customer-facing total the cashier settled at — {@link #grandTotal()} by default, but
      * may be higher when a cash tender used a rounding shortcut (e.g. Next Dollar rounded
-     * $7.30 up to $8.00 so the customer could hand over a single bill and receive no change).
+     * $7.30 up to $8.00 so the cashier will not be giving a change in decimal).
      * {@code null} until tendered.
      */
     private BigDecimal amountDue;
@@ -172,7 +172,7 @@ public class Transaction {
      * Voids the entire transaction. Terminal.
      *
      * @throws IllegalStateException if the transaction is already {@link TransactionState#PAID}
-     *                               or {@link TransactionState#VOIDED}
+     *                               or {@link TransactionState#VOIDED} or {@link TransactionState#TOTALLED}
      */
     public void voidBasket() {
         requireState("voidBasket", TransactionState.IN_PROGRESS, TransactionState.TOTALED);
