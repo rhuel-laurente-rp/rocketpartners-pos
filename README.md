@@ -36,5 +36,9 @@ Pass CLI args via Gradle's `--args="..."`:
 | `--lane-number` | `1` | Terminal / lane number for this POS. |
 | `--journal-host` | `localhost` | Virtual journal hostname (Phase 2). |
 | `--journal-port` | `12345` | Virtual journal TCP port (Phase 2). |
-| `--discount-engine-url` | `http://localhost:8080` | Discount engine base URL (Phase 3). |
+| `--discount-engine-url` | `http://localhost:8080` | Discount engine base URL (Phase 3, not yet implemented). |
+| `--scan-burst-gap-ms` | `50` | Max inter-character gap (ms) inside a scanner burst; input arriving beyond this gap is treated as human typing. |
+| `--log-dir` | `logs` | Directory to write on-disk JSONL journal files into. Each run appends to `journal-YYYY-MM-DD.jsonl`. |
 | `--help` / `-h` | — | Print usage and exit. |
+
+The virtual journal server (`runJournal`) accepts only `--port` (default `12345`) and `--help`.

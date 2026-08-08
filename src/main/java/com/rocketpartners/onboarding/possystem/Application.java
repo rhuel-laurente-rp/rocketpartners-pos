@@ -232,10 +232,10 @@ public final class Application {
     }
 
     /**
-     * Shuffles {@link #QUICK_ADD_UPC_POOL} and resolves the first {@link #QUICK_ADD_COUNT}
-     * UPCs against the pricebook. UPCs that fail to resolve are skipped (the pricebook could
-     * legitimately have been swapped in), and shuffling continues until either enough items
-     * are gathered or the pool is exhausted.
+     * Shuffles {@link #QUICK_ADD_UPC_POOL} once, then walks it in order and resolves each UPC
+     * against the pricebook, stopping when {@link #QUICK_ADD_COUNT} items have been gathered or
+     * the pool is exhausted. UPCs that fail to resolve are skipped (the pricebook could
+     * legitimately have been swapped in).
      */
     private static List<Item> pickQuickAddItems(ItemRepository repo) {
         List<String> upcs = new ArrayList<>(QUICK_ADD_UPC_POOL);

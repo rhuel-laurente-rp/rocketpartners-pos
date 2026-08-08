@@ -32,9 +32,7 @@ import java.util.UUID;
  * the rate as a field avoids introducing a service layer prematurely; a more sophisticated tax
  * model can replace this without changing the aggregate's contract.</p>
  *
- * <p>See {@code docs/Phase 1/domain-model.md} for the broader domain model. Note that the
- * state names here ({@code IN_PROGRESS / TOTALED / PAID / VOIDED}) intentionally differ from
- * the doc's diagram; docs will be synced separately.</p>
+ * <p>See {@code docs/Phase 1/domain-model.md} for the broader domain model.</p>
  */
 @Getter
 public class Transaction {
@@ -171,8 +169,12 @@ public class Transaction {
     /**
      * Voids the entire transaction. Terminal.
      *
-     * @throws IllegalStateException if the transaction is already {@link TransactionState#PAID}
-     *                               or {@link TransactionState#VOIDED} or {@link TransactionState#TOTALLED}
+     * <p>Legal in {@link TransactionState#IN_PROGRESS} or {@link TransactionState#TOTALED};
+     * throws in {@link TransactionState#PAID} or {@link TransactionState#VOIDED}.</p>
+     *
+     * @throws IllegalStateException if the transaction is not
+     *                               {@link TransactionState#IN_PROGRESS} or
+     *                               {@link TransactionState#TOTALED}
      */
     public void voidBasket() {
         requireState("voidBasket", TransactionState.IN_PROGRESS, TransactionState.TOTALED);

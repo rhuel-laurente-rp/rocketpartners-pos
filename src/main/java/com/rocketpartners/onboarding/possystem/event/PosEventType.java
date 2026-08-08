@@ -12,10 +12,6 @@ package com.rocketpartners.onboarding.possystem.event;
  *       Transaction state.</li>
  * </ul>
  *
- * <p>This enum starts with the lifecycle shape the current milestone requires. The finer-grained
- * UI-layer request events named in {@code docs/Phase 1/event-flow.md} (e.g. {@code UPC_ENTERED},
- * {@code REQUEST_ADD_ITEM}) will continue to be added alongside their views and controllers
- * in later commits.</p>
  */
 public enum PosEventType {
 

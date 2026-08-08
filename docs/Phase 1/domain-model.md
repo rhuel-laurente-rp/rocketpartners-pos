@@ -9,34 +9,42 @@ classDiagram
     class Item {
         +String upc
         +String description
+        +String displayName
         +BigDecimal unitPrice
+        +getDisplayLabel() String
     }
 
     class LineItem {
         +Item item
         +int quantity
-        +BigDecimal extendedTotal()
         +boolean voided
+        +extendedTotal() BigDecimal
     }
 
     class Transaction {
         +String transactionId
+        +Instant createdAt
         +List~LineItem~ lineItems
         +List~Discount~ discounts
+        +BigDecimal taxRate
         +TransactionState state
         +TenderType tenderType
         +BigDecimal cashTendered
-        +BigDecimal subtotal()
-        +BigDecimal discountTotal()
-        +BigDecimal taxTotal()
-        +BigDecimal grandTotal()
-        +BigDecimal changeDue()
+        +BigDecimal amountDue
+        +subtotal() BigDecimal
+        +discountTotal() BigDecimal
+        +taxTotal() BigDecimal
+        +grandTotal() BigDecimal
+        +amountDue() BigDecimal
+        +changeDue() BigDecimal
         +addLineItem(Item, int)
         +voidLine(LineItem)
+        +updateLineItemQuantity(LineItem, int)
         +voidBasket()
         +total()
         +applyDiscount(Discount)
         +tender(TenderType, BigDecimal)
+        +tender(TenderType, BigDecimal, BigDecimal)
         +payNextDollar()
     }
 
@@ -85,7 +93,7 @@ The state field on `Transaction` mirrors the user flow in [user-flow.md](user-fl
 ```mermaid
 stateDiagram-v2
     [*] --> IN_PROGRESS
-    IN_PROGRESS --> IN_PROGRESS: addLineItem / voidLine
+    IN_PROGRESS --> IN_PROGRESS: addLineItem / voidLine / updateLineItemQuantity
     IN_PROGRESS --> VOIDED: voidBasket
     IN_PROGRESS --> TOTALED: total()
     TOTALED --> TOTALED: applyDiscount
@@ -95,17 +103,40 @@ stateDiagram-v2
     VOIDED --> [*]
 ```
 
-`addLineItem` and `voidLine` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `payNextDollar` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
+`addLineItem`, `voidLine`, `updateLineItemQuantity` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `payNextDollar` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
+
+## Money — one rounding site
+
+- **`BigDecimal` everywhere.** Never `double`.
+- **Intermediate totals are unrounded.** `subtotal()`, `discountTotal()`, `taxTotal()`, and `LineItem.extendedTotal()` return raw values so rounding errors don't compound.
+- **`grandTotal()` is the sole rounding site.** Scale 2, `HALF_UP`.
+- **Tax.** A flat `taxRate` field on `Transaction`, applied after totaling to the post-discount subtotal: `taxTotal = (subtotal − discountTotal) × taxRate`. Not a per-line concern; `Item` does not carry a taxable flag.
+
+## Next Dollar — the change-simplification device
+
+**Next Dollar ceils the amount due, not the tender.** `payNextDollar()` computes `ceil(grandTotal())` and calls the three-argument tender overload with that value as *both* the cash amount and the settled `amountDue`. `changeDue()` computes `cashTendered − amountDue()` — measuring against the settled amount, not the raw grand total.
+
+**Why.** To keep coins out of change. On a $7.30 basket:
+
+- **Exact Amount tender:** the customer owes $7.30. Handing over $10.00 produces $2.70 change — a quarter, two dimes, and a nickel.
+- **Next Dollar tender:** the amount due becomes $8.00. Handing over $8.00 produces $0.00 change; handing over $10.00 produces exactly $2.00 change — one banknote. The cashier never counts coins.
+
+The customer gives up $0.70 in exchange for a workflow where the coin drawer never opens on this class of tender. That is the substance of the feature, not a rounding footnote.
+
+**Corroboration.** `ReceiptFormatter` prints a dedicated `Amount Due (Next Dollar):` line when `amountDue()` differs from `grandTotal()`, so the audit trail records the mode that was used. The `Amount Due (Exact):` variant appears when they match. Both lines print only on PAID transactions.
+
+**What would break the feature.** Computing change against `grandTotal()` instead of `amountDue()`. Someone reading `changeDue()` fresh will squint at `cashTendered − amountDue()` and want to "fix" it to `cashTendered − grandTotal()`. Do not. That change destroys the whole feature: $8.00 tendered against a $7.30 grand total would produce $0.70 change again, and the cashier is back to counting coins.
+
+`Transaction.amountDue()` returns `grandTotal()` when the field is null, so the two-argument tender path is unaffected — this is a strict superset, not a swap.
 
 ## Notes on the shape
 
-- **`Item` vs `LineItem`.** `Item` is the product record from the Pricebook — immutable, one per UPC. `LineItem` is that product's appearance on a specific Transaction with a quantity; two scans of the same UPC produce either two `LineItem`s or one `LineItem` with `quantity = 2` (implementation choice — pick one and be consistent).
-- **`Discount` is a value on a Transaction, not a rule.** The rule that produced it (BOGO, "10% off produce", etc.) lives in the discount engine's database (Phase 3). What the POS holds is the *result* of applying a rule: an amount and a description for the Receipt.
-- **Money is `BigDecimal`.** Never `double`. Rounding happens once, at `grandTotal()`.
-- **Tax is a flat, transaction-level rate.** Applied after totaling to the post-discount subtotal — `taxTotal = (subtotal − discountTotal) × taxRate`. Not a per-line concern; `Item` does not carry a taxable flag.
-- **`Void`** is captured two ways: `voidBasket()` transitions the whole Transaction to the terminal `VOIDED` state; `voidLine` marks a `LineItem` as `voided` (soft-delete keeps the audit trail for the journal).
-- **Pay Next Dollar** is a cash-tender helper on `Transaction`: rounds `grandTotal()` up to the next whole dollar and tenders that amount as `CASH`. A whole-dollar total is a no-op (tenders exactly the total).
-- **Receipt** is not modeled as a class here — it's a render of a `PAID` `Transaction`. If a `Receipt` class emerges later, it's a projection, not a new source of truth.
+- **`Item` vs `LineItem`.** `Item` is the product record from the pricebook — one per UPC. `LineItem` is that product's appearance on a specific Transaction with a quantity; a second scan of the same UPC increments the existing line rather than appending a new one, per `Transaction.addLineItem` and `TransactionService.addItemByUpc`.
+- **`Item.displayName`** is a fourth pricebook column (customer-friendly label) that falls back to `description` via `getDisplayLabel()`. Used by `QuickAddTile` and `BasketCellRenderer`. The bundled `pricebook.tsv` carries three columns today, so the fallback path is what actually runs — the code is ready for the fourth column whenever it's added.
+- **`Discount` is a value on a Transaction, not a rule.** The rule that produced it (BOGO, "10% off produce", etc.) will live in the discount engine's database (Phase 3). What the POS holds is the *result* of applying a rule: an amount and a description for the Receipt.
+- **`Void`** is captured two ways. `voidBasket()` transitions the whole Transaction to the terminal `VOIDED` state; `voidLine` marks a `LineItem` as `voided` (soft-delete keeps the audit trail for the journal). `updateLineItemQuantity(li, 0)` on `TransactionService` routes through `voidLine` — one implementation for both paths.
+- **Quantity is always ≥ 1** on a non-voided `LineItem`. `updateLineItemQuantity` is bounded above by `TransactionService.getMaxLineQuantity()` (default `TransactionService.DEFAULT_MAX_LINE_QUANTITY = 999`, error code `ABOVE_MAX_QUANTITY` on overflow). Passing zero is not a quantity change — it is a void.
+- **Receipt** is not modeled as a class. It is a render of a `PAID` `Transaction`, produced by `ReceiptFormatter`.
 
 ## Where these live
 
