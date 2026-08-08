@@ -9,6 +9,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -17,6 +18,7 @@ import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -68,6 +70,15 @@ class PosDialog extends JDialog {
 
     private final JLabel titleLabel = new JLabel();
 
+    /**
+     * Right-aligned header accessory slot: money read-out (via {@link #setHeaderAmount}) or
+     * arbitrary component (via {@link #setHeaderAccessory}). Empty by default.
+     */
+    private final JPanel headerAccessory = new JPanel(new BorderLayout());
+
+    /** Cached money label used by {@link #setHeaderAmount}; created lazily. */
+    private JLabel headerAmountLabel;
+
     /** Set on dialog open. May be {@code null} if no explicit primary was configured. */
     private PosButton primaryButton;
 
@@ -85,7 +96,11 @@ class PosDialog extends JDialog {
      * @param title the dialog title
      */
     protected PosDialog(JFrame owner, String title) {
-        super(owner, title, true);
+        // Empty native title so the title only appears once — in the custom dark header strip.
+        // A non-empty JDialog title renders in the OS-provided window title bar too, which
+        // duplicates the label and reads as noisy chrome.
+        super(owner, "", true);
+        titleLabel.setText(title);
         setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
         setResizable(false);
 
@@ -167,10 +182,43 @@ class PosDialog extends JDialog {
         this.initialFocus = c;
     }
 
-    /** Updates the dialog title (also updates the header strip label). */
+    /**
+     * Updates the header title label. The native window title is deliberately left empty (set
+     * once at construction) so this label is the only place a title appears.
+     */
     public void setDialogTitle(String title) {
-        setTitle(title);
         titleLabel.setText(title);
+    }
+
+    /**
+     * Renders a money read-out on the right side of the header strip, opposite the title.
+     * {@link PosTheme#HEADLINE} weight, white text. Shared chrome — every dialog that has an
+     * "amount due" concept surfaces it here rather than duplicating a body row.
+     *
+     * @param amount the amount to display; must not be {@code null}
+     */
+    public void setHeaderAmount(BigDecimal amount) {
+        if (amount == null) throw new IllegalArgumentException("amount must not be null");
+        if (headerAmountLabel == null) {
+            headerAmountLabel = new JLabel();
+            headerAmountLabel.setFont(PosTheme.base(Font.BOLD, PosTheme.HEADLINE));
+            headerAmountLabel.setForeground(Color.WHITE);
+            headerAmountLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+        }
+        headerAmountLabel.setText(PosTheme.money(amount));
+        setHeaderAccessory(headerAmountLabel);
+    }
+
+    /**
+     * Populates the right side of the header strip with the given component. Prefer
+     * {@link #setHeaderAmount(BigDecimal)} for money read-outs; this is the general-purpose slot
+     * for anything else a subclass wants to surface up top.
+     */
+    public void setHeaderAccessory(JComponent accessory) {
+        headerAccessory.removeAll();
+        if (accessory != null) headerAccessory.add(accessory, BorderLayout.CENTER);
+        headerAccessory.revalidate();
+        headerAccessory.repaint();
     }
 
     // ---- Lifecycle --------------------------------------------------------
@@ -202,6 +250,9 @@ class PosDialog extends JDialog {
         titleLabel.setFont(PosTheme.base(Font.BOLD, PosTheme.BUTTON));
         titleLabel.setForeground(Color.WHITE);
         header.add(titleLabel, BorderLayout.WEST);
+
+        headerAccessory.setOpaque(false);
+        header.add(headerAccessory, BorderLayout.EAST);
         return header;
     }
 
@@ -263,5 +314,18 @@ class PosDialog extends JDialog {
             if (c instanceof PosButton pb) out.add(pb);
         }
         return out;
+    }
+
+    /** For tests: the header title label rendered inside the dark strip. */
+    JLabel getHeaderTitleLabelForTest() {
+        return titleLabel;
+    }
+
+    /**
+     * For tests: the header money label, or {@code null} if
+     * {@link #setHeaderAmount(BigDecimal)} was never called on this dialog.
+     */
+    JLabel getHeaderAmountLabelForTest() {
+        return headerAmountLabel;
     }
 }

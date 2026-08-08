@@ -13,6 +13,7 @@ import com.rocketpartners.onboarding.possystem.component.JournalListener;
 import com.rocketpartners.onboarding.possystem.component.Journals;
 import com.rocketpartners.onboarding.possystem.component.LocalJournal;
 import com.rocketpartners.onboarding.possystem.component.RemoteJournal;
+import com.rocketpartners.onboarding.possystem.display.CashModeChoiceView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
@@ -146,8 +147,10 @@ public final class Application {
             remoteJournal.setConnectionListener(state ->
                     view.setJournalConnected(state == RemoteJournal.ConnectionState.CONNECTED));
 
+            CashModeChoiceView cashChoiceView = new CashModeChoiceView(view, pos);
             PayWithCashView cashView = new PayWithCashView(view, pos);
-            PayWithCashViewController cashController = new PayWithCashViewController(cashView);
+            PayWithCashViewController cashController =
+                    new PayWithCashViewController(cashChoiceView, cashView);
 
             PayWithCardView cardView = new PayWithCardView(view);
             PayWithCardViewController cardController = new PayWithCardViewController(cardView);

@@ -186,7 +186,14 @@ public class CustomerViewController implements IController, IPosEventListener {
             return;
         }
         // Copy the aggregate's line-item list so the view (and any observer, such as a
-        // Mockito verify) sees a snapshot that reflects the exact state at render time.
-        view.updateBasket(new ArrayList<>(tx.getLineItems()), tx.subtotal());
+        // Mockito verify) sees a snapshot that reflects the exact state at render time. Feed
+        // the full breakdown — subtotal, discount, tax, grand total — so the inline summary
+        // strip renders live tax instead of always $0.00.
+        view.updateBasket(
+                new ArrayList<>(tx.getLineItems()),
+                tx.subtotal(),
+                tx.discountTotal(),
+                tx.taxTotal(),
+                tx.grandTotal());
     }
 }

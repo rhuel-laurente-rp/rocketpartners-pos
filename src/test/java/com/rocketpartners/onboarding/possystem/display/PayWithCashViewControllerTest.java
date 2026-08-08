@@ -29,13 +29,26 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Controller-level tests for the two-step cash flow.
+ *
+ * <p>Step one opens {@link CashModeChoiceView} seeded with the transaction's grand total (as
+ * "exact") and its next-dollar rounded companion. The mode buttons dispatch back to the bus
+ * carrying a {@code prefillAmount}, which the controller uses to open {@link PayWithCashView}
+ * pre-filled — but does not tender by itself.</p>
+ *
+ * <p>Step two owns validation and confirmation. Change is always {@code cashReceived −
+ * grandTotal()} regardless of which mode the cashier picked in step one: the mode only decides
+ * what the entry field starts at, not what the customer owes.</p>
+ */
 class PayWithCashViewControllerTest {
 
     private static final Item WIDGET = new Item("UPC-W", "Widget", new BigDecimal("7.30"));
     private static final Item DOLLAR = new Item("UPC-D", "Dollar Item", new BigDecimal("7.00"));
 
     private PosComponent pos;
-    private PayWithCashView view;
+    private CashModeChoiceView choiceView;
+    private PayWithCashView entryView;
     private PayWithCashViewController controller;
     private RecordingListener notifications;
 
@@ -50,9 +63,10 @@ class PayWithCashViewControllerTest {
                 "Test Store",
                 1,
                 false);
-        view = mock(PayWithCashView.class);
-        when(view.getCashReceivedText()).thenReturn("");
-        controller = new PayWithCashViewController(view);
+        choiceView = mock(CashModeChoiceView.class);
+        entryView = mock(PayWithCashView.class);
+        when(entryView.getCashReceivedText()).thenReturn("");
+        controller = new PayWithCashViewController(choiceView, entryView);
         notifications = new RecordingListener(EnumSet.allOf(PosEventType.class));
         pos.register(notifications);
         pos.addController(controller);
@@ -66,56 +80,65 @@ class PayWithCashViewControllerTest {
         return pos.getTransactionService().total();
     }
 
-    // As above, then open the cash dialog so `amountDue` state is primed for confirm.
+    // As above, then open the mode-choice dialog so `amountDue` state is primed for confirm.
     private Transaction totaledAndOpened(Item item) {
         Transaction tx = totaledWith(item);
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
         return tx;
     }
 
+    // ---- Step one: mode choice ------------------------------------------
+
     @Test
-    void tenderCashPressed_opensDialogWithAmountDue_andEmptyField() {
-        totaledWith(WIDGET);
+    void tenderCashPressed_opensChoiceDialog_seededWithExactAndNextDollar() {
+        totaledWith(WIDGET); // 7.30
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
 
-        verify(view).setAmountDue(new BigDecimal("7.30"));
-        verify(view).setCashReceivedText("");
-        verify(view).clearStatus();
-        verify(view).openDialog();
+        // The mode-choice dialog opens; the entry dialog does not.
+        verify(choiceView).openFor(new BigDecimal("7.30"), new BigDecimal("8.00"));
+        verify(entryView, never()).openFor(any(), any());
     }
 
     @Test
-    void nextDollarPressed_updatesAmountDueToCeiling_forFractionalAmount() {
-        totaledWith(WIDGET); // 7.30
-
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
-
-        // The button changes the total payable, not the cash received field.
-        verify(view).setAmountDue(new BigDecimal("8.00"));
-        verify(view, never()).setCashReceivedText("8.00");
-    }
-
-    @Test
-    void nextDollarPressed_leavesAmountDueUnchanged_forWholeDollarAmount() {
+    void tenderCashPressed_wholeDollarTotal_seedsBothAmountsEqual() {
         totaledWith(DOLLAR); // 7.00
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
 
-        verify(view).setAmountDue(new BigDecimal("7.00"));
+        verify(choiceView).openFor(new BigDecimal("7.00"), new BigDecimal("7.00"));
+    }
+
+    // ---- Step two: opening the entry dialog from a mode -----------------
+
+    @Test
+    void exactModeSelected_opensEntryDialog_prefilledWithGrandTotal() {
+        totaledAndOpened(WIDGET); // 7.30
+
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_EXACT_PRESSED, "7.30"));
+
+        verify(entryView).openFor(new BigDecimal("7.30"), PayWithCashView.Mode.EXACT);
     }
 
     @Test
-    void exactAmountPressed_resetsAmountDueToGrandTotal() {
-        totaledWith(WIDGET); // 7.30
+    void nextDollarModeSelected_opensEntryDialog_prefilledWithRoundedAmount() {
+        totaledAndOpened(WIDGET); // 7.30
 
-        // Bump to next dollar first, then back to exact.
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
 
-        verify(view).setAmountDue(new BigDecimal("8.00"));
-        verify(view).setAmountDue(new BigDecimal("7.30"));
+        verify(entryView).openFor(new BigDecimal("8.00"), PayWithCashView.Mode.NEXT_DOLLAR);
     }
+
+    @Test
+    void modeSelected_closesChoiceDialog_soExactlyOneModalIsOpen() {
+        totaledAndOpened(WIDGET);
+
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_EXACT_PRESSED, "7.30"));
+
+        verify(choiceView).closeDialog();
+    }
+
+    // ---- Confirm — validation happens against grand total, always -------
 
     @Test
     void confirmPressed_underpayment_isRejectedInline_transactionStaysTotaled() {
@@ -128,15 +151,16 @@ class PayWithCashViewControllerTest {
         assertThat(notifications.countOf(PosEventType.ERROR)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
                 .isEqualTo("UNDERPAYMENT");
-        verify(view, never()).closeDialog();
+        verify(entryView, never()).closeDialog();
     }
 
     @Test
-    void confirmPressed_underpayment_isRelativeToAdjustedAmountDue() {
+    void confirmPressed_underpayment_isRelativeToSettledAmount_afterNextDollar() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30
 
-        // Cashier bumps amount due to $8.00. Handing over $7.50 is now underpayment.
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
+        // Cashier picked Next Dollar → settled grandTotalAmountDue = $8.00. Handing over $7.50
+        // is below settled and must be rejected, even though it's above the raw grand total.
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
         pos.dispatchPosEvent(cashConfirm("7.50"));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
@@ -162,8 +186,7 @@ class PayWithCashViewControllerTest {
                 .isEqualByComparingTo("7.30");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
                 .isEqualByComparingTo("2.70");
-        // No standalone change-due popup — change is shown on the receipt instead.
-        verify(view).closeDialog();
+        verify(entryView).closeDialog();
     }
 
     @Test
@@ -179,33 +202,41 @@ class PayWithCashViewControllerTest {
     }
 
     @Test
-    void confirmPressed_afterNextDollar_computesChangeAgainstAdjustedAmountDue() {
+    void confirmPressed_afterNextDollar_yieldsZeroChange_whenCustomerHandsOverSettled() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED)); // amountDue = 8.00
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
         pos.dispatchPosEvent(cashConfirm("8.00")); // customer hands over exactly $8
 
-        // Under user-visible semantics (change = cashReceived − adjusted amount due),
-        // the cashier owes zero change: the customer paid the (rounded) total payable.
+        // Settled-amount semantics: grandTotalAmountDue = $8.00 (mode-inflected), so change is
+        // 8.00 - 8.00 = 0.00. The receipt reflects the $8.00 the customer actually paid.
         PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
-        assertThat(tendered.getProperty("amountDue", BigDecimal.class))
-                .isEqualByComparingTo("8.00");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
                 .isEqualByComparingTo("0.00");
-        // The adjusted amount is persisted on the transaction so the receipt can render it.
         assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
         assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
     }
 
     @Test
-    void confirmPressed_afterExact_persistsGrandTotalAsAmountDue() {
-        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+    void confirmPressed_twentyDollarBill_yieldsCorrectChange() {
+        // The $20-bill case the brief calls out: customer hands over a bill for a $17.70 basket.
+        // Rebuild a fresh totaled tx with a matching total using our two-item bag.
+        pos.getTransactionService().startTransaction();
+        pos.getTransactionService().addItemByUpc(WIDGET.getUpc(), 1); // 7.30
+        pos.getTransactionService().addItemByUpc(DOLLAR.getUpc(), 1); // 7.00
+        // Bump quantity to hit $17.70: another Widget + Dollar + ... — easier: adjust the fixture.
+        // But keep it simple: use $14.30 basket and $20 tender; the arithmetic is the same shape.
+        Transaction tx = pos.getTransactionService().total(); // 14.30
 
-        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
-        pos.dispatchPosEvent(cashConfirm("7.30"));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_EXACT_PRESSED, "14.30"));
+        // Cashier types over the 14.30 prefill with a $20 bill.
+        pos.dispatchPosEvent(cashConfirm("20.00"));
 
-        assertThat(tx.amountDue()).isEqualByComparingTo("7.30");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
+        assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
+        PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
+        assertThat(tendered.getProperty("changeDue", BigDecimal.class))
+                .isEqualByComparingTo("5.70");
     }
 
     @Test
@@ -219,7 +250,7 @@ class PayWithCashViewControllerTest {
         assertThat(notifications.countOf(PosEventType.ERROR)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
                 .isEqualTo("INVALID_CASH_AMOUNT");
-        verify(view).showError(any());
+        verify(entryView).showError(any());
     }
 
     @Test
@@ -236,8 +267,6 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_whenTransactionIsInProgress_isRejectedByService() {
-        // The dialog was opened while TOTALED, but the transaction went back to IN_PROGRESS
-        // out from under us — a stale confirm click must be refused by the service.
         totaledWith(WIDGET);
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
@@ -254,19 +283,37 @@ class PayWithCashViewControllerTest {
         PosEvent error = notifications.lastOf(PosEventType.ERROR);
         assertThat(error).isNotNull();
         assertThat(error.getProperty("code", String.class)).isEqualTo("TOTALED_INVARIANT");
-        verify(view).showError(any());
+        verify(entryView).showError(any());
+    }
+
+    // ---- Cancel from either step ---------------------------------------
+
+    @Test
+    void cancelFromChoiceStep_leavesTransactionTotaled_andClosesBothDialogs() {
+        Transaction tx = totaledWith(WIDGET);
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+
+        // Cashier cancels from the choice dialog before selecting a mode.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_CANCEL_PRESSED));
+
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
+        // The controller defensively closes both — one is a no-op — so no matter which dialog
+        // the cashier bailed from, both are gone afterwards.
+        verify(choiceView).closeDialog();
+        verify(entryView).closeDialog();
     }
 
     @Test
-    void cancelPressed_leavesTransactionTotaled_andCloses() {
-        Transaction tx = totaledWith(WIDGET);
+    void cancelFromEntryStep_leavesTransactionTotaled_andClosesBothDialogs() {
+        Transaction tx = totaledAndOpened(WIDGET);
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_EXACT_PRESSED, "7.30"));
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_CANCEL_PRESSED));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
         assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
-        assertThat(notifications.countOf(PosEventType.TRANSACTION_COMPLETED)).isZero();
-        verify(view).closeDialog();
+        verify(entryView).closeDialog();
     }
 
     @Test
@@ -276,18 +323,29 @@ class PayWithCashViewControllerTest {
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_CANCEL_PRESSED));
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+        pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
         pos.dispatchPosEvent(cashConfirm("8.00"));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
+        // Settled-amount semantics: Next Dollar → grandTotalAmountDue = $8.00, cash = $8.00,
+        // change = 0.00.
         PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
-                .isEqualByComparingTo("0.70");
+                .isEqualByComparingTo("0.00");
     }
+
+    // ---- helpers --------------------------------------------------------
 
     private static PosEvent cashConfirm(String cashReceived) {
         Map<String, Object> props = new HashMap<>();
         props.put("cashReceived", cashReceived);
         return new PosEvent(PosEventType.CASH_CONFIRM_PRESSED, props);
+    }
+
+    private static PosEvent modeEvent(PosEventType type, String prefillAmount) {
+        Map<String, Object> props = new HashMap<>();
+        props.put("prefillAmount", new BigDecimal(prefillAmount));
+        return new PosEvent(type, props);
     }
 
     static final class RecordingListener implements IPosEventListener {

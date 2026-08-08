@@ -52,7 +52,7 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("title.confirmDialog",      "Confirm");
         LABELS.put("title.errorDialog",        "Error");
         LABELS.put("title.changeQuantity",     "Change Quantity");
-        LABELS.put("title.payCash",            "Pay Cash");
+        LABELS.put("title.payCash",            "Cash Payment");
         LABELS.put("title.payDebit",           "Pay Debit");
         LABELS.put("title.payCredit",          "Pay Credit");
         LABELS.put("title.receipt",            "Receipt");
