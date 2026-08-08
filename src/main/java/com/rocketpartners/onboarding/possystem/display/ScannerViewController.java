@@ -244,7 +244,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             // events.
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
                  CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
-                 TRANSACTION_COMPLETED -> suspendCapture();
+                 TRANSACTION_COMPLETED -> resumeCapture();
             case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();

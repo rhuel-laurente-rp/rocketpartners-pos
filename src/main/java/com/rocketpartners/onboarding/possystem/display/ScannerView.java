@@ -125,6 +125,7 @@ public class ScannerView extends JPanel {
 
     public void setStatusHint(String message) {
         statusHint.setText(message == null ? " " : message);
+        System.out.println(message);
         java.awt.Color colour = PosTheme.MUTED;
         if (message != null) {
             if (message.equals(STATUS_LOCKED)) colour = PosTheme.STOP;

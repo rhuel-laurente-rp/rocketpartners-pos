@@ -171,6 +171,14 @@ public final class Application {
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
 
             ScannerView scannerView = new ScannerView(pos);
+            // Direct reset from the receipt's Start Next Sale button so the scan bar hint flips
+            // from STATUS_LOCKED to STATUS_READY the moment the modal closes, not later in the
+            // RECEIPT_DISMISSED event chain. Belt-and-braces with ScannerViewController's own
+            // handler — the event still runs, this just closes the ordering race the user hit.
+            receiptView.setOnDismissed(() -> {
+                scannerView.setStatusHint(ScannerView.STATUS_READY);
+                scannerView.requestScanFieldFocus();
+            });
             view.installScanBar(scannerView);
             BarcodeInputBuffer scanBuffer = new BarcodeInputBuffer(
                     args.scanBurstGapMs,
