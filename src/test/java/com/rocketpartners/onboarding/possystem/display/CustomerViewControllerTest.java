@@ -24,6 +24,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -65,7 +66,17 @@ class CustomerViewControllerTest {
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
         assertThat(tx).isNotNull();
         assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // The controller feeds the full breakdown (subtotal, discount, tax, total) so the
+        // inline summary strip renders live tax; on an empty basket every figure compares
+        // equal to zero. Compare by value — the controller's derived figures come from
+        // BigDecimal arithmetic (unrounded intermediates, rounded grand total) so scales
+        // differ across arguments.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
         verify(view).setBasketInputEnabled(true);
         verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
@@ -84,7 +95,14 @@ class CustomerViewControllerTest {
         assertThat(lines).hasSize(1);
         assertThat(lines.get(0).getItem()).isEqualTo(WIDGET);
         assertThat(notifications.countOf(PosEventType.ITEM_ADDED)).isEqualTo(1);
-        verify(view).updateBasket(eq(new ArrayList<>(lines)), eq(new BigDecimal("10.00")));
+        // subtotal $10.00, no discount, tax rate 0 → $0.00 tax, grand total $10.00.
+        // Compare BigDecimal args by value — see onStart test for the rationale.
+        verify(view).updateBasket(
+                eq(new ArrayList<>(lines)),
+                argThat(v -> v != null && v.compareTo(new BigDecimal("10.00")) == 0),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(v -> v != null && v.compareTo(new BigDecimal("10.00")) == 0));
     }
 
     @Test
@@ -117,7 +135,14 @@ class CustomerViewControllerTest {
         assertThat(notifications.countOf(PosEventType.LINE_VOIDED)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.LINE_VOIDED)
                 .getProperty("lineItem", LineItem.class)).isSameAs(line);
-        verify(view).updateBasket(any(), eq(BigDecimal.ZERO));
+        // Voided line contributes zero — subtotal, tax, and grand total all compare equal
+        // to zero regardless of BigDecimal scale.
+        verify(view).updateBasket(
+                any(),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
     }
 
     @Test
@@ -170,7 +195,13 @@ class CustomerViewControllerTest {
         verify(view).setBasketInputEnabled(true);
         verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // Fresh transaction opened by beginNewTransaction — empty basket, all zeros.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
     }
 
     @Test
@@ -280,7 +311,13 @@ class CustomerViewControllerTest {
         verify(view).setBasketInputEnabled(true);
         verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // Fresh transaction opened after receipt dismissal — empty basket, all zeros.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
     }
 
     @Test
@@ -331,6 +368,16 @@ class CustomerViewControllerTest {
     }
 
     // ---- Helpers -----------------------------------------------------------
+
+    /**
+     * A Mockito matcher that accepts any {@link BigDecimal} whose value compares equal to
+     * zero. Necessary because {@code Transaction} returns unrounded subtotals/discounts/tax
+     * ({@code BigDecimal.ZERO}, scale 0) but rounded grand totals (scale 2), and
+     * {@link BigDecimal#equals} distinguishes {@code 0} from {@code 0.00}.
+     */
+    private static org.mockito.ArgumentMatcher<BigDecimal> zeroByValue() {
+        return v -> v != null && v.compareTo(BigDecimal.ZERO) == 0;
+    }
 
     private static PosEvent quickAdd(String upc) {
         Map<String, Object> props = new HashMap<>();

@@ -80,10 +80,22 @@ class PayWithCashViewControllerTest {
         return pos.getTransactionService().total();
     }
 
-    // As above, then open the mode-choice dialog so `amountDue` state is primed for confirm.
+    // As above, then open the mode-choice dialog. Leaves `grandTotalAmountDue` unset — the
+    // caller must dispatch a mode-select event before confirming.
     private Transaction totaledAndOpened(Item item) {
         Transaction tx = totaledWith(item);
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+        return tx;
+    }
+
+    // As above, then also drop into Exact mode so `grandTotalAmountDue` is primed and
+    // CASH_CONFIRM_PRESSED runs the confirm handler. For tests that need Next Dollar
+    // semantics, dispatch CASH_NEXT_DOLLAR_PRESSED explicitly instead of this helper.
+    private Transaction totaledAndExactReady(Item item) {
+        Transaction tx = totaledAndOpened(item);
+        Map<String, Object> props = new HashMap<>();
+        props.put("prefillAmount", tx.grandTotal());
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED, props));
         return tx;
     }
 
@@ -142,7 +154,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_underpayment_isRejectedInline_transactionStaysTotaled() {
-        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+        Transaction tx = totaledAndExactReady(WIDGET); // 7.30
 
         pos.dispatchPosEvent(cashConfirm("5.00"));
 
@@ -170,7 +182,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_overpayment_paysAndProducesChange() {
-        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+        Transaction tx = totaledAndExactReady(WIDGET); // 7.30
 
         pos.dispatchPosEvent(cashConfirm("10.00"));
 
@@ -191,7 +203,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_exactAmount_paysWithZeroChange() {
-        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+        Transaction tx = totaledAndExactReady(WIDGET); // 7.30
 
         pos.dispatchPosEvent(cashConfirm("7.30"));
 
@@ -241,7 +253,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_nonNumericInput_isRejected() {
-        Transaction tx = totaledAndOpened(WIDGET);
+        Transaction tx = totaledAndExactReady(WIDGET);
 
         pos.dispatchPosEvent(cashConfirm("banana"));
 
@@ -255,7 +267,7 @@ class PayWithCashViewControllerTest {
 
     @Test
     void confirmPressed_negativeInput_isRejected() {
-        Transaction tx = totaledAndOpened(WIDGET);
+        Transaction tx = totaledAndExactReady(WIDGET);
 
         pos.dispatchPosEvent(cashConfirm("-5.00"));
 
@@ -269,6 +281,11 @@ class PayWithCashViewControllerTest {
     void confirmPressed_whenTransactionIsInProgress_isRejectedByService() {
         totaledWith(WIDGET);
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
+        // Mode-select so `grandTotalAmountDue` is primed; the CASH_CONFIRM_PRESSED below
+        // must reach the service and be rejected there, not short-circuit in the controller.
+        Map<String, Object> exact = new HashMap<>();
+        exact.put("prefillAmount", new BigDecimal("7.30"));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED, exact));
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
         pos.getTransactionService().voidBasket();
         pos.getTransactionService().startTransaction();

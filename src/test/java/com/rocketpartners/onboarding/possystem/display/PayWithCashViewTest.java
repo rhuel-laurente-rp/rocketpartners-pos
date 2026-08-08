@@ -3,6 +3,7 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -32,10 +33,26 @@ class PayWithCashViewTest {
     private PayWithCashView view;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         dispatcher = new RecordingDispatcher();
-        view = new PayWithCashView(null, dispatcher);
+        SwingUtilities.invokeAndWait(() -> {
+            view = new PayWithCashView(null, dispatcher);
+            // PosDialog is modal; setVisible(true) inside openFor(...) would enter a nested
+            // dispatch loop and stall the build. Force non-modal for tests so openDialog()
+            // returns immediately and the wiring assertions can inspect the primed state.
+            view.setModal(false);
+        });
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (view != null) {
+            SwingUtilities.invokeAndWait(() -> {
+                view.setVisible(false);
+                view.dispose();
+            });
+        }
     }
 
     // ---- DocumentFilter --------------------------------------------------
@@ -149,8 +166,11 @@ class PayWithCashViewTest {
         openWith("7.30", "7.30");
         JFormattedTextField field = view.getCashFieldForTest();
 
-        assertThat(field.getText()).isEqualTo("7.30");
-        // Selection covers the whole prefill: a keystroke replaces it wholesale.
+        // The prefill is "0" (not the amount due) — the amount due lives in the header and
+        // in the status strip, and the field starts at zero so the cashier types the actual
+        // cash received rather than editing the total. Selection covers the whole prefill so
+        // the first keystroke replaces it wholesale.
+        assertThat(field.getText()).isEqualTo("0");
         assertThat(field.getSelectionStart()).isZero();
         assertThat(field.getSelectionEnd()).isEqualTo(field.getText().length());
     }

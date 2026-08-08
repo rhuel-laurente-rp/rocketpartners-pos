@@ -48,6 +48,14 @@ Error: Could not find or load main class com.rocketpartners.onboarding.posdiscou
 - **Disposition:** flag on the Phase 3 kickoff branch. Options: (a) leave broken until Phase 3 lands and the class exists, (b) temporarily point both tasks at a placeholder `Main` class that logs "not yet implemented" and exits. Prefer (b) so `bootJar` produces something runnable and the "always green" invariant covers `bootRun` too.
 - **Suggested branch:** `phase3/scaffold-discount-engine-application`.
 
+### `ScannerViewController.onPosEvent` — modal-open events call `resumeCapture()`, not `suspendCapture()`
+The switch arm covering `TENDER_CASH_PRESSED`, `TENDER_DEBIT_PRESSED`, `TENDER_CREDIT_PRESSED`, `CHANGE_QTY_PRESSED`, `VOID_BASKET_PRESSED`, and `TRANSACTION_COMPLETED` calls `resumeCapture()`. It should call `suspendCapture()` — those events open modals, and the class Javadoc explicitly claims "Scan capture is also suspended while a modal dialog is open (cash tender, receipt) so keystrokes can't leak into it." `suspendCapture()` is defined but has zero call sites; `isSuspended()` is always `false`.
+
+- **Severity:** medium — a barcode scanner burst fired while a cash-entry or receipt modal is open will still dispatch `ITEM_SCANNED`, and the receiving path is not gated on modal state.
+- **Reachable today?** Yes, on live hardware. Not reachable in unit tests because the modal doesn't literally open.
+- **Disposition:** flip the arm to `suspendCapture()`. The corresponding tests (`ScannerViewControllerTest#tenderCashPressed_leavesCaptureRunning_burstStillDispatches`, `receiptDismissed_leavesCaptureRunning`, `ChangeQuantityViewControllerTest#changeQtyDialog_doesNotSuspendScannerCapture_onOpenOrClose`) currently pin the broken behaviour; they should be renamed and flipped on the fix branch.
+- **Suggested branch:** `fix/scanner-suspend-on-modal-open`.
+
 ### `FileJournal.java` — synchronous disk write + flush on the caller's thread
 `journal(...)` opens/rolls the daily file, writes one line, then `flush()`es — all on the caller's thread, which is the Swing EDT. This violates the `Journal` contract ("must not block the caller ... must be safe to call from the Swing event dispatch thread"). In practice each write is well under a millisecond and the class Javadoc explicitly accepts this tradeoff.
 
@@ -119,4 +127,5 @@ Rough priority — highest impact and lowest coordination cost first. Nothing he
 5. `polish/error-dialog-cashier-copy` — pair with the `PosEventType` Javadoc update.
 6. `fix/transaction-guard-amount-due` — unreachable today, but a load-bearing aggregate contract shouldn't rely on that.
 7. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
-8. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.
+8. `fix/scanner-suspend-on-modal-open` — flip the resume-on-open arm to suspend, and flip the three tests that currently pin the broken behaviour.
+9. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.

@@ -3,6 +3,7 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -25,10 +26,26 @@ class VoidBasketConfirmViewTest {
     private VoidBasketConfirmView view;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         dispatcher = new RecordingDispatcher();
-        view = new VoidBasketConfirmView(null, dispatcher);
+        SwingUtilities.invokeAndWait(() -> {
+            view = new VoidBasketConfirmView(null, dispatcher);
+            // PosDialog is modal; setVisible(true) inside openFor(...) would enter a nested
+            // dispatch loop and stall the build. Force non-modal for tests so openDialog()
+            // returns immediately and the wiring assertions can inspect the primed state.
+            view.setModal(false);
+        });
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (view != null) {
+            SwingUtilities.invokeAndWait(() -> {
+                view.setVisible(false);
+                view.dispose();
+            });
+        }
     }
 
     // ---- Copy ------------------------------------------------------------

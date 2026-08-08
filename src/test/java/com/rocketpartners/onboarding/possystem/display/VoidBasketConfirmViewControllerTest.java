@@ -6,9 +6,11 @@ import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -31,7 +33,7 @@ class VoidBasketConfirmViewControllerTest {
     private VoidBasketConfirmViewController controller;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         Map<String, Item> items = new LinkedHashMap<>();
         items.put(WIDGET.getUpc(), WIDGET);
@@ -41,9 +43,25 @@ class VoidBasketConfirmViewControllerTest {
                 "Test Store",
                 1,
                 false);
-        view = new VoidBasketConfirmView(null, pos);
+        SwingUtilities.invokeAndWait(() -> {
+            view = new VoidBasketConfirmView(null, pos);
+            // PosDialog is modal; letting a real modal dialog open during a test stalls the
+            // build. Force non-modal so setVisible(true) returns immediately and the
+            // controller-level assertions still see the primed dialog state.
+            view.setModal(false);
+        });
         controller = new VoidBasketConfirmViewController(view);
         pos.addController(controller);
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (view != null) {
+            SwingUtilities.invokeAndWait(() -> {
+                view.setVisible(false);
+                view.dispose();
+            });
+        }
     }
 
     @Test

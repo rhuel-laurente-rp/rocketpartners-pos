@@ -3,6 +3,7 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,10 +27,28 @@ class CashModeChoiceViewTest {
     private CashModeChoiceView view;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         dispatcher = new RecordingDispatcher();
-        view = new CashModeChoiceView(null, dispatcher);
+        SwingUtilities.invokeAndWait(() -> {
+            view = new CashModeChoiceView(null, dispatcher);
+            // PosDialog is modal, which means setVisible(true) inside openFor(...) enters a
+            // nested event dispatch loop and never returns to invokeAndWait — the build stalls
+            // on a real cashier-facing dialog every time this class runs on a machine with a
+            // display. Force non-modal for tests so openDialog() returns immediately and the
+            // wiring assertions can inspect the primed view state.
+            view.setModal(false);
+        });
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (view != null) {
+            SwingUtilities.invokeAndWait(() -> {
+                view.setVisible(false);
+                view.dispose();
+            });
+        }
     }
 
     // ---- Cached amounts drive the mode-selected events ------------------
