@@ -30,7 +30,7 @@ import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
-import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
+import com.rocketpartners.onboarding.possystem.repository.h2.H2ItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
 
 import javax.swing.JFrame;
@@ -108,15 +108,19 @@ public final class Application {
             return;
         }
 
-        ItemRepository itemRepository;
+        Path dbDir = Paths.get(args.dbDir).toAbsolutePath();
+        H2ItemRepository itemRepository;
         try {
-            itemRepository = InMemoryItemRepository.loadFromClasspath(PRICEBOOK_RESOURCE);
+            itemRepository = H2ItemRepository.open(dbDir, args.dbName, PRICEBOOK_RESOURCE);
         } catch (RuntimeException e) {
-            System.err.println("Failed to load pricebook from " + PRICEBOOK_RESOURCE + ": " + e.getMessage());
+            System.err.println("Failed to open H2 pricebook at " + dbDir + "/" + args.dbName
+                    + ": " + e.getMessage());
             e.printStackTrace(System.err);
             System.exit(2);
             return;
         }
+        System.err.println("[POS] pricebook DB: " + dbDir.resolve(args.dbName)
+                + " (" + itemRepository.size() + " items)");
 
         TaxService taxService = new TaxService(DEFAULT_TAX_RATE);
 
@@ -197,6 +201,7 @@ public final class Application {
                 @Override
                 public void windowClosing(WindowEvent e) {
                     pos.shutdown();
+                    itemRepository.close();
                 }
             });
 
@@ -283,6 +288,15 @@ public final class Application {
                 description = "Directory to write on-disk JSONL journal files into. "
                         + "Each run appends to journal-YYYY-MM-DD.jsonl.")
         public String logDir = "logs";
+
+        @Parameter(names = "--db-dir",
+                description = "Directory to hold the H2 pricebook database file. "
+                        + "Created on first run and re-used thereafter.")
+        public String dbDir = "data";
+
+        @Parameter(names = "--db-name",
+                description = "Base name of the H2 pricebook database (no extension).")
+        public String dbName = "pricebook";
 
         @Parameter(names = {"--help", "-h"}, description = "Print this usage and exit", help = true)
         public boolean help = false;

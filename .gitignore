@@ -33,3 +33,8 @@ out/
 # Logs
 *.log
 logs/
+
+# H2 pricebook database (created on first run of runPos)
+data/
+*.mv.db
+*.trace.db

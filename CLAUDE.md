@@ -88,7 +88,9 @@ Quick Add tiles, Void Line, Void Basket, Total, Pay Cash (two-step: mode choice 
 
 Every action is journalled. Adding a user action means adding its journal entry — do that by naming a new `PosEventType` and letting `JournalListener` pick it up.
 
-**Pricebook.** In-memory only, via `InMemoryItemRepository.loadFromClasspath("/pricebook.tsv")`. The H2-backed persistence in earlier briefs was decided against — do not reintroduce it without justification.
+**Pricebook.** H2 in file mode, opened via `H2ItemRepository.open(dbDir, dbName, "/pricebook.tsv")`. The DB lives at `<--db-dir>/<--db-name>.mv.db` (default `data/pricebook.mv.db`, git-ignored). On first run the `ITEMS` table is empty and gets seeded from the classpath TSV; on later runs the seed is skipped and lookups come from the DB — edits to `ITEMS` survive restarts. `InMemoryItemRepository` is kept for tests and other in-process fixtures; both impls share the `PricebookTsv` parser. Everything downstream (`TransactionService`, `PosComponent`, controllers) depends only on the `ItemRepository` interface — do not import a concrete impl into service or display code.
+
+**H2 is single-writer.** One JDBC connection is opened for the process lifetime and closed on window close. A second POS against the same DB file fails loudly — do not "fix" that by switching to `AUTO_SERVER=TRUE` without an actual multi-process requirement.
 
 ### Invariants worth naming out loud
 
@@ -97,7 +99,7 @@ Every action is journalled. Adding a user action means adding its journal entry 
 - **Void Line is the only path to removing a line.** A zero quantity is a void, not a delete.
 - **Unchanged quantity is a no-op — double-gated on purpose.** Both `ChangeQuantityViewController` and `TransactionService.updateLineItemQuantity` short-circuit when `newQuantity == currentQuantity`. Two guards mean neither depends on the other. Do not "deduplicate" this.
 - **Money.** All computation in `BigDecimal`. Intermediate totals are unrounded; `Transaction.grandTotal()` is the sole rounding site (scale 2, HALF_UP). Never introduce a second rounding call.
-- **Next Dollar ceils the amount due, not the tender.** `payNextDollar()` sets `amountDue` to `ceil(grandTotal())`, and `changeDue()` computes against `amountDue()` — not `grandTotal()`. On a $7.30 basket, Next Dollar makes amount due $8.00: a customer handing $8.00 gets no change; a customer handing $10.00 gets exactly $2.00 rather than $2.70. The cashier never counts coins. Rewriting `changeDue()` to use `grandTotal()` destroys the feature — `ReceiptFormatter` prints a dedicated `Amount Due (Next Dollar)` line as corroboration. See [docs/Phase 1/domain-model.md](docs/Phase%201/domain-model.md).
+- **Next Dollar ceils the amount due, not the tender.** `PayWithCashViewController.nextDollar(grandTotal)` computes `ceil(grandTotal())` and drives the two-step cash flow with that value as the settled `amountDue`; confirmation persists it via the three-argument `TransactionService.tenderCash(cashReceived, amountDue)`. `changeDue()` computes against `amountDue()` — not `grandTotal()`. On a $7.30 basket, Next Dollar makes amount due $8.00: a customer handing $8.00 gets no change; a customer handing $10.00 gets exactly $2.00 rather than $2.70. The cashier never counts coins. Rewriting `changeDue()` to use `grandTotal()` destroys the feature — `ReceiptFormatter` prints a dedicated `Amount Due (Next Dollar)` line as corroboration. See [docs/Phase 1/domain-model.md](docs/Phase%201/domain-model.md).
 - **`voidBasket()`** is legal in `IN_PROGRESS` and `TOTALED`. The `priorState` field on `BASKET_VOIDED` distinguishes the two — post-Total voids are the operationally interesting case.
 
 ### Barcode capture
@@ -198,7 +200,7 @@ The package tree exists (`component/`, `controller/`, `entity/`, `repository/`, 
 
 ## Stack
 
-Java 17, Gradle (Groovy DSL), one dependency block for everything: Swing + FlatLaf + JCommander (POS), Spring Boot 3.3.x + Spring Data JPA + H2 (discount engine, when it lands), Apache HttpClient5 and Jackson (POS → engine, when it lands), Lombok. Tests: JUnit 5, Mockito, Awaitility for socket/async code.
+Java 17, Gradle (Groovy DSL), one dependency block for everything: Swing + FlatLaf + JCommander (POS), H2 in file mode for the POS pricebook (JDBC — no Spring on the POS side), Spring Boot 3.3.x + Spring Data JPA + H2 (discount engine, when it lands), Apache HttpClient5 and Jackson (POS → engine, when it lands), Lombok. Tests: JUnit 5, Mockito, Awaitility for socket/async code.
 
 ## Build & run
 
@@ -229,6 +231,8 @@ Run `./gradlew build` before considering any change finished.
 | `--discount-engine-url` | `http://localhost:8080` | Reserved for Phase 3. |
 | `--scan-burst-gap-ms` | `50` | Max inter-character gap inside a scanner burst. |
 | `--log-dir` | `logs` | Directory the file journal writes into. |
+| `--db-dir` | `data` | Directory holding the H2 pricebook DB file. |
+| `--db-name` | `pricebook` | Base name of the H2 DB (no extension). |
 | `--help` / `-h` | — | Print usage and exit. |
 
 **Journal CLI flags** (`runJournal`): `--port` (default `12345`) and `--help`. That's the whole surface.
