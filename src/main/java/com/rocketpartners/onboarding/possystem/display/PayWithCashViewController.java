@@ -76,7 +76,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
      * {@link PayWithCashView.Mode#NEXT_DOLLAR}. This is what the entry dialog shows and what
      * change is measured against.
      */
-    private BigDecimal grandTotalAmountDue;
+    private BigDecimal amountDue;
 
     /**
      * @param choiceView step-one modal; must not be {@code null}
@@ -143,11 +143,11 @@ public class PayWithCashViewController implements IController, IPosEventListener
             // Defensive — mode events should always carry a prefill. Fall back to exact.
             prefill = grandTotal;
         }
-        grandTotalAmountDue = prefill.setScale(2, RoundingMode.HALF_UP);
+        amountDue = prefill.setScale(2, RoundingMode.HALF_UP);
         // Close the choice dialog before opening the entry dialog so exactly one modal is on
         // screen at any time.
         choiceView.closeDialog();
-        entryView.openFor(grandTotalAmountDue, mode);
+        entryView.openFor(amountDue, mode);
     }
 
     /**
@@ -159,7 +159,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
     }
 
     private void confirm(PosEvent event) {
-        if (grandTotalAmountDue == null) return;
+        if (amountDue == null) return;
         String raw = event.getProperty("cashReceived", String.class);
         if (raw == null) raw = entryView.getCashReceivedText();
 
@@ -178,10 +178,10 @@ public class PayWithCashViewController implements IController, IPosEventListener
             entryView.showError("Amount must be non-negative.");
             return;
         }
-        if (cashReceived.compareTo(grandTotalAmountDue) < 0) {
+        if (cashReceived.compareTo(amountDue) < 0) {
             dispatchTenderError("UNDERPAYMENT",
                     "cash received " + cashReceived
-                            + " is less than amount due " + grandTotalAmountDue);
+                            + " is less than amount due " + amountDue);
             entryView.showError("Amount is less than the amount due.");
             return;
         }
@@ -190,7 +190,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
         try {
             // Three-arg tender: record the settled amount alongside the cash presented so
             // Transaction#changeDue() measures against the mode-inflected total.
-            paid = parent.getTransactionService().tenderCash(cashReceived, grandTotalAmountDue);
+            paid = parent.getTransactionService().tenderCash(cashReceived, amountDue);
         } catch (RuntimeException ex) {
             entryView.showError("Tender rejected: " + ex.getMessage());
             return;
@@ -201,12 +201,12 @@ public class PayWithCashViewController implements IController, IPosEventListener
         props.put("transaction", paid);
         props.put("tenderType", TenderType.CASH);
         props.put("amountTendered", cashReceived);
-        props.put("amountDue", grandTotalAmountDue);
+        props.put("amountDue", amountDue);
         props.put("changeDue", changeDue);
         parent.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED, props));
         entryView.closeDialog();
         grandTotal = null;
-        grandTotalAmountDue = null;
+        amountDue = null;
         parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED, props));
     }
 
@@ -217,7 +217,7 @@ public class PayWithCashViewController implements IController, IPosEventListener
         choiceView.closeDialog();
         entryView.closeDialog();
         grandTotal = null;
-        grandTotalAmountDue = null;
+        amountDue = null;
     }
 
     // ---- helpers ----------------------------------------------------------

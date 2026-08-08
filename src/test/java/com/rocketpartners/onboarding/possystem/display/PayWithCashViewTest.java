@@ -234,9 +234,9 @@ class PayWithCashViewTest {
     // ---- helpers --------------------------------------------------------
 
     private void openWith(String amountDue, String prefill) throws Exception {
-        // grandTotalAmountDue IS the prefill under the new semantics; the two-arg helper is
+        // amountDue IS the prefill under the new semantics; the two-arg helper is
         // kept only to minimise churn in the test bodies below. Both strings should match.
-        assert amountDue.equals(prefill) : "grandTotalAmountDue == prefill under new semantics";
+        assert amountDue.equals(prefill) : "amountDue == prefill under new semantics";
         BigDecimal due = new BigDecimal(amountDue);
         SwingUtilities.invokeAndWait(() -> view.openFor(due, PayWithCashView.Mode.EXACT));
     }

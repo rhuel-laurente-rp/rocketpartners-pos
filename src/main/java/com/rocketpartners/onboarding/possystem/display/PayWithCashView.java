@@ -119,7 +119,7 @@ public class PayWithCashView extends PosDialog {
      * The amount the customer must pay — the transaction's grand total (tax already included) including if pay next dollar or exact.
      * Never {@code null} once {@link #openFor} has been called.
      */
-    private BigDecimal grandTotalAmountDue = BigDecimal.ZERO;
+    private BigDecimal amountDue = BigDecimal.ZERO;
 
     /**
      * @param owner      the parent frame; may be {@code null}
@@ -153,7 +153,7 @@ public class PayWithCashView extends PosDialog {
     /**
      * Populates the dialog for a fresh open.
      *
-     * @param grandTotalAmountDue the amount the customer must pay — the transaction's grand
+     * @param amountDue the amount the customer must pay — the transaction's grand
      *                            total (tax included), already inflected for the picked mode:
      *                            equal to the exact grand total for {@link Mode#EXACT}, or
      *                            that total rounded up to the next whole dollar for
@@ -164,12 +164,12 @@ public class PayWithCashView extends PosDialog {
      *                            parenthetical qualifier next to the amount due; must not be
      *                            {@code null}
      */
-    public void openFor(BigDecimal grandTotalAmountDue, Mode mode) {
-        if (grandTotalAmountDue == null) throw new IllegalArgumentException("grandTotalAmountDue must not be null");
+    public void openFor(BigDecimal amountDue, Mode mode) {
+        if (amountDue == null) throw new IllegalArgumentException("amountDue must not be null");
         if (mode == null) throw new IllegalArgumentException("mode must not be null");
-        this.grandTotalAmountDue = grandTotalAmountDue.setScale(2, RoundingMode.HALF_UP);
-        setHeaderAmount(this.grandTotalAmountDue);
-        amountDueLine.setText("Amount Due: " + PosTheme.money(this.grandTotalAmountDue)
+        this.amountDue = amountDue.setScale(2, RoundingMode.HALF_UP);
+        setHeaderAmount(this.amountDue);
+        amountDueLine.setText("Amount Due: " + PosTheme.money(this.amountDue)
                 + "  (" + mode.label() + ")");
         // The grand-total-amount-due IS the prefill. One source of truth for both the field
         // value and the validation reference — no risk of them drifting apart.
@@ -261,11 +261,11 @@ public class PayWithCashView extends PosDialog {
             showStatus("Amount cannot have more than two decimal places.", PosTheme.STOP);
             return;
         }
-        if (entered.compareTo(grandTotalAmountDue) < 0) {
+        if (entered.compareTo(amountDue) < 0) {
             showStatus("Amount is less than the amount due.", PosTheme.STOP);
             return;
         }
-        BigDecimal change = entered.subtract(grandTotalAmountDue).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal change = entered.subtract(amountDue).setScale(2, RoundingMode.HALF_UP);
         showStatus("Change Due: " + PosTheme.money(change), PosTheme.GO);
     }
 
@@ -284,7 +284,7 @@ public class PayWithCashView extends PosDialog {
         }
         if (entered.signum() < 0) return "Amount must be non-negative.";
         if (entered.scale() > 2) return "Amount cannot have more than two decimal places.";
-        if (entered.compareTo(grandTotalAmountDue) < 0) return "Amount is less than the amount due.";
+        if (entered.compareTo(amountDue) < 0) return "Amount is less than the amount due.";
         return null;
     }
 
