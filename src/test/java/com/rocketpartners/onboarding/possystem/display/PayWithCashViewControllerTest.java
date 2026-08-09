@@ -80,7 +80,7 @@ class PayWithCashViewControllerTest {
         return pos.getTransactionService().total();
     }
 
-    // As above, then open the mode-choice dialog. Leaves `grandTotalAmountDue` unset — the
+    // As above, then open the mode-choice dialog. Leaves `amountDue` unset — the
     // caller must dispatch a mode-select event before confirming.
     private Transaction totaledAndOpened(Item item) {
         Transaction tx = totaledWith(item);
@@ -88,7 +88,7 @@ class PayWithCashViewControllerTest {
         return tx;
     }
 
-    // As above, then also drop into Exact mode so `grandTotalAmountDue` is primed and
+    // As above, then also drop into Exact mode so `amountDue` is primed and
     // CASH_CONFIRM_PRESSED runs the confirm handler. For tests that need Next Dollar
     // semantics, dispatch CASH_NEXT_DOLLAR_PRESSED explicitly instead of this helper.
     private Transaction totaledAndExactReady(Item item) {
@@ -170,7 +170,7 @@ class PayWithCashViewControllerTest {
     void confirmPressed_underpayment_isRelativeToSettledAmount_afterNextDollar() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30
 
-        // Cashier picked Next Dollar → settled grandTotalAmountDue = $8.00. Handing over $7.50
+        // Cashier picked Next Dollar → settled amountDue = $8.00. Handing over $7.50
         // is below settled and must be rejected, even though it's above the raw grand total.
         pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
         pos.dispatchPosEvent(cashConfirm("7.50"));
@@ -220,7 +220,7 @@ class PayWithCashViewControllerTest {
         pos.dispatchPosEvent(modeEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED, "8.00"));
         pos.dispatchPosEvent(cashConfirm("8.00")); // customer hands over exactly $8
 
-        // Settled-amount semantics: grandTotalAmountDue = $8.00 (mode-inflected), so change is
+        // Settled-amount semantics: amountDue = $8.00 (mode-inflected), so change is
         // 8.00 - 8.00 = 0.00. The receipt reflects the $8.00 the customer actually paid.
         PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
@@ -281,7 +281,7 @@ class PayWithCashViewControllerTest {
     void confirmPressed_whenTransactionIsInProgress_isRejectedByService() {
         totaledWith(WIDGET);
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
-        // Mode-select so `grandTotalAmountDue` is primed; the CASH_CONFIRM_PRESSED below
+        // Mode-select so `amountDue` is primed; the CASH_CONFIRM_PRESSED below
         // must reach the service and be rejected there, not short-circuit in the controller.
         Map<String, Object> exact = new HashMap<>();
         exact.put("prefillAmount", new BigDecimal("7.30"));
@@ -344,7 +344,7 @@ class PayWithCashViewControllerTest {
         pos.dispatchPosEvent(cashConfirm("8.00"));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
-        // Settled-amount semantics: Next Dollar → grandTotalAmountDue = $8.00, cash = $8.00,
+        // Settled-amount semantics: Next Dollar → amountDue = $8.00, cash = $8.00,
         // change = 0.00.
         PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))

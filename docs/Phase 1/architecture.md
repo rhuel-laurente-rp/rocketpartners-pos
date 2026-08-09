@@ -82,7 +82,7 @@ flowchart TB
             PCMP["component<br/>(PosComponent,<br/>Journal impls, buffer)"]
             PEV["event<br/>(PosEvent, dispatcher, listener)"]
             PDIS["display<br/>(Swing views + controllers,<br/>PosTheme, PosDialog)"]
-            PREPO["repository<br/>(InMemoryItemRepository)"]
+            PREPO["repository<br/>(H2ItemRepository — file mode;<br/>InMemoryItemRepository — tests)"]
             PSVC["service<br/>(TransactionService,<br/>TaxService,<br/>ReceiptFormatter)"]
             PTOOL["tools<br/>(TailJournal)"]
             PCON["constant"]
@@ -132,6 +132,15 @@ The POS keeps its socket and (future) HTTP integrations behind small in-repo cla
 - **`RemoteJournal`** — owns the socket, queue, sender thread, backoff, and connection listener.
 
 There is no `DiscountEngineClient` in the tree today; when Phase 3 lands it will sit under `possystem.service` and consume `commons.dto` types over HTTP.
+
+## Pricebook storage
+
+The pricebook is held in H2 in file mode, not in memory. `H2ItemRepository.open(dbDir, dbName, "/pricebook.tsv")` opens (or creates) `<dbDir>/<dbName>.mv.db`, ensures the `ITEMS` table exists, and — only when the table is empty — seeds it from the classpath TSV. Later runs skip the seed and read straight from the DB, so an operator can edit `ITEMS` in H2 and those edits survive restarts. The bundled `pricebook.tsv` becomes a first-run bootstrap, not the runtime source of truth.
+
+- **Where the file lives.** `--db-dir` (default `data`) and `--db-name` (default `pricebook`) on `runPos`. The `data/` directory is git-ignored.
+- **One connection, single-writer.** H2 file DBs are single-writer; the POS keeps one JDBC connection open for the process lifetime, closed on window close via `H2ItemRepository.close()`. Trying to launch a second POS against the same DB file fails loudly rather than silently sharing state.
+- **`InMemoryItemRepository` is still in the tree** for tests and anywhere else that wants a pricebook without touching disk. Both implementations parse via the shared `PricebookTsv` helper.
+- **The interface is impl-agnostic.** `TransactionService`, `PosComponent`, and every controller depend only on `ItemRepository`, so swapping impls does not ripple.
 
 ## Build → runnable entry points
 

@@ -303,29 +303,6 @@ public class TransactionService {
     }
 
     /**
-     * Cash-tender helper: rounds {@link Transaction#grandTotal()} up to the next whole dollar
-     * and tenders that as cash. A whole-dollar total is a no-op (tenders exactly the total).
-     * The current transaction transitions to {@link TransactionState#PAID} and the "current"
-     * slot is released.
-     *
-     * @return the paid transaction
-     * @throws IllegalStateException if no transaction is open, or the current one is not
-     *                               {@link TransactionState#TOTALED}
-     */
-    public Transaction tenderPayNextDollar() {
-        requireCurrentTransaction("tenderPayNextDollar");
-        Transaction tx = currentTransaction;
-        try {
-            tx.payNextDollar();
-        } catch (IllegalStateException e) {
-            dispatchError("TOTALED_INVARIANT", e.getMessage(), e, "operation", "tenderPayNextDollar");
-            throw e;
-        }
-        currentTransaction = null;
-        return tx;
-    }
-
-    /**
      * Records a card tender (debit or credit). The caller is responsible for passing an amount
      * equal to {@link Transaction#grandTotal()} — cards do not produce change. The current
      * transaction transitions to {@link TransactionState#PAID} and the "current" slot is released.

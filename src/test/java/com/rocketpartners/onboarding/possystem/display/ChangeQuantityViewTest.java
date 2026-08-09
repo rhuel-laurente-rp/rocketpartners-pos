@@ -84,6 +84,32 @@ class ChangeQuantityViewTest {
     }
 
     @Test
+    void editor_stillRejectsInvalidCharacters_afterOpenFor() throws Exception {
+        // JSpinner.setValue inside openFor() reinstalls the formatter, and every formatter's
+        // install() overwrites the Document's DocumentFilter with its own permissive one. If
+        // the view does not re-attach the digit filter on formatter change, letters and
+        // symbols land on screen and are only rejected at Confirm time. Regression pin for
+        // that: open the dialog, then try the same invalid characters that the "keystroke"
+        // test above proves are rejected pre-open.
+        openFor(3);
+        JTextField editor = view.getSpinnerEditorForTest();
+        SwingUtilities.invokeAndWait(() -> editor.setText(""));
+
+        typeInto(editor, "a");
+        typeInto(editor, "!");
+        typeInto(editor, "-");
+        typeInto(editor, ".");
+        typeInto(editor, "+");
+
+        assertThat(editor.getText())
+                .as("filter must survive openFor's setValue-driven formatter reinstall")
+                .isEmpty();
+
+        typeInto(editor, "5");
+        assertThat(editor.getText()).isEqualTo("5");
+    }
+
+    @Test
     void editor_rejectsMixedAndNonDigitPastes_wholesale() throws Exception {
         JTextField editor = view.getSpinnerEditorForTest();
         editor.setText("");

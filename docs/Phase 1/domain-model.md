@@ -45,7 +45,6 @@ classDiagram
         +applyDiscount(Discount)
         +tender(TenderType, BigDecimal)
         +tender(TenderType, BigDecimal, BigDecimal)
-        +payNextDollar()
     }
 
     class TransactionState {
@@ -98,12 +97,12 @@ stateDiagram-v2
     IN_PROGRESS --> TOTALED: total()
     TOTALED --> TOTALED: applyDiscount
     TOTALED --> VOIDED: voidBasket
-    TOTALED --> PAID: tender(...) / payNextDollar()
+    TOTALED --> PAID: tender(...)
     PAID --> [*]
     VOIDED --> [*]
 ```
 
-`addLineItem`, `voidLine`, `updateLineItemQuantity` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `payNextDollar` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
+`addLineItem`, `voidLine`, `updateLineItemQuantity` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
 
 ## Money — one rounding site
 
@@ -114,7 +113,7 @@ stateDiagram-v2
 
 ## Next Dollar — the change-simplification device
 
-**Next Dollar ceils the amount due, not the tender.** `payNextDollar()` computes `ceil(grandTotal())` and calls the three-argument tender overload with that value as *both* the cash amount and the settled `amountDue`. `changeDue()` computes `cashTendered − amountDue()` — measuring against the settled amount, not the raw grand total.
+**Next Dollar ceils the amount due, not the tender.** `PayWithCashViewController.nextDollar(grandTotal)` computes `ceil(grandTotal())` and drives the two-step cash flow with that value as the settled `amountDue`; confirmation calls the three-argument tender overload via `TransactionService.tenderCash(cashReceived, amountDue)`. `changeDue()` computes `cashTendered − amountDue()` — measuring against the settled amount, not the raw grand total.
 
 **Why.** To keep coins out of change. On a $7.30 basket:
 

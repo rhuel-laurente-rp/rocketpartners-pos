@@ -53,7 +53,12 @@ import java.util.Map;
  *   <li>A {@link DocumentFilter} on the spinner's editor field rejects any non-digit character
  *       on both keystroke <em>and</em> paste — no letters, no {@code +}/{@code -}, no decimal
  *       point — and caps length at the digit count of the maximum, so no entry can overflow
- *       {@code int}.</li>
+ *       {@code int}. The filter is re-attached on every {@code openFor} and every
+ *       {@code "textFormatter"} property change, because {@link JSpinner#setValue} keeps the
+ *       same {@code Document} but reinstalls the formatter, and every formatter's
+ *       {@code install()} silently overwrites the Document's filter with its own permissive
+ *       one — without the re-attach, letters and symbols would appear on screen and only get
+ *       rejected at Confirm time.</li>
  *   <li>A wrapping {@link javax.swing.TransferHandler}, because
  *       {@code JFormattedTextField} routes paste through its formatter and
  *       {@code setValue}, bypassing the document filter entirely.</li>
@@ -138,6 +143,11 @@ public class ChangeQuantityView extends PosDialog {
         this.lineItem = lineItem;
         descriptionLabel.setText(lineItem.getItem().getDescription());
         quantitySpinner.setValue(Math.max(MIN_QUANTITY, lineItem.getQuantity()));
+        // setValue reinstalls the formatter, and every formatter's install() overwrites the
+        // Document's filter with its own permissive one. The "textFormatter" listener should
+        // already have caught this, but re-attach explicitly so a future refactor that removes
+        // or reorders that listener still opens with the digit filter in place.
+        attachFilterToCurrentDocument();
         clearValidationMessage();
         openDialog();
         // Select the existing quantity so the first keystroke replaces it rather than
@@ -299,15 +309,20 @@ public class ChangeQuantityView extends PosDialog {
         // one on its own:
         //
         //   1. DocumentFilter — catches keystrokes and any paste that goes through the
-        //      Document.replace path. The field can swap its Document during commitEdit and
-        //      setValue plumbing, so the "document" property listener re-attaches the filter
-        //      whenever that happens.
+        //      Document.replace path. Two re-attach hooks: "document" for the rare case where
+        //      the field swaps its Document entirely, and "textFormatter" for the common case
+        //      where setValue keeps the same Document but reinstalls the formatter — and every
+        //      formatter's install() clobbers the Document's filter with its own permissive
+        //      one. Without the textFormatter hook, our filter is silently kicked out on the
+        //      first openFor() setValue and every subsequent keystroke lands unfiltered,
+        //      making letters and symbols appear on screen until Confirm rejects them.
         //   2. TransferHandler — catches paste specifically. JFormattedTextField's own
         //      TransferHandler parses the clipboard content via its formatter and calls
         //      setValue directly, bypassing the Document (and therefore the DocumentFilter)
         //      entirely.
         attachFilterToCurrentDocument();
         field.addPropertyChangeListener("document", e -> attachFilterToCurrentDocument());
+        field.addPropertyChangeListener("textFormatter", e -> attachFilterToCurrentDocument());
 
         javax.swing.TransferHandler original = field.getTransferHandler();
         field.setTransferHandler(

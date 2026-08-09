@@ -125,28 +125,4 @@ class TransactionTotalsTest {
         assertThat(tx.changeDue()).isEqualByComparingTo("0");
     }
 
-    @Test
-    void payNextDollar_roundsUpAndTendersCash() {
-        Transaction tx = new Transaction(NO_TAX);
-        tx.addLineItem(item("A", "7.01"), 1);
-        tx.total();
-        tx.payNextDollar();
-        assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(tx.getTenderType()).isEqualTo(TenderType.CASH);
-        assertThat(tx.getCashTendered()).isEqualByComparingTo("8.00");
-        // Next Dollar settles at the rounded total — the customer receives no change.
-        assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
-    }
-
-    @Test
-    void payNextDollar_wholeDollarTotal_isNoOpChange() {
-        Transaction tx = new Transaction(NO_TAX);
-        tx.addLineItem(item("A", "7.00"), 1);
-        tx.total();
-        tx.payNextDollar();
-        assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(tx.getCashTendered()).isEqualByComparingTo("7.00");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
-    }
 }

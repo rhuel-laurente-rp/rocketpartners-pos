@@ -180,32 +180,6 @@ class TransactionStateTest {
     }
 
     @Test
-    void payNextDollar_transitionsTotaledToPaid() {
-        Transaction tx = totaled();
-        tx.payNextDollar();
-        assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
-        assertThat(tx.getTenderType()).isEqualTo(TenderType.CASH);
-    }
-
-    @Test
-    void payNextDollar_illegalFromInProgress() {
-        Transaction tx = inProgress();
-        assertThatThrownBy(tx::payNextDollar).isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    void payNextDollar_illegalFromPaid() {
-        Transaction tx = paid();
-        assertThatThrownBy(tx::payNextDollar).isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    void payNextDollar_illegalFromVoided() {
-        Transaction tx = voided();
-        assertThatThrownBy(tx::payNextDollar).isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
     void updateLineItemQuantity_inProgress_setsQuantity() {
         Transaction tx = inProgress();
         tx.addLineItem(widget(), 1);
