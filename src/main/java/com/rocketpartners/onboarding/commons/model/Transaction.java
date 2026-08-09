@@ -32,9 +32,7 @@ import java.util.UUID;
  * the rate as a field avoids introducing a service layer prematurely; a more sophisticated tax
  * model can replace this without changing the aggregate's contract.</p>
  *
- * <p>See {@code docs/Phase 1/domain-model.md} for the broader domain model. Note that the
- * state names here ({@code IN_PROGRESS / TOTALED / PAID / VOIDED}) intentionally differ from
- * the doc's diagram; docs will be synced separately.</p>
+ * <p>See {@code docs/Phase 1/domain-model.md} for the broader domain model.</p>
  */
 @Getter
 public class Transaction {
@@ -64,7 +62,7 @@ public class Transaction {
     /**
      * The customer-facing total the cashier settled at — {@link #grandTotal()} by default, but
      * may be higher when a cash tender used a rounding shortcut (e.g. Next Dollar rounded
-     * $7.30 up to $8.00 so the customer could hand over a single bill and receive no change).
+     * $7.30 up to $8.00 so the cashier will not be giving a change in decimal).
      * {@code null} until tendered.
      */
     private BigDecimal amountDue;
@@ -171,8 +169,12 @@ public class Transaction {
     /**
      * Voids the entire transaction. Terminal.
      *
-     * @throws IllegalStateException if the transaction is already {@link TransactionState#PAID}
-     *                               or {@link TransactionState#VOIDED}
+     * <p>Legal in {@link TransactionState#IN_PROGRESS} or {@link TransactionState#TOTALED};
+     * throws in {@link TransactionState#PAID} or {@link TransactionState#VOIDED}.</p>
+     *
+     * @throws IllegalStateException if the transaction is not
+     *                               {@link TransactionState#IN_PROGRESS} or
+     *                               {@link TransactionState#TOTALED}
      */
     public void voidBasket() {
         requireState("voidBasket", TransactionState.IN_PROGRESS, TransactionState.TOTALED);
@@ -238,21 +240,6 @@ public class Transaction {
         this.cashTendered = cashTendered;
         this.amountDue = amountDue == null ? null : amountDue.setScale(2, RoundingMode.HALF_UP);
         this.state = TransactionState.PAID;
-    }
-
-    /**
-     * Cash-tender helper: rounds {@link #grandTotal()} up to the next whole dollar and tenders
-     * that amount as {@link TenderType#CASH}. A whole-dollar total is a no-op (tenders exactly
-     * the total; {@link #changeDue()} is zero).
-     *
-     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
-     */
-    public void payNextDollar() {
-        requireState("payNextDollar", TransactionState.TOTALED);
-        BigDecimal nextDollar = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2);
-        // The customer pays the rounded-up amount and receives no change; the receipt should
-        // show that adjusted total, not the raw grand total.
-        tender(TenderType.CASH, nextDollar, nextDollar);
     }
 
     /**

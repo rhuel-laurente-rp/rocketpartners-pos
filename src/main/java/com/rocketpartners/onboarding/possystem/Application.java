@@ -13,6 +13,7 @@ import com.rocketpartners.onboarding.possystem.component.JournalListener;
 import com.rocketpartners.onboarding.possystem.component.Journals;
 import com.rocketpartners.onboarding.possystem.component.LocalJournal;
 import com.rocketpartners.onboarding.possystem.component.RemoteJournal;
+import com.rocketpartners.onboarding.possystem.display.CashModeChoiceView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
 import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
 import com.rocketpartners.onboarding.possystem.display.CustomerView;
@@ -26,8 +27,10 @@ import com.rocketpartners.onboarding.possystem.display.ReceiptView;
 import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
 import com.rocketpartners.onboarding.possystem.display.ScannerView;
 import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
+import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
+import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
-import com.rocketpartners.onboarding.possystem.repository.inmemory.InMemoryItemRepository;
+import com.rocketpartners.onboarding.possystem.repository.h2.H2ItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
 
 import javax.swing.JFrame;
@@ -105,15 +108,19 @@ public final class Application {
             return;
         }
 
-        ItemRepository itemRepository;
+        Path dbDir = Paths.get(args.dbDir).toAbsolutePath();
+        H2ItemRepository itemRepository;
         try {
-            itemRepository = InMemoryItemRepository.loadFromClasspath(PRICEBOOK_RESOURCE);
+            itemRepository = H2ItemRepository.open(dbDir, args.dbName, PRICEBOOK_RESOURCE);
         } catch (RuntimeException e) {
-            System.err.println("Failed to load pricebook from " + PRICEBOOK_RESOURCE + ": " + e.getMessage());
+            System.err.println("Failed to open H2 pricebook at " + dbDir + "/" + args.dbName
+                    + ": " + e.getMessage());
             e.printStackTrace(System.err);
             System.exit(2);
             return;
         }
+        System.err.println("[POS] pricebook DB: " + dbDir.resolve(args.dbName)
+                + " (" + itemRepository.size() + " items)");
 
         TaxService taxService = new TaxService(DEFAULT_TAX_RATE);
 
@@ -146,8 +153,10 @@ public final class Application {
             remoteJournal.setConnectionListener(state ->
                     view.setJournalConnected(state == RemoteJournal.ConnectionState.CONNECTED));
 
+            CashModeChoiceView cashChoiceView = new CashModeChoiceView(view, pos);
             PayWithCashView cashView = new PayWithCashView(view, pos);
-            PayWithCashViewController cashController = new PayWithCashViewController(cashView);
+            PayWithCashViewController cashController =
+                    new PayWithCashViewController(cashChoiceView, cashView);
 
             PayWithCardView cardView = new PayWithCardView(view);
             PayWithCardViewController cardController = new PayWithCardViewController(cardView);
@@ -157,11 +166,23 @@ public final class Application {
             ChangeQuantityViewController changeQtyController =
                     new ChangeQuantityViewController(changeQtyView);
 
+            VoidBasketConfirmView voidBasketConfirmView = new VoidBasketConfirmView(view, pos);
+            VoidBasketConfirmViewController voidBasketController =
+                    new VoidBasketConfirmViewController(voidBasketConfirmView);
+
             ReceiptView receiptView = new ReceiptView(view, pos);
             ReceiptViewController receiptController =
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
 
             ScannerView scannerView = new ScannerView(pos);
+            // Direct reset from the receipt's Start Next Sale button so the scan bar hint flips
+            // from STATUS_LOCKED to STATUS_READY the moment the modal closes, not later in the
+            // RECEIPT_DISMISSED event chain. Belt-and-braces with ScannerViewController's own
+            // handler — the event still runs, this just closes the ordering race the user hit.
+            receiptView.setOnDismissed(() -> {
+                scannerView.setStatusHint(ScannerView.STATUS_READY);
+                scannerView.requestScanFieldFocus();
+            });
             view.installScanBar(scannerView);
             BarcodeInputBuffer scanBuffer = new BarcodeInputBuffer(
                     args.scanBurstGapMs,
@@ -180,6 +201,7 @@ public final class Application {
                 @Override
                 public void windowClosing(WindowEvent e) {
                     pos.shutdown();
+                    itemRepository.close();
                 }
             });
 
@@ -196,6 +218,7 @@ public final class Application {
             pos.addController(cashController);
             pos.addController(cardController);
             pos.addController(changeQtyController);
+            pos.addController(voidBasketController);
             pos.addController(errorController);
             pos.addController(scannerController);
             pos.addController(receiptController);
@@ -214,10 +237,10 @@ public final class Application {
     }
 
     /**
-     * Shuffles {@link #QUICK_ADD_UPC_POOL} and resolves the first {@link #QUICK_ADD_COUNT}
-     * UPCs against the pricebook. UPCs that fail to resolve are skipped (the pricebook could
-     * legitimately have been swapped in), and shuffling continues until either enough items
-     * are gathered or the pool is exhausted.
+     * Shuffles {@link #QUICK_ADD_UPC_POOL} once, then walks it in order and resolves each UPC
+     * against the pricebook, stopping when {@link #QUICK_ADD_COUNT} items have been gathered or
+     * the pool is exhausted. UPCs that fail to resolve are skipped (the pricebook could
+     * legitimately have been swapped in).
      */
     private static List<Item> pickQuickAddItems(ItemRepository repo) {
         List<String> upcs = new ArrayList<>(QUICK_ADD_UPC_POOL);
@@ -265,6 +288,15 @@ public final class Application {
                 description = "Directory to write on-disk JSONL journal files into. "
                         + "Each run appends to journal-YYYY-MM-DD.jsonl.")
         public String logDir = "logs";
+
+        @Parameter(names = "--db-dir",
+                description = "Directory to hold the H2 pricebook database file. "
+                        + "Created on first run and re-used thereafter.")
+        public String dbDir = "data";
+
+        @Parameter(names = "--db-name",
+                description = "Base name of the H2 pricebook database (no extension).")
+        public String dbName = "pricebook";
 
         @Parameter(names = {"--help", "-h"}, description = "Print this usage and exit", help = true)
         public boolean help = false;

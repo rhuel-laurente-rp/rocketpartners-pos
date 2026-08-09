@@ -2,6 +2,7 @@
 build/
 .gradle/
 gradle-app.setting
+gradle.properties
 
 # Java
 *.class
@@ -33,3 +34,8 @@ out/
 # Logs
 *.log
 logs/
+
+# H2 pricebook database (created on first run of runPos)
+data/
+*.mv.db
+*.trace.db

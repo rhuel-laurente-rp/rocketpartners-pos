@@ -147,6 +147,30 @@ public class JournalListener implements IController, IPosEventListener {
                 BigDecimal change = event.getProperty("changeDue", BigDecimal.class);
                 if (change != null) fields.put("change", money(change));
             }
+            case CASH_EXACT_PRESSED, CASH_NEXT_DOLLAR_PRESSED -> {
+                BigDecimal prefill = event.getProperty("prefillAmount", BigDecimal.class);
+                if (prefill != null) fields.put("prefill", money(prefill));
+            }
+            case BASKET_VOIDED -> {
+                // A confirmed void records what was discarded (item count and grand total) plus
+                // the state the transaction was in beforehand. Voiding after Total is the more
+                // interesting case operationally, so priorState makes the two paths
+                // distinguishable when a shrink review pulls the log.
+                Integer itemCount = event.getProperty("itemCount", Integer.class);
+                if (itemCount != null) fields.put("itemCount", itemCount);
+                BigDecimal grandTotal = event.getProperty("grandTotal", BigDecimal.class);
+                if (grandTotal != null) fields.put("grandTotal", money(grandTotal));
+                putIfNotNull(fields, "priorState", event.getProperty("priorState", String.class));
+            }
+            case VOID_BASKET_DECLINED -> {
+                // A declined void — the cashier opened the confirmation and backed out. Costs
+                // one line to capture and is exactly the pattern a shrink review looks for on
+                // a lane that racks up repeated near-voids.
+                Integer itemCount = event.getProperty("itemCount", Integer.class);
+                if (itemCount != null) fields.put("itemCount", itemCount);
+                BigDecimal grandTotal = event.getProperty("grandTotal", BigDecimal.class);
+                if (grandTotal != null) fields.put("grandTotal", money(grandTotal));
+            }
             case ERROR -> {
                 putIfNotNull(fields, "code", event.getProperty("code", String.class));
                 putIfNotNull(fields, "message", event.getProperty("message", String.class));

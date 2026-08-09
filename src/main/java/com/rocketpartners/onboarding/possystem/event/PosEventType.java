@@ -12,10 +12,6 @@ package com.rocketpartners.onboarding.possystem.event;
  *       Transaction state.</li>
  * </ul>
  *
- * <p>This enum starts with the lifecycle shape the current milestone requires. The finer-grained
- * UI-layer request events named in {@code docs/Phase 1/event-flow.md} (e.g. {@code UPC_ENTERED},
- * {@code REQUEST_ADD_ITEM}) will continue to be added alongside their views and controllers
- * in later commits.</p>
  */
 public enum PosEventType {
 
@@ -51,15 +47,36 @@ public enum PosEventType {
      */
     CHANGE_QTY_CANCEL_PRESSED,
 
-    /** The Void Basket button on a view was pressed. Input event; no properties. */
+    /**
+     * The Void Basket button on the main window was pressed. Input event; no properties.
+     * Opens {@link com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView}. Voiding
+     * is deferred until the cashier confirms via {@link #VOID_BASKET_CONFIRM_PRESSED}; this event
+     * alone must not mutate transaction state.
+     */
     VOID_BASKET_PRESSED,
+
+    /**
+     * The Void basket confirm button on the confirmation dialog was pressed. Input event; no
+     * properties. The controller reacts by calling voidBasket and starting a fresh transaction.
+     */
+    VOID_BASKET_CONFIRM_PRESSED,
+
+    /**
+     * The cashier declined the void-basket confirmation (Keep basket, ESC, or window close).
+     * Notification event; carries {@code itemCount} (Integer, sum of non-voided quantities at
+     * the moment of the prompt) and {@code grandTotal} (BigDecimal, grand total at the moment
+     * of the prompt) properties. Captured explicitly — a lane racking up near-voids is exactly
+     * the pattern a shrink review looks for.
+     */
+    VOID_BASKET_DECLINED,
 
     /** The Total button on a view was pressed. Input event; no properties. */
     TOTAL_PRESSED,
 
     /**
-     * The Pay Cash button was pressed. Input event; no properties. Opens the cash-entry
-     * dialog — actual tender waits for {@link #CASH_CONFIRM_PRESSED}.
+     * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
+     * dialog (step one of the two-step cash flow). Actual tender waits for
+     * {@link #CASH_CONFIRM_PRESSED} in step two.
      */
     TENDER_CASH_PRESSED,
 
@@ -70,17 +87,18 @@ public enum PosEventType {
     TENDER_CREDIT_PRESSED,
 
     /**
-     * The Exact Amount button on the cash dialog was pressed. Input event; no properties.
-     * Sets the total payable ({@code Amount Due}) to the transaction's grand total; does not
-     * tender. Change is computed against the (possibly adjusted) amount due at Confirm time.
+     * The Exact Amount button on the cash-mode-choice dialog was pressed. Input event; carries
+     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total) that the
+     * entry dialog is opened with pre-filled. Does not tender; the cashier still has to confirm
+     * the amount in step two.
      */
     CASH_EXACT_PRESSED,
 
     /**
-     * The Next Dollar button on the cash dialog was pressed. Input event; no properties.
-     * Sets the total payable ({@code Amount Due}) to the transaction's grand total rounded up
-     * to the next whole dollar; does not tender. Change is computed against the adjusted
-     * amount due at Confirm time.
+     * The Next Dollar button on the cash-mode-choice dialog was pressed. Input event; carries
+     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total rounded up
+     * to the next whole dollar) that the entry dialog is opened with pre-filled. Does not
+     * tender.
      */
     CASH_NEXT_DOLLAR_PRESSED,
 
@@ -91,8 +109,9 @@ public enum PosEventType {
     CASH_CONFIRM_PRESSED,
 
     /**
-     * The Cancel button on the cash dialog was pressed. Input event; no properties. Closes
-     * the dialog; the transaction remains {@code TOTALED} and re-tenderable.
+     * The Cancel button on either cash dialog (mode-choice or entry) was pressed. Input event;
+     * no properties. Closes both dialogs; the transaction remains {@code TOTALED} and
+     * re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}.
      */
     CASH_CANCEL_PRESSED,
 
@@ -122,7 +141,16 @@ public enum PosEventType {
      */
     QUANTITY_CHANGED,
 
-    /** The whole transaction was voided (terminal). */
+    /**
+     * The whole transaction was voided (terminal).
+     *
+     * <p>Standard properties on a confirmed void: {@code itemCount} (Integer, sum of non-voided
+     * quantities), {@code grandTotal} (BigDecimal, grand total at the moment of the void), and
+     * {@code priorState} (String, the {@link com.rocketpartners.onboarding.commons.model.TransactionState}
+     * name the transaction was in before {@code voidBasket()} — {@code IN_PROGRESS} or
+     * {@code TOTALED}). Voiding after Total is the more interesting case operationally and is
+     * distinguishable via {@code priorState}.</p>
+     */
     BASKET_VOIDED,
 
     /** The transaction was totaled — basket is frozen; tender is next. */

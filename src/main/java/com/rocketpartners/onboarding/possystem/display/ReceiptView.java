@@ -43,6 +43,14 @@ public class ReceiptView extends PosDialog {
     private final JTextArea textArea = new JTextArea();
 
     /**
+     * Wired by the caller to reset the scan-bar status to "Ready to scan" and put the caret back
+     * on the scan field on dismiss. Defaults to a no-op so tests that don't need a live
+     * scan bar don't have to inject one; {@link Application} wires it to
+     * {@link ScannerView#setStatusHint(String)} + {@link ScannerView#requestScanFieldFocus()}.
+     */
+    private Runnable onDismissed = () -> {};
+
+    /**
      * @param owner      the parent frame; may be {@code null}
      * @param dispatcher target for view-input events; must not be {@code null}
      */
@@ -54,12 +62,32 @@ public class ReceiptView extends PosDialog {
         setMinimumSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
         PosButton startNext = PosButtons.primary("Start Next Sale");
-        startNext.addActionListener(e ->
-                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED)));
+        startNext.addActionListener(e -> onStartNextSale(dispatcher));
         setPrimary(startNext);
-        setCancelAction(() ->
-                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED)));
+        setCancelAction(() -> onStartNextSale(dispatcher));
         setInitialFocus(startNext);
+    }
+
+    /**
+     * Installs a callback fired on Start Next Sale / ESC — used by {@link Application} to reset
+     * the scan bar to {@link ScannerView#STATUS_READY} and refocus its scan field immediately,
+     * without waiting for the {@link PosEventType#RECEIPT_DISMISSED} chain to arrive. The
+     * event-driven reset still runs, but a scan-bar hint left showing {@code STATUS_LOCKED}
+     * across dismissal is exactly the class of race that dropped through the cracks the last
+     * time this file was worked on, and one direct call closes it.
+     *
+     * @param callback runnable invoked on dismiss; may be {@code null} for no-op
+     */
+    public void setOnDismissed(Runnable callback) {
+        this.onDismissed = callback == null ? () -> {} : callback;
+    }
+
+    private void onStartNextSale(IPosEventDispatcher dispatcher) {
+        // Direct call first so the scan bar re-renders before any modal-close painting can pin
+        // STATUS_LOCKED in the cashier's field of view; the event chain below still runs and
+        // is what other subscribers (CustomerViewController, JournalListener) act on.
+        onDismissed.run();
+        dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISS_PRESSED));
     }
 
     // ---- Public API called by ReceiptViewController ------------------------

@@ -5,6 +5,7 @@ import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -40,10 +41,27 @@ class ChangeQuantityViewTest {
     private ChangeQuantityView view;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         dispatcher = new RecordingDispatcher();
-        view = new ChangeQuantityView(null, dispatcher, MAX_QUANTITY);
+        SwingUtilities.invokeAndWait(() -> {
+            view = new ChangeQuantityView(null, dispatcher, MAX_QUANTITY);
+            // PosDialog is modal — setVisible(true) inside openFor(...) enters a nested
+            // dispatch loop and blocks invokeAndWait forever, stalling the build on a live
+            // dialog. Force non-modal for tests so the wiring assertions can inspect the
+            // primed dialog state without a human closing the window.
+            view.setModal(false);
+        });
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (view != null) {
+            SwingUtilities.invokeAndWait(() -> {
+                view.setVisible(false);
+                view.dispose();
+            });
+        }
     }
 
     // ---- DocumentFilter --------------------------------------------------
@@ -63,6 +81,32 @@ class ChangeQuantityViewTest {
 
         typeInto(editor, "3");
         assertThat(editor.getText()).isEqualTo("3");
+    }
+
+    @Test
+    void editor_stillRejectsInvalidCharacters_afterOpenFor() throws Exception {
+        // JSpinner.setValue inside openFor() reinstalls the formatter, and every formatter's
+        // install() overwrites the Document's DocumentFilter with its own permissive one. If
+        // the view does not re-attach the digit filter on formatter change, letters and
+        // symbols land on screen and are only rejected at Confirm time. Regression pin for
+        // that: open the dialog, then try the same invalid characters that the "keystroke"
+        // test above proves are rejected pre-open.
+        openFor(3);
+        JTextField editor = view.getSpinnerEditorForTest();
+        SwingUtilities.invokeAndWait(() -> editor.setText(""));
+
+        typeInto(editor, "a");
+        typeInto(editor, "!");
+        typeInto(editor, "-");
+        typeInto(editor, ".");
+        typeInto(editor, "+");
+
+        assertThat(editor.getText())
+                .as("filter must survive openFor's setValue-driven formatter reinstall")
+                .isEmpty();
+
+        typeInto(editor, "5");
+        assertThat(editor.getText()).isEqualTo("5");
     }
 
     @Test

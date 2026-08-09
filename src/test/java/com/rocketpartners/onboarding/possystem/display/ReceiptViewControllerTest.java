@@ -27,6 +27,8 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -153,7 +155,15 @@ class ReceiptViewControllerTest {
         assertThat(next).isNotNull();
         assertThat(next).isNotSameAs(paid);
         assertThat(next.getState()).isEqualTo(TransactionState.IN_PROGRESS);
-        verify(customerView).updateBasket(List.of(), BigDecimal.ZERO);
+        // Fresh transaction opened after RECEIPT_DISMISS_PRESSED — empty basket, all zeros.
+        // Compare BigDecimal args by value because Transaction returns unrounded
+        // subtotals/discounts/tax (scale 0) but rounded grand totals (scale 2).
+        verify(customerView).updateBasket(
+                eq(List.of()),
+                argThat(v -> v != null && v.compareTo(BigDecimal.ZERO) == 0),
+                argThat(v -> v != null && v.compareTo(BigDecimal.ZERO) == 0),
+                argThat(v -> v != null && v.compareTo(BigDecimal.ZERO) == 0),
+                argThat(v -> v != null && v.compareTo(BigDecimal.ZERO) == 0));
         verify(customerView).setBasketInputEnabled(true);
         verify(customerView).setTenderInputEnabled(false);
     }

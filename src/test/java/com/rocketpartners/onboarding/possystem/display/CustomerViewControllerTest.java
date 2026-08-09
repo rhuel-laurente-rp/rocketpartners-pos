@@ -24,6 +24,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -65,8 +66,19 @@ class CustomerViewControllerTest {
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
         assertThat(tx).isNotNull();
         assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // The controller feeds the full breakdown (subtotal, discount, tax, total) so the
+        // inline summary strip renders live tax; on an empty basket every figure compares
+        // equal to zero. Compare by value — the controller's derived figures come from
+        // BigDecimal arithmetic (unrounded intermediates, rounded grand total) so scales
+        // differ across arguments.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
         verify(view).setVisible(true);
     }
@@ -83,7 +95,14 @@ class CustomerViewControllerTest {
         assertThat(lines).hasSize(1);
         assertThat(lines.get(0).getItem()).isEqualTo(WIDGET);
         assertThat(notifications.countOf(PosEventType.ITEM_ADDED)).isEqualTo(1);
-        verify(view).updateBasket(eq(new ArrayList<>(lines)), eq(new BigDecimal("10.00")));
+        // subtotal $10.00, no discount, tax rate 0 → $0.00 tax, grand total $10.00.
+        // Compare BigDecimal args by value — see onStart test for the rationale.
+        verify(view).updateBasket(
+                eq(new ArrayList<>(lines)),
+                argThat(v -> v != null && v.compareTo(new BigDecimal("10.00")) == 0),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(v -> v != null && v.compareTo(new BigDecimal("10.00")) == 0));
     }
 
     @Test
@@ -116,7 +135,14 @@ class CustomerViewControllerTest {
         assertThat(notifications.countOf(PosEventType.LINE_VOIDED)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.LINE_VOIDED)
                 .getProperty("lineItem", LineItem.class)).isSameAs(line);
-        verify(view).updateBasket(any(), eq(BigDecimal.ZERO));
+        // Voided line contributes zero — subtotal, tax, and grand total all compare equal
+        // to zero regardless of BigDecimal scale.
+        verify(view).updateBasket(
+                any(),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
     }
 
     @Test
@@ -133,7 +159,10 @@ class CustomerViewControllerTest {
     }
 
     @Test
-    void voidBasketPressed_endsCurrent_dispatchesBasketVoided_andStartsFreshTransaction() {
+    void voidBasketPressedAlone_isNotEnoughToVoid_awaitsConfirmation() {
+        // The initial-press event opens the confirmation dialog (owned by
+        // VoidBasketConfirmViewController) but must not by itself mutate transaction state or
+        // trigger the reset — voiding is deferred to VOID_BASKET_CONFIRM_PRESSED.
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
@@ -142,6 +171,21 @@ class CustomerViewControllerTest {
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
 
+        assertThat(pos.getTransactionService().getCurrentTransaction()).isSameAs(original);
+        assertThat(original.getState()).isEqualTo(TransactionState.IN_PROGRESS);
+        assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isZero();
+    }
+
+    @Test
+    void voidBasketConfirmed_endsCurrent_dispatchesBasketVoided_andStartsFreshTransaction() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        Transaction original = pos.getTransactionService().getCurrentTransaction();
+        reset(view);
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
         Transaction next = pos.getTransactionService().getCurrentTransaction();
         assertThat(next).isNotNull();
         assertThat(next).isNotSameAs(original);
@@ -149,8 +193,47 @@ class CustomerViewControllerTest {
         assertThat(original.getState()).isEqualTo(TransactionState.VOIDED);
         assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isEqualTo(1);
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // Fresh transaction opened by beginNewTransaction — empty basket, all zeros.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
+    }
+
+    @Test
+    void voidBasketConfirmed_carriesItemCountGrandTotalAndPriorState_forJournaling() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(quickAdd(GIZMO.getUpc()));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
+        PosEvent voided = notifications.lastOf(PosEventType.BASKET_VOIDED);
+        assertThat(voided.getProperty("itemCount", Integer.class)).isEqualTo(3);
+        assertThat(voided.getProperty("grandTotal", BigDecimal.class))
+                .isEqualByComparingTo(new BigDecimal("22.50"));
+        assertThat(voided.getProperty("priorState", String.class)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void voidBasketConfirmedAfterTotal_priorStateIsTotaled() {
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
+
+        PosEvent voided = notifications.lastOf(PosEventType.BASKET_VOIDED);
+        assertThat(voided.getProperty("priorState", String.class))
+                .as("voiding after Total must be distinguishable from voiding IN_PROGRESS")
+                .isEqualTo("TOTALED");
     }
 
     @Test
@@ -158,7 +241,7 @@ class CustomerViewControllerTest {
         pos.addController(controller);
         pos.start();
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
-        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_CONFIRM_PRESSED));
 
         pos.dispatchPosEvent(quickAdd(GIZMO.getUpc()));
 
@@ -181,6 +264,10 @@ class CustomerViewControllerTest {
                 .isEqualTo(TransactionState.TOTALED);
         assertThat(notifications.countOf(PosEventType.TRANSACTION_TOTALED)).isEqualTo(1);
         verify(view).setBasketInputEnabled(false);
+        // Lifecycle input stays ON at TOTALED — the domain still permits voiding the whole
+        // transaction, and grouping Void basket with the mutation controls is exactly the bug
+        // this rewrite fixes.
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(true);
     }
 
@@ -222,8 +309,15 @@ class CustomerViewControllerTest {
         assertThat(next).isNotNull();
         assertThat(next.getState()).isEqualTo(TransactionState.IN_PROGRESS);
         verify(view).setBasketInputEnabled(true);
+        verify(view).setLifecycleInputEnabled(true);
         verify(view).setTenderInputEnabled(false);
-        verify(view).updateBasket(List.of(), BigDecimal.ZERO);
+        // Fresh transaction opened after receipt dismissal — empty basket, all zeros.
+        verify(view).updateBasket(
+                eq(List.of()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()),
+                argThat(zeroByValue()));
     }
 
     @Test
@@ -274,6 +368,16 @@ class CustomerViewControllerTest {
     }
 
     // ---- Helpers -----------------------------------------------------------
+
+    /**
+     * A Mockito matcher that accepts any {@link BigDecimal} whose value compares equal to
+     * zero. Necessary because {@code Transaction} returns unrounded subtotals/discounts/tax
+     * ({@code BigDecimal.ZERO}, scale 0) but rounded grand totals (scale 2), and
+     * {@link BigDecimal#equals} distinguishes {@code 0} from {@code 0.00}.
+     */
+    private static org.mockito.ArgumentMatcher<BigDecimal> zeroByValue() {
+        return v -> v != null && v.compareTo(BigDecimal.ZERO) == 0;
+    }
 
     private static PosEvent quickAdd(String upc) {
         Map<String, Object> props = new HashMap<>();
