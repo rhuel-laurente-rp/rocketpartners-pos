@@ -65,6 +65,23 @@ class JournalListenerTest {
     }
 
     @Test
+    void itemAddedEvent_journalsMatchedRung_whenAttached() {
+        pos.getTransactionService().startTransaction();
+        LineItem li = pos.getTransactionService().addItemByUpc(WIDGET.getUpc(), 1);
+        Map<String, Object> props = new HashMap<>();
+        props.put("lineItem", li);
+        props.put("matchedRung", "STRIPPED_LEADING_ZEROS");
+        props.put("matchedKey", "12345678905");
+        props.put("scannedUpc", "0012345678905");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.ITEM_ADDED, props));
+
+        JournalRecord r = journal.lastOf("ITEM_ADDED");
+        assertThat(r.getFields()).containsEntry("matchedRung", "STRIPPED_LEADING_ZEROS");
+        assertThat(r.getFields()).containsEntry("matchedKey", "12345678905");
+        assertThat(r.getFields()).containsEntry("scannedUpc", "0012345678905");
+    }
+
+    @Test
     void cashTenderedEvent_journalsTenderTypeAndAmountsNotInstrumentDetails() {
         Map<String, Object> props = new HashMap<>();
         props.put("tenderType", TenderType.CASH);

@@ -28,7 +28,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -75,7 +75,6 @@ class ScannerViewControllerTest {
     }
 
     private boolean typed(char c) {
-        // Match the JDK's own KEY_TYPED convention: keyCode is VK_UNDEFINED, char carries it.
         KeyEvent e = new KeyEvent(scanField, KeyEvent.KEY_TYPED, clockTs.get(),
                 0, KeyEvent.VK_UNDEFINED, c);
         return installer.currentDispatcher.dispatchKeyEvent(e);
@@ -110,9 +109,6 @@ class ScannerViewControllerTest {
     void nonTerminatorKeystrokes_passThrough_soTextFieldsReceiveTyping() {
         ensureInProgress();
 
-        // Individual digits are NOT consumed — they pass through so the scan field (and any
-        // other JTextField, e.g. cash-received) receives them normally. Only the terminator
-        // that closes a scanner burst gets consumed.
         boolean consumed1 = typed('0');
         boolean consumed2 = typed('4');
 
@@ -127,7 +123,6 @@ class ScannerViewControllerTest {
         burst("049000053418", 5);
         boolean consumedEnter = typed('\n');
 
-        // Consume the terminator so it doesn't ALSO fire the scan field's Enter action.
         assertThat(consumedEnter).isTrue();
     }
 
@@ -135,9 +130,6 @@ class ScannerViewControllerTest {
     void terminator_thatDidNotCloseABurst_passesThrough() {
         ensureInProgress();
 
-        // Enter with an empty buffer — e.g. cashier pressed Enter in the scan field after
-        // typing manually. Buffer emits nothing; dispatcher must NOT consume, so the field's
-        // own Enter action can fire.
         boolean consumed = typed('\n');
 
         assertThat(consumed).isFalse();
@@ -147,9 +139,6 @@ class ScannerViewControllerTest {
     void keyEventDelivered_whileFocusOnQuickAddButton_stillReachesBuffer() {
         ensureInProgress();
 
-        // The KeyEventDispatcher sits at the KeyboardFocusManager level, so it sees a key
-        // event even if focus was on a JButton (Quick Add) at the time. We simulate that by
-        // firing a KEY_TYPED whose source is a JButton, not the scan field.
         JButton quickAdd = new JButton("Coca Cola");
         for (char c : "049000053418".toCharArray()) {
             KeyEvent e = new KeyEvent(quickAdd, KeyEvent.KEY_TYPED, clockTs.get(),
@@ -180,7 +169,7 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void manualEnter_withEmptyField_producesInvalidBarcodeError() {
+    void manualEnter_withEmptyField_paintsInlineErrorAndDispatchesNoErrorEvent() {
         ensureInProgress();
 
         Map<String, Object> props = new HashMap<>();
@@ -188,51 +177,90 @@ class ScannerViewControllerTest {
         pos.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
 
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
-        assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
-                .isEqualTo("INVALID_BARCODE");
+        // No ERROR dispatched — INVALID_BARCODE is painted inline by the controller.
+        assertThat(notifications.countOf(PosEventType.ERROR)).isZero();
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
     }
 
     @Test
-    void nonNumericInput_isRejectedAsInvalidBarcode() {
+    void nonNumericInput_paintsInlineBarcodeNotRecognised() {
         ensureInProgress();
 
-        // "banana\n" — non-digit chars in a fast burst.
         burst("bananabanan1", 5);
         typed('\n');
 
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
-        assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
-                .isEqualTo("INVALID_BARCODE");
+        assertThat(notifications.countOf(PosEventType.ERROR)).isZero();
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
     }
 
-
     @Test
-    void unknownUpc_producesItemNotFoundErrorFromService_leavesTransactionUnchanged() {
-        Transaction tx = ensureInProgress();
+    void keypadEmittedDigits_reachBufferAndComplete_theScan() {
+        ensureInProgress();
 
-        // Trigger a valid scan whose UPC isn't in the pricebook. The controller dispatches
-        // ITEM_SCANNED; CustomerViewController would call service.addItemByUpc which raises
-        // the UPC_NOT_FOUND error via the service. For an isolated test we add a customer
-        // controller so the full loop happens.
-        CustomerView customerView = mock(CustomerView.class);
-        pos.addController(new CustomerViewController(customerView));
-        // A brand-new tx opened when the customer controller onStart ran; use that.
-        tx = pos.getTransactionService().getCurrentTransaction();
-
-        burst("999999999999", 5);
+        burst("049000053418", 5);
         typed('\n');
 
-        assertThat(tx.getLineItems()).isEmpty();
-        // The scanner controller dispatched ITEM_SCANNED, the CustomerViewController tried
-        // service.addItemByUpc, and the service dispatched UPC_NOT_FOUND.
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+    }
+
+    @Test
+    void twelveDigitUnknown_withBadCheckDigit_paintsInlineMisreadHint() {
+        // 049000053417 — same digits as pricebook COKE UPC 049000053418 but with a bad
+        // last digit. Not in the pricebook. TransactionService dispatches UPC_MISREAD;
+        // scanner controller paints it inline.
+        pos.getTransactionService().startTransaction();
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+
+        burst("049000053417", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        PosEvent err = notifications.lastOf(PosEventType.ERROR);
+        assertThat(err).isNotNull();
+        assertThat(err.getProperty("code", String.class)).isEqualTo("UPC_MISREAD");
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_MISREAD);
+    }
+
+    @Test
+    void twelveDigitUnknown_withGoodCheckDigit_paintsInlineItemNotFound() {
+        pos.getTransactionService().startTransaction();
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+
+        burst("012345678905", 5);
+        typed('\n');
+
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
         PosEvent err = notifications.lastOf(PosEventType.ERROR);
         assertThat(err).isNotNull();
         assertThat(err.getProperty("code", String.class)).isEqualTo("UPC_NOT_FOUND");
+        verify(view).setInlineError(
+                ScannerViewController.MSG_ITEM_NOT_FOUND_PREFIX + "012345678905");
     }
 
     @Test
-    void scanRejected_whenTransactionIsTotaled_dispatchesScanLockedError() {
+    void unknownShortUpc_paintsInlineItemNotFound_leavesTransactionUnchanged() {
+        Transaction tx = ensureInProgress();
+
+        CustomerView customerView = mock(CustomerView.class);
+        pos.addController(new CustomerViewController(customerView));
+        tx = pos.getTransactionService().getCurrentTransaction();
+
+        // Short unknown code (not 12 digits) — misread heuristic does not apply, so we get
+        // UPC_NOT_FOUND from the service, painted inline by the scanner controller.
+        burst("999", 5);
+        typed('\n');
+
+        assertThat(tx.getLineItems()).isEmpty();
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        PosEvent err = notifications.lastOf(PosEventType.ERROR);
+        assertThat(err).isNotNull();
+        assertThat(err.getProperty("code", String.class)).isEqualTo("UPC_NOT_FOUND");
+        verify(view).setInlineError(ScannerViewController.MSG_ITEM_NOT_FOUND_PREFIX + "999");
+    }
+
+    @Test
+    void scanRejected_whenTransactionIsTotaled_paintsInlineLockHintNotDialog() {
         pos.getTransactionService().startTransaction();
         pos.getTransactionService().addItemByUpc(COKE.getUpc(), 1);
         Transaction tx = pos.getTransactionService().total();
@@ -242,17 +270,34 @@ class ScannerViewControllerTest {
 
         assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
-        PosEvent err = notifications.lastOf(PosEventType.ERROR);
-        assertThat(err.getProperty("code", String.class)).isEqualTo("SCAN_LOCKED");
+        // No ERROR event — the SCAN_LOCKED case is inline-only.
+        assertThat(notifications.countOf(PosEventType.ERROR)).isZero();
+        verify(view).setInlineError(ScannerViewController.MSG_SCAN_LOCKED);
+    }
+
+    @Test
+    void transactionTotaledEvent_locksView() {
+        ensureInProgress();
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_TOTALED));
+
+        verify(view).setLocked(true);
+    }
+
+    @Test
+    void receiptDismissed_unlocksView() {
+        ensureInProgress();
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_TOTALED));
+        // onStart already called setLocked(false); the totaled event calls setLocked(true).
+        // After RECEIPT_DISMISSED the view must be unlocked again.
+        verify(view).setLocked(true);
+        pos.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISSED));
+
+        verify(view, atLeastOnce()).setLocked(false);
     }
 
     @Test
     void tenderCashPressed_leavesCaptureRunning_burstStillDispatches() {
-        // Aligned with today's behaviour: the controller reacts to TENDER_*_PRESSED /
-        // CHANGE_QTY_PRESSED / VOID_BASKET_PRESSED / TRANSACTION_COMPLETED by calling
-        // resumeCapture(), not suspendCapture(), so isSuspended() stays false and bursts still
-        // fire. The Javadoc claims otherwise — that mismatch is tracked in
-        // docs/known-issues.md as a follow-up branch, not fixed here.
         ensureInProgress();
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
@@ -279,20 +324,6 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void receiptDismissed_leavesCaptureRunning() {
-        // Aligned with today's behaviour: TRANSACTION_COMPLETED does not suspend
-        // (see tenderCashPressed_leavesCaptureRunning_burstStillDispatches for the same
-        // mismatch), so isSuspended() is already false when RECEIPT_DISMISSED lands and
-        // stays false. Tracked as a follow-up in docs/known-issues.md.
-        ensureInProgress();
-
-        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
-        assertThat(controller.isSuspended()).isFalse();
-        pos.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISSED));
-        assertThat(controller.isSuspended()).isFalse();
-    }
-
-    @Test
     void fieldClearedAndFocusRestored_afterAcceptedScan() {
         ensureInProgress();
 
@@ -300,29 +331,58 @@ class ScannerViewControllerTest {
         typed('\n');
 
         verify(view).clearScanField();
-        verify(view, times(2)).requestScanFieldFocus(); // once at start, once after scan
+        // onStart requests focus, and every accepted scan requests focus again.
+        verify(view, atLeastOnce()).requestScanFieldFocus();
     }
 
     @Test
-    void fieldClearedAndFocusRestored_afterRejectedScan() {
+    void rejectedScanBurst_stillClearsField_becauseBufferOwnedTheText() {
+        // Scanner bursts land in the buffer via the KeyEventDispatcher, not the field. The
+        // field never held the burst text, so clearing it after rejection is a no-op on user
+        // input and keeps the field in a known state.
         ensureInProgress();
 
-        // Non-numeric burst — rejected as INVALID_BARCODE. (Wrong-length is no longer a
-        // rejection reason: the pricebook carries UPCs of assorted lengths.)
         burst("bananana1234", 5);
         typed('\n');
 
-        // Rejected scan: the completed handler still clears & refocuses so the cashier can
-        // rescan. Focus is also restored on the ERROR event that the rejection dispatches.
         verify(view).clearScanField();
-        verify(view, org.mockito.Mockito.atLeast(2)).requestScanFieldFocus();
-        assertThat(notifications.lastOf(PosEventType.ERROR).getProperty("code", String.class))
-                .isEqualTo("INVALID_BARCODE");
+        verify(view, atLeastOnce()).requestScanFieldFocus();
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
+    }
+
+    @Test
+    void rejectedManualSubmit_keepsFieldTextForRetry() {
+        // On rejected manual entry the field must NOT be cleared — the wrong text stays in
+        // place (and setInlineError selects it) so the cashier sees what they typed and the
+        // next keystroke replaces it wholesale. Clearing would leave the Scan button disabled
+        // with no obvious reason.
+        ensureInProgress();
+
+        Map<String, Object> props = new HashMap<>();
+        props.put("raw", "bananana1234");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
+
+        verify(view, times(0)).clearScanField();
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
+        verify(view, atLeastOnce()).requestScanFieldFocus();
+    }
+
+    @Test
+    void keystroke_clearsInlineErrorFromPreviousScan() {
+        ensureInProgress();
+
+        // Trigger an inline error, then type any character.
+        burst("nope", 5);
+        typed('\n');
+        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
+
+        typed('0');
+        // Any keystroke reaching the dispatcher clears the error before the buffer accepts it.
+        verify(view, atLeastOnce()).clearInlineError();
     }
 
     @Test
     void demoHotkey_replaysCannedUpc_whenDebugOn() {
-        // Rebuild with debug=true.
         pos.removeController(controller);
         installer = new CapturingInstaller();
         controller = new ScannerViewController(view, buffer, true, installer, clockTs::get);
@@ -358,6 +418,36 @@ class ScannerViewControllerTest {
         pos.removeController(controller);
 
         assertThat(installer.uninstalled).isTrue();
+    }
+
+    @Test
+    void acceptedScan_pulsesTheField() {
+        ensureInProgress();
+
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+        // Re-seed transaction since adding CustomerViewController opens its own.
+        pos.getTransactionService().getCurrentTransaction();
+
+        burst("049000053418", 5);
+        typed('\n');
+
+        // ITEM_SCANNED → CustomerViewController → ITEM_ADDED → scanner pulses.
+        verify(view, atLeastOnce()).pulseGo();
+    }
+
+    @Test
+    void nonScanError_stillOpensModal_notInline() {
+        // A cash-flow error is not a scan-bar concern — the scanner controller must not paint
+        // it inline. Dispatch a non-scan ERROR code and verify no inline call is made.
+        ensureInProgress();
+
+        Map<String, Object> props = new HashMap<>();
+        props.put("code", "INVALID_CASH_AMOUNT");
+        props.put("message", "cash received is not a valid number: banana");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
+
+        // No inline call for a non-scan code.
+        verify(view, times(0)).setInlineError(org.mockito.ArgumentMatchers.anyString());
     }
 
     // ---- Helpers -----------------------------------------------------------

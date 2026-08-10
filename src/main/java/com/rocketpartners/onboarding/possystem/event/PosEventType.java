@@ -195,9 +195,9 @@ public enum PosEventType {
      * A POS-level error occurred (e.g. bad UPC lookup, illegal state, journal unreachable).
      *
      * <p>Standard properties: {@code code} (short identifier such as {@code UPC_NOT_FOUND},
-     * {@code TOTALED_INVARIANT}, {@code INVALID_CASH_AMOUNT}, {@code UNDERPAYMENT},
-     * {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT}), {@code message} (human-readable
-     * detail), and {@code cause} (Throwable, when present). May also carry
+     * {@code UPC_MISREAD}, {@code TOTALED_INVARIANT}, {@code INVALID_CASH_AMOUNT},
+     * {@code UNDERPAYMENT}, {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT}), {@code message}
+     * (human-readable detail), and {@code cause} (Throwable, when present). May also carry
      * {@code operation}, {@code upc}, and other kind-specific keys.</p>
      */
     ERROR

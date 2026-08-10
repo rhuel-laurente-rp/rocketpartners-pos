@@ -37,10 +37,18 @@ import java.util.Set;
  *       component); everything else is left alone so the scan field's own typing still
  *       works.</li>
  *   <li><strong>Manual typing.</strong> The cashier types digits into the scan field and
- *       hits Enter. The field's action listener fires
- *       {@link PosEventType#SCAN_SUBMIT_PRESSED} carrying the field's raw text; the
- *       controller validates and dispatches {@link PosEventType#ITEM_SCANNED} on success.</li>
+ *       either presses Enter or taps the Scan button. Both routes dispatch
+ *       {@link PosEventType#SCAN_SUBMIT_PRESSED} carrying the field's raw text; the controller
+ *       validates and dispatches {@link PosEventType#ITEM_SCANNED} on success.</li>
  * </ul>
+ *
+ * <p><strong>Inline error UX.</strong> Four codes route to the scan bar's inline hint rather
+ * than to a modal dialog: {@code UPC_NOT_FOUND}, {@code UPC_MISREAD}, {@code INVALID_BARCODE},
+ * and {@code SCAN_LOCKED}. Scan failures are frequent and instantly recoverable, and a modal
+ * costs a dismissal tap with a queue waiting. Every other error code
+ * ({@code TOTALED_INVARIANT}, {@code NO_TRANSACTION}, cash-flow errors, discount-engine
+ * failures once they exist) still opens {@link ErrorPopupViewController}'s modal — those
+ * require acknowledgement; scan errors don't.</p>
  *
  * <p><strong>Focus discipline.</strong> After every user interaction — quick add, void,
  * cash-dialog dismiss, receipt dismiss, error popup dismiss — the controller calls
@@ -49,9 +57,9 @@ import java.util.Set;
  * cursor visible in the right place.</p>
  *
  * <p><strong>When scanning is off.</strong> A scan attempted while the transaction is
- * {@link TransactionState#TOTALED} is rejected with an ERROR event ({@code SCAN_LOCKED}) so
- * the cashier gets feedback instead of a silent dead field. Scan capture is also suspended
- * while a modal dialog is open (cash tender, receipt) so keystrokes can't leak into it.</p>
+ * {@link TransactionState#TOTALED} is rejected with the inline {@code SCAN_LOCKED} hint. Scan
+ * capture is also suspended while a modal dialog is open (cash tender, receipt) so keystrokes
+ * can't leak into it.</p>
  *
  * <p><strong>Debug hotkey.</strong> When the {@code debug} flag is on, F12 replays a canned
  * UPC through the same path as a real scan, so demos work without hardware on the desk.</p>
@@ -63,6 +71,12 @@ public class ScannerViewController implements IController, IPosEventListener {
 
     /** {@link KeyEvent} key code the demo hotkey listens for. */
     public static final int DEMO_HOTKEY = KeyEvent.VK_F12;
+
+    // Inline-error copy — Title Case per convention. Public because tests assert on them.
+    static final String MSG_ITEM_NOT_FOUND_PREFIX = "Item Not Found — ";
+    static final String MSG_BARCODE_NOT_RECOGNISED = "Barcode Not Recognised";
+    static final String MSG_BARCODE_MISREAD = "Barcode May Have Been Misread";
+    static final String MSG_SCAN_LOCKED = "Locked — Complete Payment";
 
     /**
      * Marshals the addition of a {@link KeyEventDispatcher} to the platform's
@@ -165,7 +179,7 @@ public class ScannerViewController implements IController, IPosEventListener {
         this.parent = parent;
         parent.register(this);
         this.uninstallDispatcher = keyInstaller.install(this::onKeyEvent);
-        view.setStatusHint(ScannerView.STATUS_READY);
+        view.setLocked(false);
         view.requestScanFieldFocus();
     }
 
@@ -215,9 +229,22 @@ public class ScannerViewController implements IController, IPosEventListener {
             buffer.reset();
             return false;
         }
+        // Any keystroke that reaches an inline-error state clears the error — the cashier is
+        // rescanning or retyping, and the error hint is now stale.
+        view.clearInlineError();
+        // Filter on KEY_TYPED's keyChar rather than keyCode: KEY_TYPED synthesises the character
+        // regardless of whether the physical key was top-row or numeric-keypad, so a scanner
+        // emitting VK_NUMPAD0..VK_NUMPAD9 still surfaces the '0'..'9' char here. Filtering on
+        // keyCode would silently drop numeric-keypad scans.
         char c = e.getKeyChar();
         Optional<String> completed = buffer.accept(c, clock.millis());
         if (completed.isPresent()) {
+            if (debug) {
+                buffer.pollLastBurstStats().ifPresent(stats -> System.err.printf(
+                        "[scan-calibration] chars=%d gaps=%d min=%dms max=%dms mean=%.1fms%n",
+                        stats.getCharCount(), stats.getGapCount(),
+                        stats.getMinGapMs(), stats.getMaxGapMs(), stats.getMeanGapMs()));
+            }
             handleCompleted(completed.get());
             // Consume the terminator so a scanner Enter doesn't ALSO fire the scan field's
             // Enter action (which would double-dispatch as a manual submit).
@@ -248,61 +275,106 @@ public class ScannerViewController implements IController, IPosEventListener {
             case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
-            // Receipt dismissal semantically starts a fresh sale: force STATUS_READY
+            // Receipt dismissal semantically starts a fresh sale: force unlocked
             // unconditionally, independent of the transaction-state check resumeCapture
             // uses, so a lingering TOTALED state (or a late TRANSACTION_COMPLETED handler
-            // firing after this) cannot leave the scan bar showing "Locked — press Total".
+            // firing after this) cannot leave the scan bar showing the locked hint.
             case RECEIPT_DISMISSED -> resumeReady();
 
-            case TRANSACTION_TOTALED -> view.setStatusHint(ScannerView.STATUS_LOCKED);
+            case TRANSACTION_TOTALED -> view.setLocked(true);
+
+            case ITEM_ADDED -> handleItemAdded();
+
+            // A non-scan error (cash flow, discount engine, etc.) still opens a modal via
+            // ErrorPopupViewController. The scan errors — UPC_NOT_FOUND, UPC_MISREAD,
+            // INVALID_BARCODE, SCAN_LOCKED — arrive here too because those codes are sometimes
+            // dispatched from other layers (TransactionService for UPC_NOT_FOUND / UPC_MISREAD),
+            // and this controller is where the scan bar's inline hint lives.
+            case ERROR -> handleErrorEvent(event);
 
             // Focus-restore hooks. After any interaction that isn't the modal-driving ones
             // above, put the cursor back on the scan field so the next scan lands there.
-            case ITEM_ADDED, LINE_VOIDED, QUANTITY_CHANGED, BASKET_VOIDED, ERROR -> restoreScanFocus();
+            case LINE_VOIDED, QUANTITY_CHANGED, BASKET_VOIDED -> restoreScanFocus();
 
             default -> { /* not subscribed */ }
         }
     }
 
     private void handleManualSubmit(PosEvent event) {
+        // Manual submit also counts as "next input" — clear any inline error first so a manual
+        // retry doesn't paint over the previous message.
+        view.clearInlineError();
         String raw = event.getProperty("raw", String.class);
         if (raw == null) raw = "";
-        submitBarcode(raw.trim(), "manualScan");
-        view.clearScanField();
+        boolean accepted = submitBarcode(raw.trim(), "manualScan");
+        // Clear only on accepted submits. On rejection the field keeps the wrong text and
+        // ScannerView.setInlineError() has selected it, so the cashier sees what they typed
+        // and the next keystroke replaces it wholesale. Clearing here would erase that
+        // context and leave the Scan button disabled with no obvious reason.
+        if (accepted) view.clearScanField();
         view.requestScanFieldFocus();
     }
 
     private void handleCompleted(String raw) {
+        // Scanner burst: the field never held the burst text — the buffer captured it via
+        // the KeyEventDispatcher — so clearing here doesn't destroy user input regardless of
+        // whether the burst was accepted or rejected. Clearing keeps the field in a known
+        // state for the next burst.
         submitBarcode(raw, "scan");
         view.clearScanField();
         view.requestScanFieldFocus();
-        view.setStatusHint(ScannerView.STATUS_READY);
     }
 
-    private void submitBarcode(String raw, String operation) {
+    private void handleItemAdded() {
+        // Accepted scan: brief GO pulse on the field border, same duration as the basket's row
+        // flash so the two read as one event.
+        view.pulseGo();
+        restoreScanFocus();
+    }
+
+    /**
+     * @return {@code true} if the submission passed local validation and an
+     *         {@link PosEventType#ITEM_SCANNED} was dispatched; {@code false} if it was
+     *         rejected inline (SCAN_LOCKED or INVALID_BARCODE). Downstream errors reached via
+     *         the ITEM_SCANNED path (UPC_NOT_FOUND, UPC_MISREAD) still count as "accepted"
+     *         here — the submit itself was well-formed.
+     */
+    private boolean submitBarcode(String raw, String operation) {
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
         if (tx != null && tx.getState() == TransactionState.TOTALED) {
-            dispatchError("SCAN_LOCKED",
-                    "cannot scan while transaction is totaled — press Total to tender",
-                    operation, raw);
-            return;
+            // Inline, not modal — a scanner burst against a locked terminal must not stack
+            // dialogs. The lock also prevents any state mutation regardless.
+            view.setInlineError(MSG_SCAN_LOCKED);
+            return false;
         }
         if (!Barcodes.isValidUpc(raw)) {
-            dispatchError("INVALID_BARCODE",
-                    "not a valid UPC: '" + raw + "'",
-                    operation, raw);
-            return;
+            view.setInlineError(MSG_BARCODE_NOT_RECOGNISED);
+            return false;
         }
         Map<String, Object> props = new HashMap<>();
         props.put("upc", raw);
         props.put("source", operation);
         parent.dispatchPosEvent(new PosEvent(PosEventType.ITEM_SCANNED, props));
+        return true;
     }
 
-    private void suspendCapture() {
-        suspended = true;
-        buffer.reset();
-        view.setStatusHint(ScannerView.STATUS_LOCKED);
+    private void handleErrorEvent(PosEvent event) {
+        String code = event.getProperty("code", String.class);
+        if (code == null) {
+            restoreScanFocus();
+            return;
+        }
+        switch (code) {
+            case "UPC_NOT_FOUND" -> {
+                String upc = event.getProperty("upc", String.class);
+                view.setInlineError(MSG_ITEM_NOT_FOUND_PREFIX + (upc == null ? "" : upc));
+            }
+            case "UPC_MISREAD" -> view.setInlineError(MSG_BARCODE_MISREAD);
+            case "INVALID_BARCODE" -> view.setInlineError(MSG_BARCODE_NOT_RECOGNISED);
+            case "SCAN_LOCKED" -> view.setInlineError(MSG_SCAN_LOCKED);
+            default -> { /* not a scan-bar concern — ErrorPopupViewController handles it */ }
+        }
+        restoreScanFocus();
     }
 
     private void resumeCapture() {
@@ -310,23 +382,23 @@ public class ScannerViewController implements IController, IPosEventListener {
         buffer.reset();
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
         boolean totaled = tx != null && tx.getState() == TransactionState.TOTALED;
-        view.setStatusHint(totaled ? ScannerView.STATUS_LOCKED : ScannerView.STATUS_READY);
+        view.setLocked(totaled);
         restoreScanFocus();
     }
 
     /**
-     * As {@link #resumeCapture()} but forces {@link ScannerView#STATUS_READY} regardless of
-     * transaction state. Called on {@link PosEventType#RECEIPT_DISMISSED} — the receipt was
-     * shown for the just-paid transaction, and the very next thing the {@link
-     * CustomerViewController} does is open a fresh IN_PROGRESS transaction, so the correct
-     * end-state hint is always "Ready to scan". Avoids a race where the still-TOTALED old
-     * transaction (or a re-delivery of the outer TRANSACTION_COMPLETED event that opened the
-     * receipt in the first place) leaves the hint stuck on STATUS_LOCKED.
+     * As {@link #resumeCapture()} but forces the unlocked state regardless of transaction
+     * state. Called on {@link PosEventType#RECEIPT_DISMISSED} — the receipt was shown for the
+     * just-paid transaction, and the very next thing the {@link CustomerViewController} does
+     * is open a fresh IN_PROGRESS transaction, so the correct end-state is always idle.
+     * Avoids a race where the still-TOTALED old transaction (or a re-delivery of the outer
+     * TRANSACTION_COMPLETED event that opened the receipt in the first place) leaves the scan
+     * bar stuck in the locked mode.
      */
     private void resumeReady() {
         suspended = false;
         buffer.reset();
-        view.setStatusHint(ScannerView.STATUS_READY);
+        view.setLocked(false);
         restoreScanFocus();
     }
 
@@ -336,16 +408,8 @@ public class ScannerViewController implements IController, IPosEventListener {
         }
     }
 
-    private void dispatchError(String code, String message, String operation, String raw) {
-        Map<String, Object> props = new HashMap<>();
-        props.put("code", code);
-        props.put("message", message);
-        props.put("operation", operation);
-        props.put("raw", raw);
-        parent.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
-    }
-
     private void triggerDemoScan() {
+        view.clearInlineError();
         submitBarcode(DEMO_UPC, "demoScan");
         view.clearScanField();
         view.requestScanFieldFocus();

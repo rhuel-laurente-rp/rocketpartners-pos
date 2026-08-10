@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
 
+
 /**
  * Listens for {@link PosEventType#ERROR} events and shows them to the cashier as a modal
  * {@link ErrorDialog}.
@@ -49,6 +50,15 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
 
     private static final String GENERIC_FALLBACK = "An unexpected error occurred.";
     private static final String TITLE = "Error";
+
+    /**
+     * Error codes handled inline by the scan bar instead of a modal dialog. Scan failures are
+     * frequent and instantly recoverable — an unlisted product, a damaged label, a misread — so
+     * a modal costs a dismissal tap with a queue waiting. {@link ScannerViewController} paints
+     * these into {@link ScannerView}; this controller drops the event silently.
+     */
+    private static final Set<String> INLINE_SCAN_CODES = Set.of(
+            "UPC_NOT_FOUND", "UPC_MISREAD", "INVALID_BARCODE", "SCAN_LOCKED");
 
     /** Marshals a task onto the Swing event dispatch thread. Default: {@link SwingUtilities#invokeLater}. */
     @FunctionalInterface
@@ -159,13 +169,18 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
     public void onPosEvent(PosEvent event) {
         if (event.getType() != PosEventType.ERROR) return;
 
+        String code = event.getProperty("code", String.class);
+        // Scan errors are painted into the scan bar's inline hint by ScannerViewController.
+        // Drop them here — routing them to a modal would defeat the point of the inline
+        // treatment (frequent, instantly recoverable, cashier keeps scanning without a tap).
+        if (code != null && INLINE_SCAN_CODES.contains(code)) return;
+
         // Coalesce burst errors: if a dialog is already up, drop this one on the floor. The
         // cashier can retrigger the underlying action after dismissing; a stack of dialogs is
         // never useful.
         if (dialogShowing) return;
         dialogShowing = true;
 
-        String code = event.getProperty("code", String.class);
         String message = event.getProperty("message", String.class);
         String userMessage = cashierMessage(code, message, event);
 
@@ -189,6 +204,12 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
      * Maps an error event to a cashier-readable message. Falls back to
      * {@link #GENERIC_FALLBACK} on unknown codes and on a {@code null} message; never returns
      * the string {@code "null"}.
+     *
+     * <p>The four {@link #INLINE_SCAN_CODES} do not reach this method today — they are dropped
+     * upstream in {@link #onPosEvent(PosEvent)} and painted into the scan bar's inline hint
+     * instead. The mappings are kept for parity so a code path that ever routes a scan error to
+     * the modal (e.g. a future component that couldn't reach the scan bar) still gets sensible
+     * copy rather than the generic fallback.</p>
      */
     static String cashierMessage(String code, String message, PosEvent event) {
         if (code == null) code = "";
@@ -198,6 +219,11 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
                 return upc != null
                         ? "Item not found: " + upc
                         : "Item not found.";
+            case "UPC_MISREAD":
+                // 12-digit input with a bad UPC-A check digit — a printed barcode almost never
+                // fails the checksum, so the likely cause is a scanner misread, not an unknown
+                // product. Prompt the cashier to rescan rather than let them hand-key.
+                return "Barcode may have been misread. Try scanning again.";
             case "INVALID_BARCODE":
                 String raw = event.getProperty("raw", String.class);
                 return (raw == null || raw.isEmpty())
