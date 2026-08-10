@@ -124,14 +124,20 @@ public class CustomerViewController implements IController, IPosEventListener {
 
     private void addItemByUpc(String upc) {
         if (upc == null) return;
-        LineItem added;
+        TransactionService.AddItemOutcome outcome;
         try {
-            added = parent.getTransactionService().addItemByUpc(upc, 1);
+            outcome = parent.getTransactionService().addItemByUpcDetailed(upc, 1);
         } catch (RuntimeException ignored) {
             return;
         }
         Map<String, Object> props = new HashMap<>();
-        props.put("lineItem", added);
+        props.put("lineItem", outcome.getLineItem());
+        // Attach the ladder outcome so JournalListener can record which normalisation rung the
+        // scanned code resolved on. Knowing a scan only resolved on rung 3 is the difference
+        // between a working integration and one quietly relying on a coincidence.
+        props.put("matchedRung", outcome.getMatchedRung().name());
+        props.put("matchedKey", outcome.getMatchedKey());
+        props.put("scannedUpc", upc);
         parent.dispatchPosEvent(new PosEvent(PosEventType.ITEM_ADDED, props));
         render();
     }

@@ -8,7 +8,9 @@ import com.rocketpartners.onboarding.commons.model.TransactionState;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import com.rocketpartners.onboarding.possystem.component.Barcodes;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
+import com.rocketpartners.onboarding.possystem.repository.UpcResolver;
 import lombok.Getter;
 
 import java.math.BigDecimal;
@@ -120,18 +122,39 @@ public class TransactionService {
      *                                  {@link TransactionState#IN_PROGRESS}
      */
     public LineItem addItemByUpc(String upc, int quantity) {
+        return addItemByUpcDetailed(upc, quantity).getLineItem();
+    }
+
+    /**
+     * As {@link #addItemByUpc(String, int)}, but returns the full resolution outcome — the
+     * affected {@link LineItem} plus which rung of {@link UpcResolver} produced the hit and the
+     * normalised key that matched. Callers that want to journal the ladder outcome
+     * ({@code CustomerViewController} → {@code ITEM_ADDED}) use this overload.
+     *
+     * <p>The single-argument {@link #addItemByUpc(String, int)} delegates to this method — the
+     * ladder is the only lookup path. Callers that don't care about the rung throw away the
+     * extra fields.</p>
+     */
+    public AddItemOutcome addItemByUpcDetailed(String upc, int quantity) {
         requireCurrentTransaction("addItemByUpc");
-        Optional<Item> maybeItem = itemRepository.findByUpc(upc);
-        if (maybeItem.isEmpty()) {
+        Optional<UpcResolver.Resolution> resolved = UpcResolver.resolve(itemRepository, upc);
+        if (resolved.isEmpty()) {
             IllegalArgumentException ex = new IllegalArgumentException("unknown UPC: " + upc);
+            // 12-digit input with an invalid check digit is far more likely a scanner misread
+            // than an unknown product. Separate code so the popup can prompt the cashier to
+            // rescan rather than let them conclude the item is unlisted and hand-key it.
+            boolean likelyMisread = upc != null
+                    && upc.length() == Barcodes.UPC_A_LENGTH
+                    && Barcodes.isValidUpc(upc)
+                    && !Barcodes.hasValidUpcACheckDigit(upc);
             Map<String, Object> props = new HashMap<>();
-            props.put("code", "UPC_NOT_FOUND");
+            props.put("code", likelyMisread ? "UPC_MISREAD" : "UPC_NOT_FOUND");
             props.put("message", ex.getMessage());
             props.put("upc", upc);
             eventDispatcher.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
             throw ex;
         }
-        Item item = maybeItem.get();
+        Item item = resolved.get().getItem();
         try {
             currentTransaction.addLineItem(item, quantity);
         } catch (IllegalStateException e) {
@@ -143,10 +166,27 @@ public class TransactionService {
         }
         for (LineItem li : currentTransaction.getLineItems()) {
             if (!li.isVoided() && li.getItem().getUpc().equals(item.getUpc())) {
-                return li;
+                return new AddItemOutcome(li, resolved.get().getRung(), resolved.get().getMatchedKey());
             }
         }
         throw new IllegalStateException("line item disappeared after add — should not happen");
+    }
+
+    /** Outcome of {@link #addItemByUpcDetailed(String, int)}. */
+    public static final class AddItemOutcome {
+        private final LineItem lineItem;
+        private final UpcResolver.Rung matchedRung;
+        private final String matchedKey;
+
+        AddItemOutcome(LineItem lineItem, UpcResolver.Rung matchedRung, String matchedKey) {
+            this.lineItem = lineItem;
+            this.matchedRung = matchedRung;
+            this.matchedKey = matchedKey;
+        }
+
+        public LineItem getLineItem() { return lineItem; }
+        public UpcResolver.Rung getMatchedRung() { return matchedRung; }
+        public String getMatchedKey() { return matchedKey; }
     }
 
     /**

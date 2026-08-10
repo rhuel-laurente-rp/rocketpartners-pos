@@ -129,6 +129,13 @@ public class JournalListener implements IController, IPosEventListener {
             case ITEM_ADDED, LINE_VOIDED -> {
                 LineItem li = event.getProperty("lineItem", LineItem.class);
                 if (li != null) putLineItem(fields, li);
+                // On ITEM_ADDED the scanned form and the ladder rung are attached by
+                // CustomerViewController; record them so the journal shows whether a scan
+                // resolved on exact match or via normalisation. On LINE_VOIDED these keys are
+                // absent and the putIfNotNull below is a no-op.
+                putIfNotNull(fields, "matchedRung", event.getProperty("matchedRung", String.class));
+                putIfNotNull(fields, "matchedKey", event.getProperty("matchedKey", String.class));
+                putIfNotNull(fields, "scannedUpc", event.getProperty("scannedUpc", String.class));
             }
             case QUANTITY_CHANGED -> {
                 LineItem li = event.getProperty("lineItem", LineItem.class);

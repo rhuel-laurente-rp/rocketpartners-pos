@@ -48,6 +48,9 @@ public final class BarcodeInputBuffer {
     /** Standard Enter terminator. Scanners are typically shipped configured this way. */
     public static final char TERMINATOR_ENTER = '\n';
 
+    /** Carriage return terminator. Some scanners send {@code \r} either alone or as CR+LF. */
+    public static final char TERMINATOR_CR = '\r';
+
     /** Standard Tab terminator. Some scanners are configured this way. */
     public static final char TERMINATOR_TAB = '\t';
 
@@ -61,6 +64,27 @@ public final class BarcodeInputBuffer {
 
     private final StringBuilder buffer = new StringBuilder();
     private long lastCharTs = Long.MIN_VALUE;
+
+    /**
+     * Timestamp of the terminator that most recently completed a burst; {@link Long#MIN_VALUE}
+     * when no burst has been emitted yet or the buffer has since been reset. Used to swallow a
+     * CR+LF pair as a single terminator — after CR completes a burst, an LF arriving within the
+     * burst-gap of that CR is dropped rather than counted as an empty submit.
+     */
+    private long lastEmittedTerminatorTs = Long.MIN_VALUE;
+
+    /**
+     * Inter-character gap accumulator for the burst that is currently being built. Reset every
+     * time the buffer is cleared (stale timeout, gap overrun, reset, emit). Read by the
+     * controller when a burst completes so it can log a calibration summary in debug mode.
+     */
+    private int burstCharCount = 0;
+    private long burstMinGap = Long.MAX_VALUE;
+    private long burstMaxGap = Long.MIN_VALUE;
+    private long burstTotalGap = 0L;
+    private int burstGapCount = 0;
+
+    private BurstStats lastCompletedBurstStats;
 
     /**
      * Builds a buffer with default timings ({@value #DEFAULT_BURST_GAP_MS} ms burst gap,
@@ -95,6 +119,7 @@ public final class BarcodeInputBuffer {
     private static Set<Character> defaultTerminators() {
         Set<Character> t = new HashSet<>();
         t.add(TERMINATOR_ENTER);
+        t.add(TERMINATOR_CR);
         t.add(TERMINATOR_TAB);
         return t;
     }
@@ -117,25 +142,54 @@ public final class BarcodeInputBuffer {
         if (buffer.length() > 0 && lastCharTs != Long.MIN_VALUE
                 && (tsMillis - lastCharTs) > staleTimeoutMs) {
             buffer.setLength(0);
+            resetBurstStats();
         }
 
         if (terminators.contains(c)) {
+            // CR+LF suppression: some scanners send both terminators back-to-back. If we just
+            // emitted a burst on a CR and an LF (or another terminator) follows within the
+            // burst gap, treat the pair as one terminator rather than one scan plus an empty
+            // submit. Anything arriving later than the gap is a genuine standalone terminator.
+            if (lastEmittedTerminatorTs != Long.MIN_VALUE
+                    && (tsMillis - lastEmittedTerminatorTs) <= burstGapMs) {
+                lastCharTs = tsMillis;
+                lastEmittedTerminatorTs = tsMillis;
+                return Optional.empty();
+            }
             if (buffer.length() == 0) {
                 lastCharTs = tsMillis;
+                lastEmittedTerminatorTs = Long.MIN_VALUE;
                 return Optional.empty();
             }
             String result = buffer.toString();
             buffer.setLength(0);
             lastCharTs = tsMillis;
+            lastEmittedTerminatorTs = tsMillis;
+            lastCompletedBurstStats = snapshotBurstStats();
+            resetBurstStats();
             return Optional.of(result);
         }
 
         // Non-terminator: check the gap. If we're beyond the scanner-burst threshold, drop
         // whatever's in the buffer — this is either the start of a new burst (accept), or
         // human typing (which will never terminate a valid burst).
-        if (buffer.length() > 0 && lastCharTs != Long.MIN_VALUE
-                && (tsMillis - lastCharTs) > burstGapMs) {
+        boolean burstGapExceeded = buffer.length() > 0 && lastCharTs != Long.MIN_VALUE
+                && (tsMillis - lastCharTs) > burstGapMs;
+        if (burstGapExceeded) {
             buffer.setLength(0);
+            resetBurstStats();
+        }
+
+        // Record the inter-character gap for calibration BEFORE we append. Only meaningful
+        // when this char is being accumulated (a prefix will be stripped below but still
+        // counts as an inbound keystroke; skip it for stats to keep the numbers about the
+        // barcode payload only).
+        if (buffer.length() > 0 && lastCharTs != Long.MIN_VALUE) {
+            long gap = tsMillis - lastCharTs;
+            if (gap < burstMinGap) burstMinGap = gap;
+            if (gap > burstMaxGap) burstMaxGap = gap;
+            burstTotalGap += gap;
+            burstGapCount++;
         }
 
         // A configured prefix that arrives as the first character of a burst is silently
@@ -144,8 +198,12 @@ public final class BarcodeInputBuffer {
         boolean isPrefix = prefix != NO_PREFIX && c == prefix && buffer.length() == 0;
         if (!isPrefix) {
             buffer.append(c);
+            burstCharCount++;
         }
         lastCharTs = tsMillis;
+        // A new burst is starting; a subsequent terminator opens a fresh CR+LF window from
+        // the terminator itself, not from any prior emission.
+        lastEmittedTerminatorTs = Long.MIN_VALUE;
         return Optional.empty();
     }
 
@@ -157,6 +215,58 @@ public final class BarcodeInputBuffer {
     public void reset() {
         buffer.setLength(0);
         lastCharTs = Long.MIN_VALUE;
+        lastEmittedTerminatorTs = Long.MIN_VALUE;
+        resetBurstStats();
+    }
+
+    /**
+     * @return the calibration snapshot for the most recently completed burst, or empty if no
+     *         burst has completed since construction / {@link #reset()}. Used by the controller
+     *         when {@code --debug} is on to log per-scan gap statistics for tuning
+     *         {@code --scan-burst-gap-ms} to actual hardware.
+     */
+    public Optional<BurstStats> pollLastBurstStats() {
+        BurstStats out = lastCompletedBurstStats;
+        lastCompletedBurstStats = null;
+        return Optional.ofNullable(out);
+    }
+
+    private BurstStats snapshotBurstStats() {
+        long minGap = burstGapCount == 0 ? 0L : burstMinGap;
+        long maxGap = burstGapCount == 0 ? 0L : burstMaxGap;
+        double mean = burstGapCount == 0 ? 0d : ((double) burstTotalGap) / burstGapCount;
+        return new BurstStats(burstCharCount, burstGapCount, minGap, maxGap, mean);
+    }
+
+    private void resetBurstStats() {
+        burstCharCount = 0;
+        burstMinGap = Long.MAX_VALUE;
+        burstMaxGap = Long.MIN_VALUE;
+        burstTotalGap = 0L;
+        burstGapCount = 0;
+    }
+
+    /** Inter-character gap summary for a completed burst; times in milliseconds. */
+    public static final class BurstStats {
+        private final int charCount;
+        private final int gapCount;
+        private final long minGapMs;
+        private final long maxGapMs;
+        private final double meanGapMs;
+
+        BurstStats(int charCount, int gapCount, long minGapMs, long maxGapMs, double meanGapMs) {
+            this.charCount = charCount;
+            this.gapCount = gapCount;
+            this.minGapMs = minGapMs;
+            this.maxGapMs = maxGapMs;
+            this.meanGapMs = meanGapMs;
+        }
+
+        public int getCharCount() { return charCount; }
+        public int getGapCount() { return gapCount; }
+        public long getMinGapMs() { return minGapMs; }
+        public long getMaxGapMs() { return maxGapMs; }
+        public double getMeanGapMs() { return meanGapMs; }
     }
 
     /**

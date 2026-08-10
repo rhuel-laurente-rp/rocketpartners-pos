@@ -175,12 +175,12 @@ public final class Application {
                     new ReceiptViewController(receiptView, args.storeName, args.laneNumber);
 
             ScannerView scannerView = new ScannerView(pos);
-            // Direct reset from the receipt's Start Next Sale button so the scan bar hint flips
-            // from STATUS_LOCKED to STATUS_READY the moment the modal closes, not later in the
+            // Direct reset from the receipt's Start Next Sale button so the scan bar flips out
+            // of the locked mode the moment the modal closes, not later in the
             // RECEIPT_DISMISSED event chain. Belt-and-braces with ScannerViewController's own
             // handler — the event still runs, this just closes the ordering race the user hit.
             receiptView.setOnDismissed(() -> {
-                scannerView.setStatusHint(ScannerView.STATUS_READY);
+                scannerView.setLocked(false);
                 scannerView.requestScanFieldFocus();
             });
             view.installScanBar(scannerView);
@@ -188,7 +188,11 @@ public final class Application {
                     args.scanBurstGapMs,
                     BarcodeInputBuffer.DEFAULT_STALE_TIMEOUT_MS,
                     BarcodeInputBuffer.NO_PREFIX,
+                    // CR is included alongside Enter (LF) and Tab: some USB HID scanners emit
+                    // CR alone, others emit CR+LF. The buffer's CR+LF swallow makes the pair
+                    // resolve as a single scan rather than one scan plus an empty submit.
                     java.util.Set.of(BarcodeInputBuffer.TERMINATOR_ENTER,
+                            BarcodeInputBuffer.TERMINATOR_CR,
                             BarcodeInputBuffer.TERMINATOR_TAB));
             ScannerViewController scannerController =
                     new ScannerViewController(scannerView, scanBuffer, args.debug);
@@ -207,11 +211,11 @@ public final class Application {
 
             // JournalListener first so it captures the POS_STARTED entry before any
             // controller-initiated startup event. ScannerViewController is registered BEFORE
-            // ReceiptViewController so that on TRANSACTION_COMPLETED the scanner suspends
+            // ReceiptViewController so that on TRANSACTION_COMPLETED the scanner reacts
             // BEFORE the modal receipt dialog opens: openDialog() blocks the outer dispatch
             // loop, so any listener sitting after receiptController in registration order
             // would only receive TRANSACTION_COMPLETED after the receipt was dismissed — which
-            // would re-suspend the scanner and stomp on the STATUS_READY set by the nested
+            // would re-lock the scanner and stomp on the unlocked state set by the nested
             // RECEIPT_DISMISSED handler.
             pos.addController(journalListener);
             pos.addController(controller);
