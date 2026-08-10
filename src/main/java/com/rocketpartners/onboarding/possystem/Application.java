@@ -188,7 +188,11 @@ public final class Application {
                     args.scanBurstGapMs,
                     BarcodeInputBuffer.DEFAULT_STALE_TIMEOUT_MS,
                     BarcodeInputBuffer.NO_PREFIX,
+                    // CR is included alongside Enter (LF) and Tab: some USB HID scanners emit
+                    // CR alone, others emit CR+LF. The buffer's CR+LF swallow makes the pair
+                    // resolve as a single scan rather than one scan plus an empty submit.
                     java.util.Set.of(BarcodeInputBuffer.TERMINATOR_ENTER,
+                            BarcodeInputBuffer.TERMINATOR_CR,
                             BarcodeInputBuffer.TERMINATOR_TAB));
             ScannerViewController scannerController =
                     new ScannerViewController(scannerView, scanBuffer, args.debug);

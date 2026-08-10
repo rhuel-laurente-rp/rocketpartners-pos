@@ -198,6 +198,11 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
                 return upc != null
                         ? "Item not found: " + upc
                         : "Item not found.";
+            case "UPC_MISREAD":
+                // 12-digit input with a bad UPC-A check digit — a printed barcode almost never
+                // fails the checksum, so the likely cause is a scanner misread, not an unknown
+                // product. Prompt the cashier to rescan rather than let them hand-key.
+                return "Barcode may have been misread. Try scanning again.";
             case "INVALID_BARCODE":
                 String raw = event.getProperty("raw", String.class);
                 return (raw == null || raw.isEmpty())

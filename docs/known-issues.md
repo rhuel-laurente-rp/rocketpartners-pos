@@ -8,13 +8,6 @@ Severity is the impact if the code path fires, not how easy it is to reach. Seve
 
 ## Live bugs
 
-### `ScannerView.java:128` — debug `System.out.println` on every status-hint change
-`setStatusHint(...)` prints its argument to stdout. Leftover from local debugging; the status hint fires on every scan, tender, void, dialog open, and receipt dismiss, so a normal session produces a stream of `Ready to scan` / `Locked …` lines on the terminal.
-
-- **Severity:** low (noise only).
-- **Disposition:** remove the `println`; no other change needed.
-- **Suggested branch:** `chore/scanner-view-remove-println`.
-
 ### `Transaction.java:239` — `tender(...)` accepts `amountDue < grandTotal()` with no check
 The three-argument tender overload writes whatever `amountDue` is passed in, no comparison against `grandTotal()`. If a caller ever passed a settled amount below the grand total, `changeDue()` would still compute positive change: an underpayment silently framed as change owed.
 
@@ -120,12 +113,11 @@ Whoever fixes one should fix all three, and update `ButtonLabelTitleCaseTest` to
 
 Rough priority — highest impact and lowest coordination cost first. Nothing here is urgent; the app runs green.
 
-1. `chore/scanner-view-remove-println` — one-line delete, no risk.
-2. `chore/delete-line-item-cell-renderer` — remove the drift trap while it's small.
-3. `chore/change-quantity-view-cleanup` — the double-add is trivial and lets the same PR touch other stale bits nearby.
-4. `polish/apply-title-case-convention` — bundle the three casing sites and the test flip.
-5. `polish/error-dialog-cashier-copy` — pair with the `PosEventType` Javadoc update.
-6. `fix/transaction-guard-amount-due` — unreachable today, but a load-bearing aggregate contract shouldn't rely on that.
-7. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
-8. `fix/scanner-suspend-on-modal-open` — flip the resume-on-open arm to suspend, and flip the three tests that currently pin the broken behaviour.
-9. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.
+1. `chore/delete-line-item-cell-renderer` — remove the drift trap while it's small.
+2. `chore/change-quantity-view-cleanup` — the double-add is trivial and lets the same PR touch other stale bits nearby.
+3. `polish/apply-title-case-convention` — bundle the three casing sites and the test flip.
+4. `polish/error-dialog-cashier-copy` — pair with the `PosEventType` Javadoc update.
+5. `fix/transaction-guard-amount-due` — unreachable today, but a load-bearing aggregate contract shouldn't rely on that.
+6. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
+7. `fix/scanner-suspend-on-modal-open` — flip the resume-on-open arm to suspend, and flip the three tests that currently pin the broken behaviour.
+8. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.

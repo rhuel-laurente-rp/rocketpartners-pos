@@ -215,9 +215,19 @@ public class ScannerViewController implements IController, IPosEventListener {
             buffer.reset();
             return false;
         }
+        // Filter on KEY_TYPED's keyChar rather than keyCode: KEY_TYPED synthesises the character
+        // regardless of whether the physical key was top-row or numeric-keypad, so a scanner
+        // emitting VK_NUMPAD0..VK_NUMPAD9 still surfaces the '0'..'9' char here. Filtering on
+        // keyCode would silently drop numeric-keypad scans.
         char c = e.getKeyChar();
         Optional<String> completed = buffer.accept(c, clock.millis());
         if (completed.isPresent()) {
+            if (debug) {
+                buffer.pollLastBurstStats().ifPresent(stats -> System.err.printf(
+                        "[scan-calibration] chars=%d gaps=%d min=%dms max=%dms mean=%.1fms%n",
+                        stats.getCharCount(), stats.getGapCount(),
+                        stats.getMinGapMs(), stats.getMaxGapMs(), stats.getMeanGapMs()));
+            }
             handleCompleted(completed.get());
             // Consume the terminator so a scanner Enter doesn't ALSO fire the scan field's
             // Enter action (which would double-dispatch as a manual submit).

@@ -153,4 +153,67 @@ class BarcodeInputBufferTest {
         assertThat(Barcodes.isValidUpc("banana")).isFalse();
         assertThat(Barcodes.isValidUpc("0490abc53418")).isFalse();
     }
+
+    // ---- CR + LF terminator handling ---------------------------------------
+
+    @Test
+    void crThenLf_withinBurstGap_yieldsOneScan_notOnePlusEmptySubmit() {
+        BarcodeInputBuffer buf = new BarcodeInputBuffer();
+
+        feedBurst(buf, "049000053418", 5, 0L);
+        Optional<String> onCr = buf.accept('\r', 60L);
+        // The LF arrives 5 ms after the CR — well inside the 50 ms burst gap.
+        Optional<String> onLf = buf.accept('\n', 65L);
+
+        assertThat(onCr).contains("049000053418");
+        assertThat(onLf).isEmpty();
+    }
+
+    @Test
+    void crAlone_terminatesTheBurst() {
+        BarcodeInputBuffer buf = new BarcodeInputBuffer();
+
+        feedBurst(buf, "049000053418", 5, 0L);
+        Optional<String> completed = buf.accept('\r', 60L);
+
+        assertThat(completed).contains("049000053418");
+    }
+
+    @Test
+    void lfLongAfterCr_isNotSwallowed_soManualEnterAfterAScanStillFires() {
+        BarcodeInputBuffer buf = new BarcodeInputBuffer();
+
+        // Scanner burst completes on CR.
+        feedBurst(buf, "049000053418", 5, 0L);
+        Optional<String> first = buf.accept('\r', 60L);
+        assertThat(first).contains("049000053418");
+
+        // 500 ms later, a human hits Enter on an empty scan field. This must NOT be
+        // swallowed by the CR+LF window — it's a separate event.
+        Optional<String> onLf = buf.accept('\n', 560L);
+        assertThat(onLf).isEmpty(); // empty because the buffer is empty, but not swallowed
+                                    // by the CR+LF window — pendingLength remains zero
+        assertThat(buf.pendingLength()).isZero();
+    }
+
+    // ---- Burst statistics --------------------------------------------------
+
+    @Test
+    void pollLastBurstStats_reportsPerBurstGapSummary() {
+        BarcodeInputBuffer buf = new BarcodeInputBuffer();
+
+        feedBurst(buf, "049000053418", 5, 0L);
+        buf.accept('\n', 60L);
+
+        Optional<BarcodeInputBuffer.BurstStats> stats = buf.pollLastBurstStats();
+        assertThat(stats).isPresent();
+        assertThat(stats.get().getCharCount()).isEqualTo(12);
+        assertThat(stats.get().getGapCount()).isEqualTo(11); // gaps between 12 chars
+        assertThat(stats.get().getMinGapMs()).isEqualTo(5);
+        assertThat(stats.get().getMaxGapMs()).isEqualTo(5);
+        assertThat(stats.get().getMeanGapMs()).isEqualTo(5.0);
+
+        // Second poll returns empty — the snapshot is consumed on read.
+        assertThat(buf.pollLastBurstStats()).isEmpty();
+    }
 }

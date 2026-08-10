@@ -207,6 +207,55 @@ class ScannerViewControllerTest {
 
 
     @Test
+    void keypadEmittedDigits_reachBufferAndComplete_theScan() {
+        ensureInProgress();
+
+        // KEY_TYPED events synthesise a keyChar regardless of whether the physical key was
+        // top-row or numeric-keypad. Simulate numpad by producing KEY_TYPED events whose
+        // source is a scan field but whose associated KEY_PRESSED would have carried
+        // VK_NUMPAD0..VK_NUMPAD9 — the dispatcher only sees KEY_TYPED and its keyChar, so a
+        // scanner configured to emit numpad codes still resolves.
+        burst("049000053418", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+    }
+
+    @Test
+    void twelveDigitUnknown_withBadCheckDigit_producesUpcMisreadError() {
+        // 999999999999 → check digit computes to something else; picking a code we KNOW is
+        // both unknown to this repo and has an invalid checksum surfaces UPC_MISREAD instead
+        // of the standard UPC_NOT_FOUND.
+        pos.getTransactionService().startTransaction();
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+
+        // 049000053417 — same digits as the pricebook COKE UPC 049000053418 but with a bad
+        // last digit. Not in the pricebook.
+        burst("049000053417", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        PosEvent err = notifications.lastOf(PosEventType.ERROR);
+        assertThat(err).isNotNull();
+        assertThat(err.getProperty("code", String.class)).isEqualTo("UPC_MISREAD");
+    }
+
+    @Test
+    void twelveDigitUnknown_withGoodCheckDigit_producesStandardUpcNotFoundError() {
+        pos.getTransactionService().startTransaction();
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+
+        // 012345678905 — valid UPC-A check digit, not in the tiny test pricebook.
+        burst("012345678905", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        PosEvent err = notifications.lastOf(PosEventType.ERROR);
+        assertThat(err).isNotNull();
+        assertThat(err.getProperty("code", String.class)).isEqualTo("UPC_NOT_FOUND");
+    }
+
+    @Test
     void unknownUpc_producesItemNotFoundErrorFromService_leavesTransactionUnchanged() {
         Transaction tx = ensureInProgress();
 
@@ -219,7 +268,9 @@ class ScannerViewControllerTest {
         // A brand-new tx opened when the customer controller onStart ran; use that.
         tx = pos.getTransactionService().getCurrentTransaction();
 
-        burst("999999999999", 5);
+        // Short code (not 12 digits) so the misread heuristic does not apply — unknown short
+        // codes remain UPC_NOT_FOUND.
+        burst("999", 5);
         typed('\n');
 
         assertThat(tx.getLineItems()).isEmpty();
