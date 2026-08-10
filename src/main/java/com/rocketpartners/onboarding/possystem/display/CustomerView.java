@@ -223,6 +223,7 @@ public class CustomerView extends JFrame {
         root.add(buildColumns(quickAddItems), BorderLayout.CENTER);
         setContentPane(root);
 
+        refreshTotalButton();
         refreshStatusPill();
         setLocationRelativeTo(null);
     }
@@ -319,6 +320,7 @@ public class CustomerView extends JFrame {
 
         refreshSelectionDependentButtons();
         refreshVoidBasketButton();
+        refreshTotalButton();
     }
 
     /**
@@ -341,7 +343,7 @@ public class CustomerView extends JFrame {
     public void setBasketInputEnabled(boolean enabled) {
         basketInputEnabled = enabled;
         for (PosButton b : quickAddButtons) b.setEnabled(enabled);
-        totalButton.setEnabled(enabled);
+        refreshTotalButton();
         refreshSelectionDependentButtons();
         refreshStatusPill();
     }
@@ -370,6 +372,13 @@ public class CustomerView extends JFrame {
         // nothing to discard, and opening the confirmation dialog on an empty summary is
         // meaningless. Both gates together produce the final enabled state.
         voidBasketButton.setEnabled(lifecycleInputEnabled && lastNonVoidedQuantitySum > 0);
+    }
+
+    private void refreshTotalButton() {
+        // Two gates, same shape as refreshVoidBasketButton: the phase gate (basketInputEnabled
+        // is off in TOTALED/PAID/VOIDED) and the content gate (nothing to total when every line
+        // is voided or the basket is empty). Either one closed disables the button.
+        totalButton.setEnabled(basketInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     private void refreshSelectionDependentButtons() {
