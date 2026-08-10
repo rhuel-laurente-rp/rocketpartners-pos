@@ -397,15 +397,22 @@ public class CustomerView extends JFrame {
         refreshStatusPill();
     }
 
-    /** Derives the header pill from the two enable flags. */
+    /**
+     * Derives the header pill from the phase flags.
+     *
+     * <p>OPEN is the state where basket input is accepted — an empty fresh transaction still
+     * counts. Using {@code totalButton.isEnabled()} as the OPEN proxy would fall through to
+     * LOCKED on first run (empty basket = no Total = "terminal state" by the derived logic),
+     * which reads to the cashier as "the lane is dead." {@link #basketInputEnabled} tracks the
+     * phase directly.</p>
+     */
     private void refreshStatusPill() {
-        boolean basketOn = totalButton.isEnabled();
         boolean tenderOn = payCashButton.isEnabled();
         if (tenderOn) {
             statusPill.setText("AWAITING PAYMENT");
             statusPill.setForeground(Color.WHITE);
             statusPill.setBackground(PosTheme.LIVE);
-        } else if (basketOn) {
+        } else if (basketInputEnabled) {
             statusPill.setText("OPEN");
             statusPill.setForeground(new Color(0xC9, 0xD1, 0xD8));
             statusPill.setBackground(new Color(0x2A, 0x31, 0x39));
