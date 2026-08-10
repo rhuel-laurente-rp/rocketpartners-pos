@@ -68,12 +68,16 @@ public class Transaction {
     private BigDecimal amountDue;
 
     /**
-     * Opens a new transaction with a freshly generated id and the current instant.
+     * Opens a new transaction with a freshly generated short id and the current instant.
+     *
+     * <p>The id is the first 8 hex chars of a random {@link UUID}. {@link #getCreatedAt()}
+     * carries the wall-clock time separately, so the id is not required to encode it —
+     * cashier-readable brevity wins over collision-proof entropy at this scale.</p>
      *
      * @param taxRate flat sales-tax rate; must not be {@code null}
      */
     public Transaction(BigDecimal taxRate) {
-        this(UUID.randomUUID().toString(), Instant.now(), taxRate);
+        this(UUID.randomUUID().toString().substring(0, 23), Instant.now(), taxRate);
     }
 
     /**
