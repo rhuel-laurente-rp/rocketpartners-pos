@@ -123,8 +123,18 @@ public class CustomerView extends JFrame {
     private final CardLayout basketCards = new CardLayout();
     private final JPanel basketCenter = new JPanel(basketCards);
 
-    private final JLabel inlineSummary = new JLabel();
+    // Summary tape — Subtotal → Discount → Tax → Total, matching ReceiptFormatter's on-screen
+    // order. Built once, mutated in-place; no allocation on the render path.
+    private final JLabel subtotalLabel = new JLabel("Subtotal");
+    private final JLabel subtotalValue = new JLabel("$0.00", SwingConstants.RIGHT);
+    private final JLabel discountLabel = new JLabel("Discount");
+    private final JLabel discountValue = new JLabel("$0.00", SwingConstants.RIGHT);
+    private final JLabel taxLabel = new JLabel("Tax");
+    private final JLabel taxValue = new JLabel("$0.00", SwingConstants.RIGHT);
+    private final JLabel totalLabel = new JLabel("TOTAL");
     private final JLabel totalValue = new JLabel("$0.00", SwingConstants.RIGHT);
+    private JPanel summaryTape;
+
     private final JLabel amountDueValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
@@ -213,6 +223,7 @@ public class CustomerView extends JFrame {
         root.add(buildColumns(quickAddItems), BorderLayout.CENTER);
         setContentPane(root);
 
+        refreshTotalButton();
         refreshStatusPill();
         setLocationRelativeTo(null);
     }
@@ -283,7 +294,15 @@ public class CustomerView extends JFrame {
             animateDensityTransition(target);
         }
 
-        renderInlineSummary(subtotal, discount, tax);
+        // Snapshot the non-voided quantity sum first — the vertical summary shows the item count
+        // beside the Subtotal label, and it must match the value stored on this render.
+        int qtySum = 0;
+        for (LineItem li : lines) {
+            if (!li.isVoided()) qtySum += li.getQuantity();
+        }
+        lastNonVoidedQuantitySum = qtySum;
+
+        renderVerticalSummary(subtotal, discount, tax, total);
         totalValue.setText(PosTheme.money(total));
         amountDueValue.setText(PosTheme.money(total));
 
@@ -295,15 +314,13 @@ public class CustomerView extends JFrame {
         // rendered. Identity-keyed so a merged bump on the same LineItem is detected as an
         // increase, not a new arrival.
         previousQuantities.clear();
-        int qtySum = 0;
         for (LineItem li : lines) {
             previousQuantities.put(li, li.getQuantity());
-            if (!li.isVoided()) qtySum += li.getQuantity();
         }
-        lastNonVoidedQuantitySum = qtySum;
 
         refreshSelectionDependentButtons();
         refreshVoidBasketButton();
+        refreshTotalButton();
     }
 
     /**
@@ -326,7 +343,7 @@ public class CustomerView extends JFrame {
     public void setBasketInputEnabled(boolean enabled) {
         basketInputEnabled = enabled;
         for (PosButton b : quickAddButtons) b.setEnabled(enabled);
-        totalButton.setEnabled(enabled);
+        refreshTotalButton();
         refreshSelectionDependentButtons();
         refreshStatusPill();
     }
@@ -355,6 +372,13 @@ public class CustomerView extends JFrame {
         // nothing to discard, and opening the confirmation dialog on an empty summary is
         // meaningless. Both gates together produce the final enabled state.
         voidBasketButton.setEnabled(lifecycleInputEnabled && lastNonVoidedQuantitySum > 0);
+    }
+
+    private void refreshTotalButton() {
+        // Two gates, same shape as refreshVoidBasketButton: the phase gate (basketInputEnabled
+        // is off in TOTALED/PAID/VOIDED) and the content gate (nothing to total when every line
+        // is voided or the basket is empty). Either one closed disables the button.
+        totalButton.setEnabled(basketInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     private void refreshSelectionDependentButtons() {
@@ -465,6 +489,19 @@ public class CustomerView extends JFrame {
     PosButton[] getTenderButtonsForTest() {
         return new PosButton[]{payCashButton, payDebitButton, payCreditButton};
     }
+
+    // Summary tape test hooks — expose the four labels and the tape container so tests can
+    // assert order, values, colours, and layout-stability without reflecting on private fields.
+    JLabel getSubtotalLabelForTest() { return subtotalLabel; }
+    JLabel getSubtotalValueForTest() { return subtotalValue; }
+    JLabel getDiscountLabelForTest() { return discountLabel; }
+    JLabel getDiscountValueForTest() { return discountValue; }
+    JLabel getTaxLabelForTest() { return taxLabel; }
+    JLabel getTaxValueForTest() { return taxValue; }
+    JLabel getTotalLabelForTest() { return totalLabel; }
+    JLabel getTotalValueForTest() { return totalValue; }
+    JLabel getAmountDueValueForTest() { return amountDueValue; }
+    JPanel getSummaryTapeForTest() { return summaryTape; }
 
     /**
      * For the snapshot harness: the outermost tender-column card in the shown frame, so a
@@ -657,46 +694,9 @@ public class CustomerView extends JFrame {
                 BorderFactory.createMatteBorder(1, 0, 0, 0, PosTheme.RULE),
                 BorderFactory.createEmptyBorder(12, 16, 14, 16)));
 
-        // Inline summary: Subtotal $X · Discount −$Y · Tax $Z on one row, small. Reclaims ~40px
-        // vs stacked rows without losing any information. HTML lets us paint the GO green on the
-        // discount fragment only, so a non-zero discount jumps out.
-        inlineSummary.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
-        inlineSummary.setForeground(PosTheme.MUTED);
-        renderInlineSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
-
-        // Total on its own line, 34pt (down from 40pt) — still the largest thing on screen but
-        // ~50px cheaper. Uppercase eyebrow key on the left, big number on the right.
-        JPanel totalRow = new JPanel(new BorderLayout());
-        totalRow.setOpaque(false);
-        JLabel totalKey = new JLabel("TOTAL");
-        totalKey.setFont(PosTheme.base(Font.BOLD, 12f).deriveFont(PosTheme.trackedAttributes()));
-        totalKey.setForeground(PosTheme.INK);
-        totalValue.setFont(PosTheme.base(Font.BOLD, 34f));
-        totalValue.setForeground(PosTheme.INK);
-        totalRow.add(totalKey, BorderLayout.WEST);
-        totalRow.add(totalValue, BorderLayout.EAST);
-
-        JPanel tape = new JPanel();
-        tape.setOpaque(false);
-        tape.setLayout(new BoxLayout(tape, BoxLayout.Y_AXIS));
-
-        JPanel inlineWrap = new JPanel(new BorderLayout());
-        inlineWrap.setOpaque(false);
-        inlineWrap.add(inlineSummary, BorderLayout.WEST);
-        inlineWrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        tape.add(inlineWrap);
-
-        JPanel hairline = new JPanel();
-        hairline.setBackground(PosTheme.RULE);
-        hairline.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-        hairline.setPreferredSize(new Dimension(10, 1));
-        tape.add(Box.createVerticalStrut(6));
-        tape.add(hairline);
-        tape.add(Box.createVerticalStrut(6));
-
-        totalRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
-        tape.add(totalRow);
-        south.add(tape, BorderLayout.NORTH);
+        summaryTape = buildSummaryTape();
+        renderVerticalSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+        south.add(summaryTape, BorderLayout.NORTH);
 
         JPanel actions = new JPanel(new BorderLayout(0, 8));
         actions.setOpaque(false);
@@ -730,24 +730,123 @@ public class CustomerView extends JFrame {
         return south;
     }
 
-    private void renderInlineSummary(BigDecimal subtotal, BigDecimal discount, BigDecimal tax) {
-        // Discount hidden entirely at zero; painted GO green when non-zero. Tax always shown.
-        // Using a JLabel with a small HTML fragment gives us the mixed colour without stacking
-        // three widgets and paying their layout cost every render.
-        StringBuilder html = new StringBuilder("<html>");
-        html.append("Subtotal ").append(escapeHtml(PosTheme.money(subtotal)));
-        if (discount.signum() > 0) {
-            html.append(" &nbsp;·&nbsp; <font color='#0B6E4F'>Discount −")
-                    .append(escapeHtml(PosTheme.money(discount)))
-                    .append("</font>");
-        }
-        html.append(" &nbsp;·&nbsp; Tax ").append(escapeHtml(PosTheme.money(tax)));
-        html.append("</html>");
-        inlineSummary.setText(html.toString());
+    // ---- Summary tape (vertical stack) ------------------------------------
+    //
+    // Four rows read top-to-bottom: Subtotal → Discount → Tax → Total. Order matches
+    // {@link ReceiptFormatter} exactly — the on-screen summary and the printed receipt agree, so
+    // a cashier reading either sees the same arithmetic. Tax is computed on the post-discount
+    // subtotal (see {@link com.rocketpartners.onboarding.commons.model.Transaction#taxTotal()}),
+    // so listing Tax after Discount matches how the number is derived. The Total row is
+    // separated by a hairline rule; component rows share a fixed-width value column so amounts
+    // right-align to the same edge as digit-count changes.
+
+    /** Fixed width of the value column, in pixels — anchors right-edge alignment across rows. */
+    private static final int SUMMARY_VALUE_COL_WIDTH = 140;
+    /** Height of a single component row (Subtotal / Discount / Tax). */
+    private static final int SUMMARY_COMPONENT_ROW_HEIGHT = 20;
+    /** Height of the Total row — taller so the number reads at register scale. */
+    private static final int SUMMARY_TOTAL_ROW_HEIGHT = 38;
+    /** Vertical breathing space above and below the Total row. */
+    private static final int SUMMARY_TOTAL_BREATH = 4;
+    /** Point size of the Total row's value — larger than BUTTON/AMOUNT, less than DISPLAY, to
+     *  leave headroom for the amount-due readout in the tender column. */
+    private static final float SUMMARY_TOTAL_SIZE = 30f;
+
+    private JPanel buildSummaryTape() {
+        JPanel tape = new JPanel();
+        tape.setOpaque(false);
+        tape.setLayout(new BoxLayout(tape, BoxLayout.Y_AXIS));
+
+        Font componentFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
+
+        subtotalLabel.setFont(componentFont);
+        subtotalLabel.setForeground(PosTheme.MUTED);
+        subtotalValue.setFont(componentFont);
+        subtotalValue.setForeground(PosTheme.INK);
+
+        discountLabel.setFont(componentFont);
+        discountLabel.setForeground(PosTheme.MUTED);
+        discountValue.setFont(componentFont);
+        // Discount value colour flips between GO (non-zero) and MUTED (zero) in the render pass.
+
+        taxLabel.setFont(componentFont);
+        taxLabel.setForeground(PosTheme.MUTED);
+        taxValue.setFont(componentFont);
+        taxValue.setForeground(PosTheme.INK);
+
+        totalLabel.setFont(PosTheme.eyebrow());
+        totalLabel.setForeground(PosTheme.INK);
+        totalValue.setFont(PosTheme.base(Font.BOLD, SUMMARY_TOTAL_SIZE));
+        totalValue.setForeground(PosTheme.INK);
+
+        tape.add(componentRow(subtotalLabel, subtotalValue));
+        tape.add(componentRow(discountLabel, discountValue));
+        tape.add(componentRow(taxLabel, taxValue));
+
+        tape.add(Box.createVerticalStrut(SUMMARY_TOTAL_BREATH));
+        JPanel hairline = new JPanel();
+        hairline.setBackground(PosTheme.RULE);
+        hairline.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+        hairline.setPreferredSize(new Dimension(10, 1));
+        tape.add(hairline);
+        tape.add(Box.createVerticalStrut(SUMMARY_TOTAL_BREATH));
+
+        tape.add(totalRow(totalLabel, totalValue));
+        return tape;
     }
 
-    private static String escapeHtml(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    private static JPanel componentRow(JLabel label, JLabel value) {
+        JPanel row = new JPanel(new BorderLayout());
+        row.setOpaque(false);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, SUMMARY_COMPONENT_ROW_HEIGHT));
+        row.add(label, BorderLayout.WEST);
+        JPanel valueCell = new JPanel(new BorderLayout());
+        valueCell.setOpaque(false);
+        valueCell.setPreferredSize(new Dimension(SUMMARY_VALUE_COL_WIDTH, SUMMARY_COMPONENT_ROW_HEIGHT));
+        valueCell.add(value, BorderLayout.CENTER);
+        row.add(valueCell, BorderLayout.EAST);
+        return row;
+    }
+
+    private static JPanel totalRow(JLabel label, JLabel value) {
+        JPanel row = new JPanel(new BorderLayout());
+        row.setOpaque(false);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, SUMMARY_TOTAL_ROW_HEIGHT));
+        row.add(label, BorderLayout.WEST);
+        JPanel valueCell = new JPanel(new BorderLayout());
+        valueCell.setOpaque(false);
+        valueCell.setPreferredSize(new Dimension(SUMMARY_VALUE_COL_WIDTH, SUMMARY_TOTAL_ROW_HEIGHT));
+        valueCell.add(value, BorderLayout.CENTER);
+        row.add(valueCell, BorderLayout.EAST);
+        return row;
+    }
+
+    /**
+     * Fills the summary tape with the given figures. Discount row is always present — when the
+     * discount is zero both label and value render in MUTED (no minus sign) so the eye skips the
+     * row without the tape's height changing, which would shift the basket list beneath it.
+     * When the discount is non-zero the value renders in GO with a leading minus.
+     */
+    private void renderVerticalSummary(BigDecimal subtotal, BigDecimal discount, BigDecimal tax,
+                                       BigDecimal total) {
+        subtotalLabel.setText(lastNonVoidedQuantitySum > 0
+                ? "Subtotal  " + itemCountFragment(lastNonVoidedQuantitySum)
+                : "Subtotal");
+        subtotalValue.setText(PosTheme.money(subtotal));
+
+        boolean hasDiscount = discount.signum() > 0;
+        discountLabel.setForeground(hasDiscount ? PosTheme.INK : PosTheme.MUTED);
+        discountValue.setForeground(hasDiscount ? PosTheme.GO : PosTheme.MUTED);
+        discountValue.setText(hasDiscount
+                ? "-" + PosTheme.money(discount)
+                : PosTheme.money(discount));
+
+        taxValue.setText(PosTheme.money(tax));
+        totalValue.setText(PosTheme.money(total));
+    }
+
+    private static String itemCountFragment(int count) {
+        return count == 1 ? "1 item" : count + " items";
     }
 
     private void dispatchWithSelection(PosEventType type) {

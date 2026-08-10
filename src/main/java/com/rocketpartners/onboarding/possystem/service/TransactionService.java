@@ -9,6 +9,7 @@ import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
+import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -43,6 +44,12 @@ public class TransactionService {
     private final IPosEventDispatcher eventDispatcher;
     private final int maxLineQuantity;
 
+    /**
+     * -- GETTER --
+     *
+     * @return the current in-flight transaction, or {@code null} if none is open
+     */
+    @Getter
     private Transaction currentTransaction;
 
     /**
@@ -351,13 +358,6 @@ public class TransactionService {
      */
     public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber) {
         return ReceiptFormatter.format(transaction, storeName, laneNumber);
-    }
-
-    /**
-     * @return the current in-flight transaction, or {@code null} if none is open
-     */
-    public Transaction getCurrentTransaction() {
-        return currentTransaction;
     }
 
     private void requireCurrentTransaction(String operation) {

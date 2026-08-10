@@ -43,8 +43,8 @@ classDiagram
         +voidBasket()
         +total()
         +applyDiscount(Discount)
-        +tender(TenderType, BigDecimal)
-        +tender(TenderType, BigDecimal, BigDecimal)
+        +tender(TenderType, BigDecimal) «cards only»
+        +tender(TenderType, BigDecimal, BigDecimal) «cash only»
     }
 
     class TransactionState {
@@ -126,7 +126,9 @@ The customer gives up $0.70 in exchange for a workflow where the coin drawer nev
 
 **What would break the feature.** Computing change against `grandTotal()` instead of `amountDue()`. Someone reading `changeDue()` fresh will squint at `cashTendered − amountDue()` and want to "fix" it to `cashTendered − grandTotal()`. Do not. That change destroys the whole feature: $8.00 tendered against a $7.30 grand total would produce $0.70 change again, and the cashier is back to counting coins.
 
-`Transaction.amountDue()` returns `grandTotal()` when the field is null, so the two-argument tender path is unaffected — this is a strict superset, not a swap.
+`Transaction.amountDue()` returns `grandTotal()` when the field is null, so the two-argument (card) tender path is unaffected — this is a strict superset, not a swap.
+
+**Two overloads, split by tender type.** `tender(TenderType, BigDecimal)` accepts `DEBIT` or `CREDIT` only (cards produce no change; the single amount is stored as both `cashTendered` and `amountDue`). `tender(TenderType, BigDecimal, BigDecimal)` accepts `CASH` only, and takes the cash the customer handed over plus the settled amount due; passing `null` for `amountDue` means "same as grand total". Each overload rejects the other's tender types with `IllegalArgumentException` — the split is enforced on the aggregate, not by convention.
 
 ## Notes on the shape
 

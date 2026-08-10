@@ -20,7 +20,7 @@ import java.util.Locale;
  * display only; the underlying aggregate is untouched.</p>
  *
  * <p>Two entry points: a header-less {@link #format(Transaction)} used by tests that don't care
- * about store metadata, and {@link #format(Transaction, String, int)} which prepends the store
+ * about store metadata, and which prepends the store
  * name and lane number the way a real receipt reads. Both share the same body.</p>
  */
 public final class ReceiptFormatter {

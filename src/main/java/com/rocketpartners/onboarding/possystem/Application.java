@@ -57,7 +57,7 @@ public final class Application {
 
     private static final String PRICEBOOK_RESOURCE = "/pricebook.tsv";
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.07");
-    private static final int QUICK_ADD_COUNT = 14;
+    private static final int QUICK_ADD_COUNT = 16;
 
     /**
      * Curated pool of foods and drinks (no tobacco / no lottery / no fuel prepay) drawn from
@@ -65,7 +65,7 @@ public final class Application {
      * {@link #QUICK_ADD_COUNT} UPCs to bind to quick-add buttons — a different set each run.
      */
     private static final List<String> QUICK_ADD_UPC_POOL = List.of(
-            "049000053418", // COCA COLA CAN
+            "049000053418", // COCA-COLA CAN
             "049000000450", // DT COKE 20OZ
             "012000001291", // PEPSI 20Z BT
             "049000007640", // SPRT 20Z
