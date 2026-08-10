@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A whole sale: its line items, discounts, tender, and lifecycle state.
+ * A wholesale: its line items, discounts, tender, and lifecycle state.
  *
  * <p>{@code Transaction} is the aggregate root of the domain model. It owns the state machine
  * that decides which operations are legal at any moment; those checks live here and are the
@@ -207,35 +207,52 @@ public class Transaction {
     }
 
     /**
-     * Records payment and moves to {@link TransactionState#PAID}. Terminal.
+     * Records a card payment and moves to {@link TransactionState#PAID}. Terminal.
      *
-     * <p>For {@link TenderType#DEBIT} and {@link TenderType#CREDIT}, callers should pass a
-     * {@code cashTendered} equal to {@link #grandTotal()} (no change due).</p>
+     * <p>Card-only overload — accepts {@link TenderType#DEBIT} or {@link TenderType#CREDIT}.
+     * Cards produce no change, so callers pass a single amount equal to {@link #grandTotal()};
+     * that value is stored as both {@code cashTendered} and {@code amountDue}, keeping
+     * {@link #changeDue()} at zero. For cash use
+     * {@link #tender(TenderType, BigDecimal, BigDecimal)}.</p>
      *
-     * @param type         payment method; must not be {@code null}
-     * @param cashTendered amount presented; must not be {@code null}
+     * @param type      payment method; must be {@link TenderType#DEBIT} or {@link TenderType#CREDIT}
+     * @param amountDue amount charged; must not be {@code null}
      * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
-     * @throws IllegalArgumentException if either argument is null
+     * @throws IllegalArgumentException if either argument is null, or {@code type} is
+     *                                  {@link TenderType#CASH}
      */
-    public void tender(TenderType type, BigDecimal cashTendered) {
-        tender(type, cashTendered, null);
+    public void tender(TenderType type, BigDecimal amountDue) {
+        requireState("tender", TransactionState.TOTALED);
+        if (type == null) throw new IllegalArgumentException("type must not be null");
+        if (amountDue == null) throw new IllegalArgumentException("amountDue must not be null");
+        if (type != TenderType.DEBIT && type != TenderType.CREDIT) throw new IllegalArgumentException("type must be DEBIT or CREDIT");
+        this.tenderType = type;
+        this.cashTendered = amountDue;
+        this.amountDue = amountDue;
+        this.state = TransactionState.PAID;
     }
 
     /**
-     * As {@link #tender(TenderType, BigDecimal)}, but records the customer-facing amount the
-     * cashier settled at. Pass a non-null {@code amountDue} when it differs from
-     * {@link #grandTotal()} — the Next Dollar shortcut is the canonical case. When
-     * {@code amountDue} is {@code null} the transaction's amount due defaults to
-     * {@link #grandTotal()} at read time.
+     * Records a cash payment and moves to {@link TransactionState#PAID}. Terminal.
      *
-     * @param type         payment method; must not be {@code null}
-     * @param cashTendered amount presented; must not be {@code null}
+     * <p>Cash-only overload — records both the cash the customer handed over and the
+     * customer-facing amount the cashier settled at. Pass a non-null {@code amountDue} when it
+     * differs from {@link #grandTotal()} — the Next Dollar shortcut is the canonical case. When
+     * {@code amountDue} is {@code null} the transaction's amount due defaults to
+     * {@link #grandTotal()} at read time.</p>
+     *
+     * @param type         payment method; must be {@link TenderType#CASH}
+     * @param cashTendered amount the customer presented; must not be {@code null}
      * @param amountDue    settled amount due; may be {@code null} to mean "same as grand total"
+     * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
+     * @throws IllegalArgumentException if {@code type} is not {@link TenderType#CASH}, or
+     *                                  {@code cashTendered} is null
      */
     public void tender(TenderType type, BigDecimal cashTendered, BigDecimal amountDue) {
         requireState("tender", TransactionState.TOTALED);
         if (type == null) throw new IllegalArgumentException("tender type must not be null");
         if (cashTendered == null) throw new IllegalArgumentException("cashTendered must not be null");
+        if (type != TenderType.CASH) throw new IllegalArgumentException("type must be CASH");
         this.tenderType = type;
         this.cashTendered = cashTendered;
         this.amountDue = amountDue == null ? null : amountDue.setScale(2, RoundingMode.HALF_UP);

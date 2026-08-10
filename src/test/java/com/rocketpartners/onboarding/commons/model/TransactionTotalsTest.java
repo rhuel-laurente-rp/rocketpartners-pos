@@ -112,7 +112,7 @@ class TransactionTotalsTest {
         Transaction tx = new Transaction(NO_TAX);
         tx.addLineItem(item("A", "7.50"), 1);
         tx.total();
-        tx.tender(TenderType.CASH, new BigDecimal("10.00"));
+        tx.tender(TenderType.CASH, new BigDecimal("10.00"), null);
         assertThat(tx.changeDue()).isEqualByComparingTo("2.50");
     }
 
