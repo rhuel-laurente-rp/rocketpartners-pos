@@ -79,6 +79,12 @@ public final class DialogSnapshotTool {
         ImageIO.write(composeTenderColumn(), "PNG", columnFile);
         System.out.println("wrote " + columnFile.getName());
 
+        // Summary tape: zero-discount and non-zero-discount side by side. Verifies right-edge
+        // alignment holds when digit counts change and the Total row dominates.
+        File summaryFile = new File(out, "summary-tape.png");
+        ImageIO.write(composeSummaryTape(), "PNG", summaryFile);
+        System.out.println("wrote " + summaryFile.getName());
+
         System.exit(0);
     }
 
@@ -207,6 +213,78 @@ public final class DialogSnapshotTool {
             Graphics2D sub = (Graphics2D) dst.create(x, y, w, h);
             try {
                 column.paint(sub);
+            } finally {
+                sub.dispose();
+            }
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /**
+     * Renders the summary tape twice — first with a zero discount, then with a non-zero one —
+     * side by side, so the anti-layout-shift guarantee (identical heights) is visible on the
+     * composite and right-edge alignment can be eyeballed across differing digit counts.
+     */
+    private static BufferedImage composeSummaryTape() {
+        int tapeW = 380;
+        int tapeH = 160;
+        int gap = 40;
+        int labelH = 26;
+        int pad = 24;
+        int totalW = tapeW * 2 + gap + pad * 2;
+        int totalH = tapeH + labelH + pad * 2;
+
+        BufferedImage img = new BufferedImage(totalW, totalH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(PosTheme.PAPER);
+            g.fillRect(0, 0, totalW, totalH);
+            g.setFont(PosTheme.base(Font.BOLD, PosTheme.EYEBROW));
+            g.setColor(PosTheme.MUTED);
+
+            paintSummaryTape(g, pad, pad, tapeW, tapeH,
+                    new BigDecimal("17.70"), BigDecimal.ZERO,
+                    new BigDecimal("1.24"), new BigDecimal("18.94"));
+            String lbl1 = "ZERO DISCOUNT";
+            g.drawString(lbl1, pad + (tapeW - g.getFontMetrics().stringWidth(lbl1)) / 2,
+                    pad + tapeH + labelH - 8);
+
+            int x2 = pad + tapeW + gap;
+            paintSummaryTape(g, x2, pad, tapeW, tapeH,
+                    new BigDecimal("109.99"), new BigDecimal("12.00"),
+                    new BigDecimal("6.86"), new BigDecimal("104.85"));
+            String lbl2 = "NON-ZERO DISCOUNT";
+            g.drawString(lbl2, x2 + (tapeW - g.getFontMetrics().stringWidth(lbl2)) / 2,
+                    pad + tapeH + labelH - 8);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    private static void paintSummaryTape(Graphics2D dst, int x, int y, int w, int h,
+                                         BigDecimal subtotal, BigDecimal discount,
+                                         BigDecimal tax, BigDecimal total) {
+        CustomerView view = new CustomerView("snapshot", List.of(), noop());
+        try {
+            view.setSize(new Dimension(1412, 882));
+            view.doLayout();
+            view.updateBasket(List.of(), subtotal, discount, tax, total);
+
+            JPanel tape = view.getSummaryTapeForTest();
+            tape.setSize(w, h);
+            tape.doLayout();
+            layoutAll(tape);
+
+            // Match the surrounding column background so the tape doesn't render on the raw
+            // PAPER — SURFACE is what appears in the shipping basket column.
+            Graphics2D sub = (Graphics2D) dst.create(x, y, w, h);
+            try {
+                sub.setColor(PosTheme.SURFACE);
+                sub.fillRect(0, 0, w, h);
+                tape.paint(sub);
             } finally {
                 sub.dispose();
             }

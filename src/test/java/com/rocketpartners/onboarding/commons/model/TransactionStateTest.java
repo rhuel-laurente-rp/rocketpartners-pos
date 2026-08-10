@@ -28,7 +28,7 @@ class TransactionStateTest {
 
     private static Transaction paid() {
         Transaction tx = totaled();
-        tx.tender(TenderType.CASH, new BigDecimal("1.00"));
+        tx.tender(TenderType.CASH, new BigDecimal("1.00"), null);
         return tx;
     }
 
@@ -54,9 +54,47 @@ class TransactionStateTest {
     @Test
     void tender_transitionsTotaledToPaid() {
         Transaction tx = totaled();
-        tx.tender(TenderType.CASH, new BigDecimal("1.00"));
+        tx.tender(TenderType.CASH, new BigDecimal("1.00"), null);
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         assertThat(tx.getTenderType()).isEqualTo(TenderType.CASH);
+    }
+
+    @Test
+    void tender_cardOverloadRejectsCash() {
+        Transaction tx = totaled();
+        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void tender_cashOverloadRejectsCardTypes() {
+        Transaction tx = totaled();
+        assertThatThrownBy(() -> tx.tender(TenderType.DEBIT, new BigDecimal("1.00"), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        Transaction tx2 = totaled();
+        assertThatThrownBy(() -> tx2.tender(TenderType.CREDIT, new BigDecimal("1.00"), null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void tender_cashOverloadRecordsSettledAmountDueForNextDollar() {
+        Transaction tx = new Transaction(NO_TAX);
+        tx.addLineItem(new Item("UPC-1", "Widget", new BigDecimal("7.30")), 1);
+        tx.total();
+        tx.tender(TenderType.CASH, new BigDecimal("8.00"), new BigDecimal("8.00"));
+        assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
+        assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void tender_cashOverloadWithNullAmountDueFallsBackToGrandTotal() {
+        Transaction tx = new Transaction(NO_TAX);
+        tx.addLineItem(new Item("UPC-1", "Widget", new BigDecimal("7.30")), 1);
+        tx.total();
+        tx.tender(TenderType.CASH, new BigDecimal("10.00"), null);
+        assertThat(tx.amountDue()).isEqualByComparingTo("7.30");
+        assertThat(tx.changeDue()).isEqualByComparingTo("2.70");
     }
 
     @Test
@@ -128,21 +166,21 @@ class TransactionStateTest {
     @Test
     void tender_illegalFromInProgress() {
         Transaction tx = inProgress();
-        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00")))
+        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00"), null))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void tender_illegalFromPaid() {
         Transaction tx = paid();
-        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00")))
+        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00"), null))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void tender_illegalFromVoided() {
         Transaction tx = voided();
-        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00")))
+        assertThatThrownBy(() -> tx.tender(TenderType.CASH, new BigDecimal("1.00"), null))
                 .isInstanceOf(IllegalStateException.class);
     }
 
