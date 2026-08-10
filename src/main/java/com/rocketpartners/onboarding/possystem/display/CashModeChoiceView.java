@@ -42,9 +42,12 @@ import java.util.Map;
  * of Exact Amount; disabling keeps the layout stable so the fingertip target doesn't move
  * between transactions.</p>
  *
- * <p>The footer holds Cancel alone and ESC does the same. There is no Confirm — choosing a
- * mode <em>is</em> the action. Enter is pointed at Exact Amount so the dialog remains usable
- * from the keyboard.</p>
+ * <p>There is no Confirm — choosing a mode <em>is</em> the action. Cancel occupies the
+ * primary (right) footer slot instead of sitting alone on the left, keeping the shell's
+ * "primary on the right, always" invariant intact even though the button style is
+ * {@code danger} rather than affirmative. ESC and Enter both cancel — the cashier's positive
+ * action is a physical tap on one of the two mode tiles, and there is no affirmative-commit
+ * button for Enter to target here.</p>
  */
 public class CashModeChoiceView extends PosDialog {
 
@@ -98,15 +101,18 @@ public class CashModeChoiceView extends PosDialog {
         nextDollarButton.addActionListener(
                 e -> fireModeSelected(PosEventType.CASH_NEXT_DOLLAR_PRESSED, nextDollarAmount));
         cancelButton.addActionListener(e -> fireCancel());
-        addSecondary(cancelButton);
+        // Cancel is the only footer button, so it takes the right (primary) slot rather than
+        // sitting alone on the left with dead space beside it. It stays styled as danger — the
+        // right-slot position is about layout balance, not implying a commit; the affirmative
+        // action lives on the two mode tiles in the body.
+        setPrimary(cancelButton);
         setCancelAction(this::fireCancel);
 
-        // No primary button: choosing a mode IS the confirmation, and the footer holds Cancel
-        // alone. Focusing a JButton alone is not enough to give Enter a target — a focused
-        // button responds to Space; Enter activates the root pane's *default* button. Without
-        // this line Enter does nothing in this dialog.
+        // Enter would otherwise fire the primary button, which is now Cancel. That is safe
+        // (no state has been committed at this point in the flow) and matches ESC's behaviour;
+        // the cashier's affirmative gesture is a tap on one of the mode tiles. Initial focus
+        // lands on Exact Amount so Space still selects the most common choice.
         setInitialFocus(exactButton);
-        getRootPane().setDefaultButton(exactButton);
     }
 
     // ---- Public API called by PayWithCashViewController --------------------
