@@ -176,8 +176,10 @@ class CustomerViewSummaryTest {
         List<String> out = new ArrayList<>();
         for (Component c : tape.getComponents()) {
             if (!(c instanceof JPanel p)) continue;
-            // Each row panel has BorderLayout — the west child is a JLabel.
-            Component west = ((java.awt.BorderLayout) p.getLayout()).getLayoutComponent(java.awt.BorderLayout.WEST);
+            // Row panels use BorderLayout; the hairline separator is also a JPanel but with a
+            // FlowLayout — skip anything that isn't a Border-laid row.
+            if (!(p.getLayout() instanceof java.awt.BorderLayout bl)) continue;
+            Component west = bl.getLayoutComponent(java.awt.BorderLayout.WEST);
             if (west instanceof JLabel label) out.add(label.getText());
         }
         return out;
