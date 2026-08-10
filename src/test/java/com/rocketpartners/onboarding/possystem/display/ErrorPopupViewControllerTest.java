@@ -57,10 +57,16 @@ class ErrorPopupViewControllerTest {
     }
 
     @Test
-    void upcNotFoundError_mapsToItemNotFoundMessage() {
+    void inlineScanCodes_areDroppedWithoutOpeningModal() {
+        // The four scan codes are painted into the scan bar's inline hint by ScannerView, not
+        // routed to a modal. Fire each of them; the presenter must not be called.
         pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 012345678905", "upc", "012345678905"));
+        pos.dispatchPosEvent(error("UPC_MISREAD", "misread 12-digit UPC"));
+        pos.dispatchPosEvent(error("INVALID_BARCODE", "not a valid UPC"));
+        pos.dispatchPosEvent(error("SCAN_LOCKED", "cannot scan while totaled"));
 
-        assertThat(presenter.messages).containsExactly("Item not found: 012345678905");
+        assertThat(presenter.messages).isEmpty();
+        assertThat(controller.isDialogShowing()).isFalse();
     }
 
     @Test
@@ -138,34 +144,36 @@ class ErrorPopupViewControllerTest {
         pos.removeController(this.controller);
         pos.addController(queueingController);
 
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 111", "upc", "111"));
+        pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: a"));
         // First error queued; dialog "showing" (deferred callback not yet run).
         assertThat(queued.pending()).isEqualTo(1);
         assertThat(queueingController.isDialogShowing()).isTrue();
 
         // Fire two more before the first callback runs.
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 222", "upc", "222"));
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 333", "upc", "333"));
+        pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: b"));
+        pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: c"));
 
         // Second and third dropped: still exactly one pending Swing task.
         assertThat(queued.pending()).isEqualTo(1);
 
         // Now let the first one run.
         queued.runNext();
-        assertThat(presenter.messages).containsExactly("Item not found: 111");
+        assertThat(presenter.messages)
+                .containsExactly("Invalid cash amount. Enter a valid, non-negative number.");
         assertThat(queueingController.isDialogShowing()).isFalse();
     }
 
     @Test
     void dialogFlagReleased_afterDismiss_soFutureErrorsShow() {
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 111", "upc", "111"));
+        pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: a"));
         assertThat(presenter.messages).hasSize(1);
         assertThat(controller.isDialogShowing()).isFalse();
 
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 222", "upc", "222"));
+        pos.dispatchPosEvent(error("UNDERPAYMENT", "short by 1.00"));
 
         assertThat(presenter.messages).hasSize(2);
-        assertThat(presenter.messages.get(1)).isEqualTo("Item not found: 222");
+        assertThat(presenter.messages.get(1))
+                .isEqualTo("Cash received is less than the amount due.");
     }
 
     @Test
@@ -190,9 +198,9 @@ class ErrorPopupViewControllerTest {
         pos.removeController(this.controller);
         pos.addController(threadedController);
 
-        // Dispatch from a background thread.
+        // Dispatch from a background thread. Use a non-scan code so the modal path is exercised.
         Thread background = new Thread(() ->
-                pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 999", "upc", "999")),
+                pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: z")),
                 "bg-caller");
         background.start();
         background.join(1000);
@@ -202,12 +210,13 @@ class ErrorPopupViewControllerTest {
         assertThat(executedOn.get(0).getName()).isEqualTo("sim-edt");
         assertThat(executedOn.get(0)).isNotSameAs(callerThread);
         assertThat(executedOn.get(0)).isNotSameAs(background);
-        assertThat(presenter.messages).containsExactly("Item not found: 999");
+        assertThat(presenter.messages)
+                .containsExactly("Invalid cash amount. Enter a valid, non-negative number.");
     }
 
     @Test
     void dismissingError_invokesOnDismissHook_forFocusReturn() {
-        pos.dispatchPosEvent(error("UPC_NOT_FOUND", "unknown UPC: 111", "upc", "111"));
+        pos.dispatchPosEvent(error("INVALID_CASH_AMOUNT", "not a number: a"));
 
         // In production this hook is `focusComponent::requestFocusInWindow` — running it here
         // proves the controller returns focus after dismiss, without asserting on Swing state.
@@ -216,8 +225,11 @@ class ErrorPopupViewControllerTest {
 
     @Test
     void transactionState_isUnchanged_afterErrorDismissed() {
-        // Ring up a widget, then trigger an error (unknown UPC). Verify the widget is still on
-        // the transaction, the state is still IN_PROGRESS, and the subtotal unchanged.
+        // Ring up a widget, then trigger an unknown-UPC error via the service. The scan
+        // controller isn't wired here, so the ERROR event still reaches this controller —
+        // which drops it as an inline scan code (no modal). Either way the transaction must
+        // stay intact; this test is really about "the service's throw path did not clobber
+        // basket state", not about how the error was rendered.
         pos.getTransactionService().startTransaction();
         pos.getTransactionService().addItemByUpc(WIDGET.getUpc(), 1);
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
@@ -231,10 +243,9 @@ class ErrorPopupViewControllerTest {
             threwUnknownUpc.set(true);
         }
 
-        // The unknown-UPC path dispatched an ERROR through the service; the controller then
-        // showed a popup. Neither of them touched the transaction.
         assertThat(threwUnknownUpc.get()).isTrue();
-        assertThat(presenter.messages).containsExactly("Item not found: does-not-exist");
+        // UPC_NOT_FOUND is inline — this controller does not present it.
+        assertThat(presenter.messages).isEmpty();
         assertThat(tx.getState()).isEqualTo(stateBefore);
         assertThat(tx.subtotal()).isEqualByComparingTo(subtotalBefore);
         assertThat(tx.getLineItems()).hasSize(1);
