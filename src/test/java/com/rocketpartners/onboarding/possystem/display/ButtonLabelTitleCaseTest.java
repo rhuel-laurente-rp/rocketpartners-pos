@@ -43,6 +43,9 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("PayWithCashView.exact",      "Exact Amount");
         LABELS.put("PayWithCashView.nextDollar", "Next Dollar");
         LABELS.put("PayWithCardView.confirm",    "Confirm Payment");
+        LABELS.put("TenderConfirmView.confirm",  "Confirm Payment");
+        LABELS.put("TenderConfirmView.cashBack", "Back");
+        LABELS.put("TenderConfirmView.cardCancel", "Cancel");
         LABELS.put("ErrorDialog.dismiss",        "Dismiss");
         LABELS.put("ReceiptView.startNext",      "Start Next Sale");
 
@@ -52,6 +55,7 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("title.payCash",            "Cash Payment");
         LABELS.put("title.payDebit",           "Pay Debit");
         LABELS.put("title.payCredit",          "Pay Credit");
+        LABELS.put("title.confirmPayment",     "Confirm Payment");
         LABELS.put("title.receipt",            "Receipt");
 
         // The void-basket confirmation dialog is deliberately sentence case throughout — copy

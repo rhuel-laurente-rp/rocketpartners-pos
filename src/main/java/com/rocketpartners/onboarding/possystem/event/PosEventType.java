@@ -88,33 +88,74 @@ public enum PosEventType {
 
     /**
      * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
-     * dialog. From there {@link #CASH_EXACT_PRESSED} and {@link #CASH_NEXT_DOLLAR_PRESSED} tender
-     * immediately (one tap, straight to the receipt); only {@link #OTHER_CASH_AMOUNT_PRESSED}
-     * opens the amount-entry dialog and defers tender to {@link #CASH_CONFIRM_PRESSED}.
+     * dialog. From there {@link #CASH_EXACT_PRESSED} and {@link #CASH_NEXT_DOLLAR_PRESSED} open a
+     * confirmation dialog and defer tender to {@link #CASH_TENDER_CONFIRM_PRESSED}; only
+     * {@link #OTHER_CASH_AMOUNT_PRESSED} opens the amount-entry dialog and defers tender to
+     * {@link #CASH_CONFIRM_PRESSED}.
      */
     TENDER_CASH_PRESSED,
 
-    /** The Pay Debit button was pressed. Input event; no properties. */
+    /**
+     * The Pay Debit button was pressed. Input event; no properties. Opens the card-tender
+     * confirmation dialog; the actual card processing is deferred to
+     * {@link #CARD_TENDER_CONFIRM_PRESSED}.
+     */
     TENDER_DEBIT_PRESSED,
 
-    /** The Pay Credit button was pressed. Input event; no properties. */
+    /**
+     * The Pay Credit button was pressed. Input event; no properties. Opens the card-tender
+     * confirmation dialog; the actual card processing is deferred to
+     * {@link #CARD_TENDER_CONFIRM_PRESSED}.
+     */
     TENDER_CREDIT_PRESSED,
+
+    /**
+     * The Confirm button on the card-tender confirmation dialog was pressed. Input event; no
+     * properties. The controller reacts by opening the card-processing dialog and committing the
+     * tender for the pending tender type (DEBIT or CREDIT). The confirmation dialog alone must not
+     * charge the card — that is deferred to this event so a mis-tap on Pay Debit / Pay Credit is
+     * recoverable.
+     */
+    CARD_TENDER_CONFIRM_PRESSED,
+
+    /**
+     * The card-tender confirmation was cancelled — Cancel or ESC on the confirmation dialog.
+     * Input event; no properties. Closes the dialog with no tender; the transaction remains
+     * {@code TOTALED} and re-tenderable.
+     */
+    CARD_TENDER_CANCELLED,
 
     /**
      * The Exact Amount tile on the cash-mode-choice dialog was pressed. Input event; carries a
      * {@code prefillAmount} property (BigDecimal, the transaction's grand total) for journalling
-     * which mode produced the tender. <strong>Tenders immediately</strong> — the controller
-     * settles the grand total in cash and goes straight to the receipt, no entry dialog.
+     * which mode produced the tender. <strong>Opens the cash-tender confirmation dialog</strong>
+     * seeded with the grand total; the tender is deferred to {@link #CASH_TENDER_CONFIRM_PRESSED}.
      */
     CASH_EXACT_PRESSED,
 
     /**
      * The Next Dollar tile on the cash-mode-choice dialog was pressed. Input event; carries a
      * {@code prefillAmount} property (BigDecimal, the grand total rounded up to the next whole
-     * dollar) for journalling. <strong>Tenders immediately</strong> — the controller settles the
-     * ceiled amount in cash (change $0.00) and goes straight to the receipt, no entry dialog.
+     * dollar) for journalling. <strong>Opens the cash-tender confirmation dialog</strong> seeded
+     * with the ceiled amount; the tender is deferred to {@link #CASH_TENDER_CONFIRM_PRESSED}.
      */
     CASH_NEXT_DOLLAR_PRESSED,
+
+    /**
+     * The Confirm button on the cash-tender confirmation dialog was pressed (Exact Amount / Next
+     * Dollar paths). Input event; no properties. The controller settles the pending cash amount
+     * for the pending mode (grand total for Exact, ceiled figure for Next Dollar) and goes
+     * straight to the receipt. Deferring the tender to this event makes a mis-tap on a mode tile
+     * recoverable.
+     */
+    CASH_TENDER_CONFIRM_PRESSED,
+
+    /**
+     * The Back button on the cash-tender confirmation dialog was pressed. Input event; no
+     * properties. Returns to the mode-choice dialog without tendering — a cashier who mis-tapped
+     * a mode tile can pick another. The transaction stays {@code TOTALED}.
+     */
+    CASH_TENDER_BACK_PRESSED,
 
     /**
      * The Other Amount button on the cash-mode-choice dialog was pressed. Input event; no

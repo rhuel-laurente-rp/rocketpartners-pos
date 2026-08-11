@@ -123,6 +123,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.CHANGE_QTY_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED,
+            PosEventType.CARD_TENDER_CANCELLED,
             PosEventType.CASH_TENDERED,
             PosEventType.CARD_TENDERED,
             PosEventType.CHANGE_QTY_CONFIRM_PRESSED,
@@ -426,7 +427,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
                  CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
                  TRANSACTION_COMPLETED -> resumeCapture();
-            case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
+            case CASH_CANCEL_PRESSED, CARD_TENDER_CANCELLED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
             // Receipt dismissal semantically starts a fresh sale: force unlocked

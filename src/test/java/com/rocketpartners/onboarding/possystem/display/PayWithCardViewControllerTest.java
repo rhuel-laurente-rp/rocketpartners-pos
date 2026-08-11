@@ -24,8 +24,10 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 class PayWithCardViewControllerTest {
@@ -34,6 +36,7 @@ class PayWithCardViewControllerTest {
 
     private PosComponent pos;
     private PayWithCardView view;
+    private TenderConfirmView confirmView;
     private QueuedScheduler scheduler;
     private PayWithCardViewController controller;
     private RecordingListener notifications;
@@ -49,8 +52,9 @@ class PayWithCardViewControllerTest {
                 1,
                 false);
         view = mock(PayWithCardView.class);
+        confirmView = mock(TenderConfirmView.class);
         scheduler = new QueuedScheduler();
-        controller = new PayWithCardViewController(view, scheduler);
+        controller = new PayWithCardViewController(view, confirmView, scheduler);
         notifications = new RecordingListener(EnumSet.allOf(PosEventType.class));
         pos.register(notifications);
         pos.addController(controller);
@@ -64,10 +68,25 @@ class PayWithCardViewControllerTest {
     }
 
     @Test
-    void tenderDebitPressed_opensDialogInProcessingState_thenApprovesAndCompletes() {
+    void tenderDebitPressed_opensConfirmation_doesNotProcessUntilConfirmed() {
         Transaction tx = totaledWith(WIDGET);
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+
+        // The button press opens the confirmation only — no card processing starts.
+        verify(confirmView).openFor(any(), any(), any(), eq(new BigDecimal("10.00")));
+        verify(view, never()).showProcessing();
+        verify(view, never()).openDialog();
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CARD_TENDERED)).isZero();
+    }
+
+    @Test
+    void tenderDebitConfirmed_opensDialogInProcessingState_thenApprovesAndCompletes() {
+        Transaction tx = totaledWith(WIDGET);
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDER_CONFIRM_PRESSED));
 
         verify(view).configure(eq(TenderType.DEBIT), eq(new BigDecimal("10.00")));
         verify(view).showProcessing();
@@ -99,6 +118,7 @@ class PayWithCardViewControllerTest {
         Transaction tx = totaledWith(WIDGET);
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CREDIT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDER_CONFIRM_PRESSED));
         scheduler.runNext();
 
         assertThat(tx.getTenderType()).isEqualTo(TenderType.CREDIT);
@@ -112,6 +132,7 @@ class PayWithCardViewControllerTest {
         Transaction tx = totaledWith(WIDGET);
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDER_CONFIRM_PRESSED));
         scheduler.runNext();
 
         assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
@@ -125,6 +146,7 @@ class PayWithCardViewControllerTest {
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDER_CONFIRM_PRESSED));
         scheduler.runNext();
 
         assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
@@ -132,6 +154,19 @@ class PayWithCardViewControllerTest {
         PosEvent error = notifications.lastOf(PosEventType.ERROR);
         assertThat(error).isNotNull();
         assertThat(error.getProperty("code", String.class)).isEqualTo("TOTALED_INVARIANT");
+    }
+
+    @Test
+    void cancelFromConfirmation_leavesTransactionTotaled_noProcessing() {
+        Transaction tx = totaledWith(WIDGET);
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CARD_TENDER_CANCELLED));
+
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CARD_TENDERED)).isZero();
+        verify(view, never()).showProcessing();
+        verify(confirmView).closeDialog();
     }
 
     /**

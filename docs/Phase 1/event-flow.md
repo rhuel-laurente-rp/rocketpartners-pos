@@ -13,8 +13,8 @@ There is no `QuickAddView` / `TransactionView` / `ToolbarView` split. Everything
 - **Scan bar** — `ScannerView` + `ScannerViewController`
 - **Change-quantity dialog** — `ChangeQuantityView` + `ChangeQuantityViewController`
 - **Void-basket confirm dialog** — `VoidBasketConfirmView` + `VoidBasketConfirmViewController`
-- **Cash-mode-choice dialog** and **cash-entry dialog** — `CashModeChoiceView`, `PayWithCashView`, both driven by `PayWithCashViewController`
-- **Card dialog** — `PayWithCardView` + `PayWithCardViewController`
+- **Cash-mode-choice dialog**, **cash-entry dialog**, and **cash tender-confirm dialog** — `CashModeChoiceView`, `PayWithCashView`, `TenderConfirmView`, all driven by `PayWithCashViewController`
+- **Card tender-confirm dialog** and **card dialog** — `TenderConfirmView` + `PayWithCardView`, both driven by `PayWithCardViewController`
 - **Receipt dialog** — `ReceiptView` + `ReceiptViewController`
 - **Error popup** — `ErrorDialog` + `ErrorPopupViewController`
 - **Journal writer** — `JournalListener` subscribes to every event and writes a record for it
@@ -59,14 +59,18 @@ Every constant on `PosEventType` appears below, grouped by phase of the sale.
 | `TOTAL_PRESSED` | `CustomerView` → `CustomerViewController` | Freezes the basket. |
 | `TRANSACTION_TOTALED` | `CustomerViewController` → all listeners | Basket is finalised; tender is next. |
 | `TENDER_CASH_PRESSED` | `CustomerView` → `PayWithCashViewController` | Opens `CashModeChoiceView`. Rejected with `INVALID_ARGUMENT` if the grand total is $0.00. |
-| `CASH_EXACT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | **Tenders immediately** — settles the grand total in cash (change $0.00) and goes straight to the receipt. No entry dialog. `prefillAmount` carried only for journalling which mode produced the tender. |
-| `CASH_NEXT_DOLLAR_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | **Tenders immediately** via `Transaction.payNextDollar()` — settles the ceiled amount (change $0.00). No entry dialog. Disabled on whole-dollar totals. |
+| `CASH_EXACT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens the `TenderConfirmView` seeded with the grand total; tender deferred to `CASH_TENDER_CONFIRM_PRESSED`. `prefillAmount` carried only for journalling which mode produced the tender. |
+| `CASH_NEXT_DOLLAR_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens the `TenderConfirmView` seeded with the ceiled amount; tender deferred to `CASH_TENDER_CONFIRM_PRESSED`. Disabled on whole-dollar totals. |
+| `CASH_TENDER_CONFIRM_PRESSED` | `TenderConfirmView` → `PayWithCashViewController` | Confirm on the cash confirmation dialog. Settles the pending mode: grand total in cash for Exact (change $0.00), `Transaction.payNextDollar()` for Next Dollar (change $0.00). Goes straight to the receipt. |
+| `CASH_TENDER_BACK_PRESSED` | `TenderConfirmView` → `PayWithCashViewController` | Back on the cash confirmation dialog: returns to `CashModeChoiceView` without tendering. |
 | `OTHER_CASH_AMOUNT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens `PayWithCashView` seeded with the grand total. The only path through the entry dialog; tender deferred to `CASH_CONFIRM_PRESSED`. |
 | `CASH_CONFIRM_PRESSED` | `PayWithCashView` → `PayWithCashViewController` | Other Amount path only. Carries raw `cashReceived` string; change is `cashReceived − grandTotal()`. Controller validates and dispatches `CASH_TENDERED` on success, `ERROR` (`INVALID_CASH_AMOUNT` / `UNDERPAYMENT`) on failure. |
 | `CASH_ENTRY_BACK_PRESSED` | `PayWithCashView` → `PayWithCashViewController` | Back button on the entry dialog: returns to `CashModeChoiceView` without tendering. |
-| `CASH_CANCEL_PRESSED` | Cancel on the mode choice, or ESC on either dialog → `PayWithCashViewController` | Abandons the flow; closes both dialogs; transaction stays `TOTALED` and re-tenderable. No tender event. |
-| `TENDER_DEBIT_PRESSED` | `CustomerView` → `PayWithCardViewController` | Opens `PayWithCardView`, schedules simulated approval off the EDT. |
+| `CASH_CANCEL_PRESSED` | Cancel on the mode choice, or ESC on any cash dialog → `PayWithCashViewController` | Abandons the flow; closes every cash dialog; transaction stays `TOTALED` and re-tenderable. No tender event. |
+| `TENDER_DEBIT_PRESSED` | `CustomerView` → `PayWithCardViewController` | Opens the `TenderConfirmView` for the card charge; processing deferred to `CARD_TENDER_CONFIRM_PRESSED`. |
 | `TENDER_CREDIT_PRESSED` | `CustomerView` → `PayWithCardViewController` | As above. |
+| `CARD_TENDER_CONFIRM_PRESSED` | `TenderConfirmView` → `PayWithCardViewController` | Confirm on the card confirmation dialog. Opens `PayWithCardView` and schedules the simulated approval off the EDT for the pending tender type. |
+| `CARD_TENDER_CANCELLED` | Cancel/ESC on the card confirmation dialog → `PayWithCardViewController` | Abandons the tender; closes the dialog; transaction stays `TOTALED`. No tender event. |
 | `CASH_TENDERED` | `PayWithCashViewController` → all listeners | Carries `tenderType`, `amountTendered`, `amountDue`, `changeDue`. |
 | `CARD_TENDERED` | `PayWithCardViewController` → all listeners | Carries `amountTendered` (= grand total), `changeDue` (= zero), `tenderType` (DEBIT or CREDIT). |
 | `TRANSACTION_COMPLETED` | Tender controller → `ReceiptViewController` (and all listeners) | Carries the paid `transaction`, `tenderType`, `amountTendered`, `changeDue`. Consumers render the receipt. |
@@ -123,8 +127,8 @@ flowchart LR
     subgraph Views["Views (dumb Swing)"]
         CV[CustomerView<br/>main window]
         SV[ScannerView]
-        CDlg[CashModeChoiceView<br/>PayWithCashView]
-        CardDlg[PayWithCardView]
+        CDlg[CashModeChoiceView<br/>PayWithCashView<br/>TenderConfirmView]
+        CardDlg[TenderConfirmView<br/>PayWithCardView]
         QDlg[ChangeQuantityView]
         VDlg[VoidBasketConfirmView]
         RDlg[ReceiptView]
@@ -149,6 +153,7 @@ flowchart LR
     CV -- QUICK_ADD_PRESSED / VOID_LINE_PRESSED /<br/>VOID_BASKET_PRESSED / TOTAL_PRESSED /<br/>TENDER_*_PRESSED / CHANGE_QTY_PRESSED --> PC
     SV -- SCAN_SUBMIT_PRESSED --> PC
     CDlg -- CASH_*_PRESSED / CASH_CANCEL_PRESSED --> PC
+    CardDlg -- CARD_TENDER_CONFIRM_PRESSED /<br/>CARD_TENDER_CANCELLED --> PC
     QDlg -- CHANGE_QTY_CONFIRM/CANCEL_PRESSED --> PC
     VDlg -- VOID_BASKET_CONFIRM_PRESSED /<br/>VOID_BASKET_DECLINED --> PC
     RDlg -- RECEIPT_DISMISS_PRESSED --> PC

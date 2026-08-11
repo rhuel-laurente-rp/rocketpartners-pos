@@ -27,8 +27,10 @@ import com.rocketpartners.onboarding.possystem.display.ReceiptView;
 import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
 import com.rocketpartners.onboarding.possystem.display.ScannerView;
 import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
+import com.rocketpartners.onboarding.possystem.display.TenderConfirmView;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
+import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import com.rocketpartners.onboarding.possystem.repository.h2.H2ItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
 
@@ -124,11 +126,18 @@ public final class Application {
 
             CashModeChoiceView cashChoiceView = new CashModeChoiceView(view, pos);
             PayWithCashView cashView = new PayWithCashView(view, pos);
+            TenderConfirmView cashConfirmView = new TenderConfirmView(view, pos,
+                    PosEventType.CASH_TENDER_CONFIRM_PRESSED, PosEventType.CASH_TENDER_BACK_PRESSED,
+                    "Confirm Payment", "Back");
             PayWithCashViewController cashController =
-                    new PayWithCashViewController(cashChoiceView, cashView);
+                    new PayWithCashViewController(cashChoiceView, cashView, cashConfirmView);
 
             PayWithCardView cardView = new PayWithCardView(view);
-            PayWithCardViewController cardController = new PayWithCardViewController(cardView);
+            TenderConfirmView cardConfirmView = new TenderConfirmView(view, pos,
+                    PosEventType.CARD_TENDER_CONFIRM_PRESSED, PosEventType.CARD_TENDER_CANCELLED,
+                    "Confirm Payment", "Cancel");
+            PayWithCardViewController cardController =
+                    new PayWithCardViewController(cardView, cardConfirmView);
 
             ChangeQuantityView changeQtyView = new ChangeQuantityView(
                     view, pos, pos.getTransactionService().getMaxLineQuantity());
