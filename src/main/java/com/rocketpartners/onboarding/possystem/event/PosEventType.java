@@ -74,6 +74,19 @@ public enum PosEventType {
     TOTAL_PRESSED,
 
     /**
+     * The Discount button on the main window was pressed. Input event; no properties.
+     *
+     * <p><strong>Not yet wired to a feature.</strong> The button is present in the actions row
+     * but disabled — applying a discount while a transaction is {@code IN_PROGRESS} is a domain
+     * change (widening {@link com.rocketpartners.onboarding.commons.model.Transaction#applyDiscount()}'s
+     * state rule and making running-subtotal discounts track basket mutations) that belongs on a
+     * dedicated {@code feature/in-progress-discounts} branch with its own tests, not bundled into
+     * a layout refactor. This event constant and the button's listener exist so the wiring is in
+     * place; nothing dispatches it until the button is enabled by that feature.</p>
+     */
+    DISCOUNT_PRESSED,
+
+    /**
      * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
      * dialog. From there {@link #CASH_EXACT_PRESSED} and {@link #CASH_NEXT_DOLLAR_PRESSED} tender
      * immediately (one tap, straight to the receipt); only {@link #OTHER_CASH_AMOUNT_PRESSED}

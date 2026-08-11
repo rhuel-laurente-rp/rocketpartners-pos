@@ -2,6 +2,7 @@ package com.rocketpartners.onboarding.possystem.repository;
 
 import com.rocketpartners.onboarding.commons.model.Item;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -20,6 +21,13 @@ public interface ItemRepository {
      * @return the item, or {@link Optional#empty()} if no item matches
      */
     Optional<Item> findByUpc(String upc);
+
+    /**
+     * @return every item in the repository, in a stable order. Used by the Quick Add grid, which
+     *         renders the whole pricebook (paged) rather than a curated subset. The returned list
+     *         is a snapshot the caller may freely sort or filter.
+     */
+    List<Item> getAll();
 
     /**
      * @return the number of items currently in the repository

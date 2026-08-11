@@ -3,6 +3,9 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.commons.model.LineItem;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -20,32 +23,37 @@ import java.awt.GridBagLayout;
 import java.awt.RenderingHints;
 
 /**
- * Renders one basket row in one of two density modes.
+ * Renders one basket row as a dense four-column table row: <strong>Item · Price · Qty ·
+ * Total</strong>. The description is left-aligned and ellipsised into whatever width remains
+ * after the fixed numeric columns (≈235px in the shipping left-column width); Price, Qty, and
+ * Total are right-aligned. Values render in {@link PosTheme#BODY}; the column headers painted
+ * above the list (see {@code CustomerView}) are the matching {@code EYEBROW} labels, aligned to
+ * the same column geometry exposed by {@link #numericColumns(JComponent, JComponent, JComponent)}
+ * and {@link #ITEM_INSET_LEFT}.
  *
- * <p><strong>Comfortable</strong> (≤ 9 items, ~52px rows). Two lines: description, then a muted
- * {@code @ $unit} line beneath. Reads calmly when the basket is short.</p>
+ * <p><strong>Qty is the badge.</strong> The quantity column is the {@link BadgePanel} pill: a
+ * multi-quantity line jumps out of the list — a wrong quantity is the expensive mistake — while a
+ * quantity of one reads as blank, the same convenience-store convention the previous design used.
+ * Keeping the badge as the qty indicator also means the density regression tests, which probe the
+ * badge's paint behaviour, keep describing a real element rather than a vestige.</p>
  *
- * <p><strong>Compact</strong> (&gt; 9 items, ~42px rows). One line: description on the left,
- * {@code @ $unit} and extended total right-aligned. Font sizes are identical to Comfortable —
- * only the row height and vertical stacking change.</p>
+ * <p>Two density modes change only the row height, not the columns:</p>
+ * <ul>
+ *   <li><strong>Comfortable</strong> (≤ {@value #DENSITY_THRESHOLD} items, {@value
+ *       #COMFORTABLE_ROW_HEIGHT}px rows).</li>
+ *   <li><strong>Compact</strong> (&gt; {@value #DENSITY_THRESHOLD} items, {@value
+ *       #COMPACT_ROW_HEIGHT}px rows).</li>
+ * </ul>
  *
- * <p>Row states, in precedence order (highest first):</p>
- * <ol>
- *   <li><em>Flash</em> — a green tint painted by the container at row bounds; renderers only
- *       need to know the flash is happening so the badge can pulse in sympathy.</li>
- *   <li><em>Selected</em> — {@link PosTheme#SELECTED} background.</li>
- *   <li><em>Hover</em> — {@link PosTheme#HOVER_ROW} background (tracked by the view via
- *       MouseMotionListener since {@link JList} has no hover concept).</li>
- * </ol>
+ * <p>Row states, in precedence order (highest first): <em>flash</em> (a green tint painted by the
+ * container at row bounds; the renderer only pulses the badge in sympathy), <em>selected</em>
+ * ({@link PosTheme#SELECTED}), <em>hover</em> ({@link PosTheme#HOVER_ROW}). Voided lines are struck
+ * through and muted but stay visible — a void is not a delete.</p>
  *
- * <p>Voided lines are struck through and muted but stay visible — the cashier and the customer
- * both need to see that a void happened, so this is not a delete.</p>
- *
- * <p>All fields, fonts, and colours are allocated once in the constructor and mutated per call.
- * No new components, Font, Color, or Border objects are allocated inside
- * {@link #getListCellRendererComponent} — that is what keeps a 250-item list feeling smooth even
- * on modest hardware. JList already virtualizes to visible rows with a fixed cell height, so no
- * additional caching is needed.</p>
+ * <p>All components, fonts, and colours are allocated once in the constructor and mutated per
+ * call; {@link #getListCellRendererComponent} allocates no {@code Component}, {@code Font},
+ * {@code Color}, or {@code Border}, which is what keeps a 250-item list smooth. JList virtualizes
+ * to visible rows at a fixed cell height, so no further caching is needed.</p>
  */
 public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineItem> {
 
@@ -56,18 +64,27 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     /** The threshold at which the list switches from Comfortable to Compact. */
     public static final int DENSITY_THRESHOLD = 9;
 
+    // ---- Column geometry (shared with the header row in CustomerView) ------
+    /** Left inset of the Item column — the header's "Item" label uses the same inset. */
+    public static final int ITEM_INSET_LEFT = 12;
+    /** Right inset past the Total column. */
+    public static final int ITEM_INSET_RIGHT = 12;
+    /** Fixed width of the Price column. */
+    public static final int PRICE_COL_WIDTH = 66;
+    /** Fixed width of the Qty column (holds the {@link BadgePanel}). */
+    public static final int QTY_COL_WIDTH = 40;
+    /** Fixed width of the Total column. */
+    public static final int TOTAL_COL_WIDTH = 66;
+    /** Gap between adjacent numeric columns. */
+    public static final int COL_GAP = 6;
+
     private final JLabel description = new JLabel();
-    private final JLabel unitPrice = new JLabel();
+    private final JLabel price = new JLabel("", SwingConstants.RIGHT);
     private final JLabel extended = new JLabel("", SwingConstants.RIGHT);
     private final BadgePanel badge = new BadgePanel();
-    private final JPanel textStack = new JPanel(new BorderLayout());
-    private final JPanel comfortableText = new JPanel(new BorderLayout());
-    private final JPanel compactText = new JPanel(new BorderLayout(8, 0));
 
-    private final Font descFontRow = PosTheme.base(Font.PLAIN, PosTheme.ROW);
-    private final Font descFontBold = PosTheme.base(Font.BOLD, PosTheme.ROW);
-    private final Font unitFont = PosTheme.base(Font.PLAIN, 12f);
-    private final Font extendedFont = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
+    private final Font valueFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
+    private final Font totalFont = PosTheme.base(Font.BOLD, PosTheme.BODY);
 
     private Density density = Density.COMFORTABLE;
 
@@ -84,33 +101,55 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     private int hoverIndex = -1;
 
     public BasketCellRenderer() {
-        super(new BorderLayout(12, 0));
-        // Border padding is symmetric so the swap between Comfortable and Compact only requires
-        // changing the list's fixed cell height; contents stay centred vertically in both modes.
+        super(new BorderLayout(COL_GAP, 0));
+        // Symmetric vertical inset keeps content centred in both densities — only the list's
+        // fixed cell height changes between modes. A hairline rule separates rows.
         setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, PosTheme.ROW_RULE),
-                BorderFactory.createEmptyBorder(6, 14, 6, 14)));
+                BorderFactory.createEmptyBorder(6, ITEM_INSET_LEFT, 6, ITEM_INSET_RIGHT)));
 
-        JPanel badgeWrap = new JPanel(new GridBagLayout());
-        badgeWrap.setOpaque(false);
-        badgeWrap.add(badge);
-        add(badgeWrap, BorderLayout.WEST);
+        description.setFont(valueFont);
+        price.setFont(valueFont);
+        price.setForeground(PosTheme.MUTED);
+        extended.setFont(totalFont);
 
-        description.setFont(descFontRow);
-        unitPrice.setFont(unitFont);
-        unitPrice.setForeground(PosTheme.MUTED);
+        add(description, BorderLayout.CENTER);
+        add(numericColumns(price, badge, extended), BorderLayout.EAST);
+    }
 
-        comfortableText.setOpaque(false);
-        comfortableText.add(description, BorderLayout.NORTH);
-        comfortableText.add(unitPrice, BorderLayout.CENTER);
+    /**
+     * Builds the right-hand numeric column group — Price, Qty, Total — at the shared fixed
+     * widths, each cell right-aligning its content. Used by this renderer for data rows and by
+     * {@code CustomerView} for the column-header row so the two align pixel-for-pixel.
+     *
+     * @param priceCell content for the Price column (right-aligned within its cell)
+     * @param qtyCell   content for the Qty column (centred within its cell)
+     * @param totalCell content for the Total column (right-aligned within its cell)
+     */
+    public static JPanel numericColumns(JComponent priceCell, JComponent qtyCell, JComponent totalCell) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.add(fixedCell(priceCell, PRICE_COL_WIDTH, false));
+        row.add(Box.createHorizontalStrut(COL_GAP));
+        row.add(fixedCell(qtyCell, QTY_COL_WIDTH, true));
+        row.add(Box.createHorizontalStrut(COL_GAP));
+        row.add(fixedCell(totalCell, TOTAL_COL_WIDTH, false));
+        return row;
+    }
 
-        compactText.setOpaque(false);
-
-        textStack.setOpaque(false);
-        add(textStack, BorderLayout.CENTER);
-
-        extended.setFont(extendedFont);
-        add(extended, BorderLayout.EAST);
+    private static JPanel fixedCell(JComponent content, int width, boolean centre) {
+        // GridBagLayout centres a single child vertically; for a plain label that just holds the
+        // baseline while the label's own RIGHT alignment handles the horizontal edge. For the
+        // badge (centre=true) the centring is both axes, which reads right in a narrow column.
+        JPanel cell = new JPanel(centre ? new GridBagLayout() : new BorderLayout());
+        cell.setOpaque(false);
+        cell.add(content, centre ? null : BorderLayout.CENTER);
+        Dimension fixed = new Dimension(width, 1);
+        cell.setPreferredSize(new Dimension(width, cell.getPreferredSize().height));
+        cell.setMinimumSize(fixed);
+        cell.setMaximumSize(new Dimension(width, Integer.MAX_VALUE));
+        return cell;
     }
 
     /** Density mode. */
@@ -149,6 +188,24 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         return hoverIndex;
     }
 
+    /**
+     * Reports a modest preferred width so the {@link JList} tracks the viewport width rather than
+     * growing to fit the widest description. Without this cap a long item name inflates the list's
+     * preferred width past the viewport, and with the horizontal scrollbar disabled the right edge
+     * — the Total column — is silently clipped, especially once the vertical scrollbar appears. The
+     * real per-row width always comes from the list (viewport) width; the description ellipsises
+     * into whatever the Item column has left.
+     */
+    @Override
+    public Dimension getPreferredSize() {
+        Dimension d = super.getPreferredSize();
+        d.width = PREFERRED_WIDTH_HINT;
+        return d;
+    }
+
+    /** Small enough to stay under any real viewport width, so the list tracks the viewport. */
+    private static final int PREFERRED_WIDTH_HINT = 240;
+
     @Override
     public Component getListCellRendererComponent(
             JList<? extends LineItem> list, LineItem value, int index,
@@ -158,52 +215,33 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         boolean hovered = index == hoverIndex;
 
         // Flash > selection > hover > default. Flash is painted as an overlay on top of the
-        // resolved background (see CustomerView.FlashOverlay), so here we still resolve
-        // background against selection/hover; the overlay layers green on top.
+        // resolved background (see CustomerView.FlashLayerPanel), so here we resolve against
+        // selection/hover only; the overlay layers green on top.
         Color bg = isSelected ? PosTheme.SELECTED
                 : hovered ? PosTheme.HOVER_ROW
                 : PosTheme.SURFACE;
         setBackground(bg);
 
         int qty = value.getQuantity();
-        badge.setQuantity(qty, voided,
-                index == flashIndex && flashIsBump);
+        badge.setQuantity(qty, voided, index == flashIndex && flashIsBump);
 
         String label = value.getItem().getDisplayLabel().trim();
-        // Voided rows use HTML so the strike is a real strike; non-voided stays plain to keep
-        // rendering as cheap as possible. Bold description in Compact mode helps it hold its
-        // weight now that the second line is gone.
+        // Voided rows use HTML so the strike is a real strike; non-voided stays plain text so the
+        // JList ellipsises the description automatically when the Item column is too narrow.
         if (voided) {
             description.setText("<html><strike>" + escapeHtml(label)
                     + "</strike> &nbsp;<font color='#A32A1F'>VOID</font></html>");
         } else {
             description.setText(label);
         }
-        description.setFont(density == Density.COMPACT ? descFontBold : descFontRow);
         description.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
 
-        unitPrice.setText("@ " + PosTheme.money(value.getItem().getUnitPrice()));
-        unitPrice.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.MUTED);
+        price.setText(PosTheme.money(value.getItem().getUnitPrice()));
+        price.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.MUTED);
 
         extended.setText(PosTheme.money(value.extendedTotal()));
         extended.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
 
-        // Swap the middle stack to match density. Both containers and their children are
-        // preallocated; only the parent-child edge changes, so there's no allocation on the
-        // render path. Description/unit-price get re-parented between comfortableText and
-        // compactText — Swing tolerates this since we removeAll() first.
-        textStack.removeAll();
-        comfortableText.removeAll();
-        compactText.removeAll();
-        if (density == Density.COMPACT) {
-            compactText.add(description, BorderLayout.CENTER);
-            compactText.add(unitPrice, BorderLayout.EAST);
-            textStack.add(compactText, BorderLayout.CENTER);
-        } else {
-            comfortableText.add(description, BorderLayout.NORTH);
-            comfortableText.add(unitPrice, BorderLayout.CENTER);
-            textStack.add(comfortableText, BorderLayout.CENTER);
-        }
         return this;
     }
 
@@ -212,9 +250,9 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     }
 
     /**
-     * A compact pill/circle drawn beside the description. Hidden when quantity is 1 while its
-     * width stays reserved — Square/Shopify do this so a multi-quantity line jumps out of the
-     * list, which is the actual goal since a wrong quantity is the expensive mistake.
+     * A compact pill/circle drawn in the Qty column. Hidden when quantity is 1 while its width
+     * stays reserved — Square/Shopify do this so a multi-quantity line jumps out of the list,
+     * which is the actual goal since a wrong quantity is the expensive mistake.
      */
     static final class BadgePanel extends JPanel {
         static final int WIDTH = 34;
