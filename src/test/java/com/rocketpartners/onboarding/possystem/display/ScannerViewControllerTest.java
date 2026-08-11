@@ -106,14 +106,25 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void nonTerminatorKeystrokes_passThrough_soTextFieldsReceiveTyping() {
+    void digitKeystrokes_areConsumedOptimistically_notLeakedToTheFocusedField() {
+        // Optimistic capture: a digit is held in the buffer (consumed) until timing reveals
+        // whether it's a scan or human typing, so nothing leaks into the focused field mid-burst.
         ensureInProgress();
 
         boolean consumed1 = typed('0');
         boolean consumed2 = typed('4');
 
-        assertThat(consumed1).isFalse();
-        assertThat(consumed2).isFalse();
+        assertThat(consumed1).isTrue();
+        assertThat(consumed2).isTrue();
+    }
+
+    @Test
+    void nonDigitKeystrokes_passThrough_soLettersReachTextFields() {
+        // Letters are never buffered — typing into a search field is unaffected.
+        ensureInProgress();
+
+        assertThat(typed('a')).isFalse();
+        assertThat(typed('.')).isFalse();
     }
 
     @Test
@@ -183,15 +194,17 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void nonNumericInput_paintsInlineBarcodeNotRecognised() {
+    void letterBurst_passesThrough_isNotCapturedAsAScan() {
+        // Under optimistic capture, non-digits are never buffered — a run of letters is human
+        // typing that passes straight through to the focused field, dispatching no scan. (Invalid
+        // barcodes now surface only via manual submit; see manualEnter tests.)
         ensureInProgress();
 
-        burst("bananabanan1", 5);
+        burst("banana", 5);
         typed('\n');
 
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
         assertThat(notifications.countOf(PosEventType.ERROR)).isZero();
-        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
     }
 
     @Test
@@ -336,21 +349,6 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void rejectedScanBurst_stillClearsField_becauseBufferOwnedTheText() {
-        // Scanner bursts land in the buffer via the KeyEventDispatcher, not the field. The
-        // field never held the burst text, so clearing it after rejection is a no-op on user
-        // input and keeps the field in a known state.
-        ensureInProgress();
-
-        burst("bananana1234", 5);
-        typed('\n');
-
-        verify(view).clearScanField();
-        verify(view, atLeastOnce()).requestScanFieldFocus();
-        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
-    }
-
-    @Test
     void rejectedManualSubmit_keepsFieldTextForRetry() {
         // On rejected manual entry the field must NOT be cleared — the wrong text stays in
         // place (and setInlineError selects it) so the cashier sees what they typed and the
@@ -369,12 +367,15 @@ class ScannerViewControllerTest {
 
     @Test
     void keystroke_clearsInlineErrorFromPreviousScan() {
-        ensureInProgress();
+        // Lock the transaction so a scan burst is rejected inline (SCAN_LOCKED), then confirm the
+        // next keystroke clears the stale hint before the buffer processes it.
+        pos.getTransactionService().startTransaction();
+        pos.getTransactionService().addItemByUpc(COKE.getUpc(), 1);
+        pos.getTransactionService().total();
 
-        // Trigger an inline error, then type any character.
-        burst("nope", 5);
+        burst("049000053418", 5);
         typed('\n');
-        verify(view).setInlineError(ScannerViewController.MSG_BARCODE_NOT_RECOGNISED);
+        verify(view).setInlineError(ScannerViewController.MSG_SCAN_LOCKED);
 
         typed('0');
         // Any keystroke reaching the dispatcher clears the error before the buffer accepts it.
@@ -450,7 +451,106 @@ class ScannerViewControllerTest {
         verify(view, times(0)).setInlineError(org.mockito.ArgumentMatchers.anyString());
     }
 
+    // ---- Global scanning: optimistic capture + replay ---------------------
+
+    @Test
+    void fastBurst_withFocusInSearchField_addsToBasket_leavesFieldAndFilterUntouched() {
+        QuickAddPanel quickAdd = new QuickAddPanel(
+                List.of(new Item("111", "Alpha", new BigDecimal("1.00")),
+                        new Item("222", "Beta", new BigDecimal("2.00"))),
+                item -> { });
+        JTextField search = quickAdd.getSearchFieldForTest();
+        installCaptureController(() -> search, new ManualScheduler());
+        ensureInProgress();
+        int before = quickAdd.filteredSortedForTest().size();
+
+        burst("049000053418", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        assertThat(search.getText()).isEmpty();
+        assertThat(quickAdd.filteredSortedForTest()).hasSize(before);
+    }
+
+    @Test
+    void digitsTypedAtHumanSpeed_appearInSearchField_andFilterTheGrid() {
+        QuickAddPanel quickAdd = new QuickAddPanel(
+                List.of(new Item("207", "Cola 207", new BigDecimal("1.00")),
+                        new Item("999", "Water", new BigDecimal("2.00"))),
+                item -> { });
+        JTextField search = quickAdd.getSearchFieldForTest();
+        ManualScheduler sched = new ManualScheduler();
+        installCaptureController(() -> search, sched);
+        ensureInProgress();
+
+        // Human speed: each inter-digit gap exceeds the 50ms burst threshold.
+        typed('2'); tickAdvance(120);
+        typed('0'); tickAdvance(120);
+        typed('7'); tickAdvance(120);
+        sched.fire();  // stale timeout flushes the trailing held digit
+
+        assertThat(search.getText()).isEqualTo("207");
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
+        assertThat(quickAdd.filteredSortedForTest()).hasSize(1);
+    }
+
+    @Test
+    void burstAbandonedMidway_replaysHeldDigitsIntoTheFocusedField() {
+        JTextField field = new JTextField();
+        installCaptureController(() -> field, new ManualScheduler());
+        ensureInProgress();
+
+        typed('0'); tickAdvance(5);
+        typed('4'); tickAdvance(120);   // the next gap exceeds the burst threshold
+        typed('9');                     // slow digit → "04" replayed, "9" newly held
+
+        assertThat(field.getText()).isEqualTo("04");
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
+    }
+
+    @Test
+    void burst_withFocusOnVoidBasketButton_doesNotVoidTheBasket() {
+        JButton voidBasket = new JButton("Void Basket");
+        installCaptureController(() -> voidBasket, new ManualScheduler());
+        ensureInProgress();
+
+        burst("049000053418", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.VOID_BASKET_PRESSED)).isZero();
+        assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isZero();
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+    }
+
     // ---- Helpers -----------------------------------------------------------
+
+    private void installCaptureController(java.util.function.Supplier<java.awt.Component> focus,
+                                          ManualScheduler scheduler) {
+        pos.removeController(controller);
+        installer = new CapturingInstaller();
+        controller = new ScannerViewController(
+                view, buffer, false, installer, clockTs::get, focus, scheduler);
+        pos.addController(controller);
+    }
+
+    /** A replay scheduler whose pending flush the test fires by hand (no real timer). */
+    static final class ManualScheduler implements ScannerViewController.ReplayScheduler {
+        private Runnable pending;
+
+        @Override
+        public Runnable after(long delayMs, Runnable task) {
+            pending = task;
+            return () -> {
+                if (pending == task) pending = null;
+            };
+        }
+
+        void fire() {
+            Runnable t = pending;
+            pending = null;
+            if (t != null) t.run();
+        }
+    }
 
     /** Captures the installed dispatcher so the test can drive it synchronously. */
     static final class CapturingInstaller implements ScannerViewController.KeyDispatchInstaller {

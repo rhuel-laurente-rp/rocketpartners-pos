@@ -29,7 +29,6 @@ import com.rocketpartners.onboarding.possystem.display.ScannerView;
 import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
 import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
-import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
 import com.rocketpartners.onboarding.possystem.repository.h2.H2ItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
 
@@ -42,11 +41,7 @@ import java.awt.event.WindowEvent;
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
-import java.util.Random;
 
 /**
  * Entry point for the POS desktop client. Parses CLI args, loads the pricebook, installs the
@@ -57,34 +52,6 @@ public final class Application {
 
     private static final String PRICEBOOK_RESOURCE = "/pricebook.tsv";
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.07");
-    private static final int QUICK_ADD_COUNT = 16;
-
-    /**
-     * Curated pool of foods and drinks (no tobacco / no lottery / no fuel prepay) drawn from
-     * {@code /pricebook.tsv}. {@link #main} shuffles this list at startup and takes the first
-     * {@link #QUICK_ADD_COUNT} UPCs to bind to quick-add buttons — a different set each run.
-     */
-    private static final List<String> QUICK_ADD_UPC_POOL = List.of(
-            "049000053418", // COCA-COLA CAN
-            "049000000450", // DT COKE 20OZ
-            "012000001291", // PEPSI 20Z BT
-            "049000007640", // SPRT 20Z
-            "999999937551", // Medium Polar Pop
-            "999995377641", // SLICED PEPPERONI PIZ
-            "999999235275", // DONUT WITH HOLE
-            "028400323826", // LAYS REGULAR
-            "028400324427", // 2.5Z RUFFLES CH
-            "999999414977", // BANANA TB
-            "194283301180", // MBROOK 1L
-            "786162200433", // GLACEAU SMART WATER 20Z
-            "034000004805", // REESES PB CUP KING SZ
-            "040000000327", // M&M PNUT REG 1.74Z
-            "611269818994",  // RED BULL ENERGY DRIN
-            "860006114916",
-            "999991218931",
-            "070847811169",
-            "049000000443"
-    );
 
     private Application() {}
 
@@ -130,7 +97,9 @@ public final class Application {
             System.err.println("FlatLaf unavailable, falling back to system LAF: " + e.getMessage());
         }
 
-        List<Item> quickAddItems = pickQuickAddItems(itemRepository);
+        // Quick Add renders the whole pricebook now (paged, searchable, sortable in the view),
+        // so there is no curated subset to sample — hand the grid every item.
+        List<Item> quickAddItems = itemRepository.getAll();
 
         LocalJournal localJournal = new LocalJournal();
         Path logDir = Paths.get(args.logDir).toAbsolutePath();
@@ -234,28 +203,9 @@ public final class Application {
                         + " journal=" + args.journalHost + ":" + args.journalPort
                         + " engine=" + args.discountEngineUrl
                         + " mode=" + args.appMode
-                        + " quickAdd=" + quickAddItems.stream()
-                                .map(Item::getUpc).toList());
+                        + " quickAdd=" + quickAddItems.size() + " items");
             }
         });
-    }
-
-    /**
-     * Shuffles {@link #QUICK_ADD_UPC_POOL} once, then walks it in order and resolves each UPC
-     * against the pricebook, stopping when {@link #QUICK_ADD_COUNT} items have been gathered or
-     * the pool is exhausted. UPCs that fail to resolve are skipped (the pricebook could
-     * legitimately have been swapped in).
-     */
-    private static List<Item> pickQuickAddItems(ItemRepository repo) {
-        List<String> upcs = new ArrayList<>(QUICK_ADD_UPC_POOL);
-        Collections.shuffle(upcs, new Random());
-        List<Item> picked = new ArrayList<>();
-        for (String upc : upcs) {
-            if (picked.size() >= QUICK_ADD_COUNT) break;
-            Optional<Item> item = repo.findByUpc(upc);
-            item.ifPresent(picked::add);
-        }
-        return picked;
     }
 
     /** JCommander-parsed CLI arguments. Public for JCommander reflection access. */
