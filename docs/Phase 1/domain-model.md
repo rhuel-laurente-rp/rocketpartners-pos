@@ -113,14 +113,16 @@ stateDiagram-v2
 
 ## Next Dollar — the change-simplification device
 
-**Next Dollar ceils the amount due, not the tender.** `PayWithCashViewController.nextDollar(grandTotal)` computes `ceil(grandTotal())` and drives the two-step cash flow with that value as the settled `amountDue`; confirmation calls the three-argument tender overload via `TransactionService.tenderCash(cashReceived, amountDue)`. `changeDue()` computes `cashTendered − amountDue()` — measuring against the settled amount, not the raw grand total.
+**Next Dollar ceils the amount due, not the tender.** `Transaction.payNextDollar()` computes `ceil(grandTotal())`, records that ceiled figure as *both* the cash tendered and the settled `amountDue`, and tenders it — so `changeDue()` (`cashTendered − amountDue()`) is exactly $0.00. It measures against the settled amount, not the raw grand total.
+
+**One tap, no entry dialog.** In the restructured cash flow the two common cases finish in a single tap. **Exact Amount** settles the grand total immediately (`TransactionService.tenderCash(grandTotal)`, two-arg tender, `amountDue` null → falls back to the grand total, change $0.00). **Next Dollar** settles the ceiled figure immediately (`TransactionService.payNextDollar()`). Neither opens an entry dialog. Only **Other Amount** opens `PayWithCashView`, where the cashier keys the cash received and change is `cashReceived − grandTotal()` — the path for a customer handing over more than the ceiled amount.
 
 **Why.** To keep coins out of change. On a $7.30 basket:
 
-- **Exact Amount tender:** the customer owes $7.30. Handing over $10.00 produces $2.70 change — a quarter, two dimes, and a nickel.
-- **Next Dollar tender:** the amount due becomes $8.00. Handing over $8.00 produces $0.00 change; handing over $10.00 produces exactly $2.00 change — one banknote. The cashier never counts coins.
+- **Exact Amount tender:** the customer owes $7.30 and hands over exactly that — $0.00 change. A customer handing over $10.00 goes through **Other Amount**, producing $2.70 change (a quarter, two dimes, and a nickel).
+- **Next Dollar tender:** the amount due becomes $8.00 and the customer hands over exactly $8.00 — $0.00 change, no coins. Choosing this asserts the customer handed over the ceiled amount; a customer offering $10.00 instead must go through **Other Amount** (change computed against the true grand total, coins possible).
 
-The customer gives up $0.70 in exchange for a workflow where the coin drawer never opens on this class of tender. That is the substance of the feature, not a rounding footnote.
+The customer gives up $0.70 in exchange for a workflow where the coin drawer never opens on this class of tender. That is the substance of the feature, not a rounding footnote. Because Next Dollar now tenders immediately, it must never be "fixed" into an entry dialog — that would undo the one-tap design.
 
 **Corroboration.** `ReceiptFormatter` prints a dedicated `Amount Due (Next Dollar):` line when `amountDue()` differs from `grandTotal()`, so the audit trail records the mode that was used. The `Amount Due (Exact):` variant appears when they match. Both lines print only on PAID transactions.
 

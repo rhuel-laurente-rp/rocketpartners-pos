@@ -64,13 +64,14 @@ flowchart TD
     Tchoose -->|Void Basket| VBprompt
     Tchoose -->|Pay Cash| CashMode[open CashModeChoiceView]
     Tchoose -->|Pay Debit / Pay Credit| Card[open PayWithCardView<br/>simulated approval]
-    CashMode --> CashChoose{Exact Amount or<br/>Next Dollar?}
-    CashChoose -->|Exact Amount| CashEnter[open PayWithCashView<br/>pre-filled with grand total]
-    CashChoose -->|Next Dollar| CashEnter2[open PayWithCashView<br/>pre-filled with ceil grand total]
+    CashMode --> CashChoose{Exact Amount,<br/>Next Dollar,<br/>or Other Amount?}
+    CashChoose -->|Exact Amount| Receipt
+    CashChoose -->|Next Dollar| Receipt
+    CashChoose -->|Other Amount| CashEnter[open PayWithCashView<br/>cashier types cash received]
     CashChoose -->|Cancel| Tchoose
-    CashEnter --> CashConfirm{Confirm Payment<br/>or Cancel?}
-    CashEnter2 --> CashConfirm
-    CashConfirm -->|Cancel| Tchoose
+    CashEnter --> CashConfirm{Confirm Payment,<br/>Back, or ESC?}
+    CashEnter -->|Back| CashMode
+    CashConfirm -->|ESC| Tchoose
     CashConfirm -->|Confirm Payment| Receipt
     Card --> Receipt[open ReceiptView modal]
     Receipt --> RcpDismiss{Start Next Sale}

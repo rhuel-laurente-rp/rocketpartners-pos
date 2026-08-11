@@ -19,36 +19,47 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Owns the two-step cash-tender flow.
+ * Owns the cash-tender flow. Three ways in, two of them one tap.
  *
  * <p><strong>Step one — mode choice.</strong> On {@link PosEventType#TENDER_CASH_PRESSED} the
  * controller opens {@link CashModeChoiceView}, seeded with the transaction's exact grand total
- * and its next-dollar rounded companion. Each button dispatches back with a
- * {@code prefillAmount} property: the exact grand total for {@link PosEventType#CASH_EXACT_PRESSED}
- * or the next-dollar amount for {@link PosEventType#CASH_NEXT_DOLLAR_PRESSED}.</p>
+ * and its next-dollar rounded companion.</p>
  *
- * <p><strong>Step two — enter and confirm.</strong> On either mode event the controller closes
- * the choice dialog and opens {@link PayWithCashView} with the mode-inflected amount due. That
- * amount <em>is</em> the pre-fill and is also the reference the entry dialog validates
- * against — one number, both jobs. The field stays fully editable so a $20 bill on a $17.70
- * basket is handled by typing over the pre-fill.</p>
+ * <p><strong>Exact Amount and Next Dollar tender immediately.</strong>
+ * {@link PosEventType#CASH_EXACT_PRESSED} settles the grand total in cash
+ * ({@link TransactionService#tenderCash(BigDecimal)} — two-arg tender, {@code amountDue} left
+ * null so it falls back to the grand total, change $0.00). {@link PosEventType#CASH_NEXT_DOLLAR_PRESSED}
+ * settles the ceiled amount via {@link TransactionService#payNextDollar()} (amountDue set to the
+ * ceiled figure, change $0.00). Neither opens the entry dialog — the mode choice is the whole
+ * interaction and the receipt follows directly. Choosing one asserts the customer handed over
+ * exactly that amount; a customer offering more goes through Other Amount.</p>
  *
- * <p><strong>Change semantics.</strong> Change is measured against the settled
- * grand-total-amount-due, not the raw grand total. A $7.30 basket rung up as Next Dollar has a
- * settled total of $8.00: hand over $20 and change is $12.00, not $12.70. The service records
- * the settled amount alongside the tender via
- * {@link TransactionService#tenderCash(BigDecimal, BigDecimal)}, so {@link Transaction#changeDue()}
- * returns the same figure the customer sees on-screen.</p>
+ * <p><strong>Other Amount opens the entry dialog.</strong> On
+ * {@link PosEventType#OTHER_CASH_AMOUNT_PRESSED} the controller opens {@link PayWithCashView}
+ * seeded with the grand total as the amount owed. The field is editable so the cashier keys
+ * what the customer handed over; {@link PosEventType#CASH_CONFIRM_PRESSED} validates and tenders
+ * via {@link TransactionService#tenderCash(BigDecimal)} — change is {@code cashReceived −
+ * grandTotal()}, measured against the true grand total, so overpayment change may include
+ * coins.</p>
  *
- * <p><strong>Cancel semantics.</strong> Cancel at either step closes the open dialog and
- * leaves the transaction {@link TransactionState#TOTALED} — re-tenderable via a fresh
- * {@code TENDER_CASH_PRESSED}, which restarts at step one. There is no Back affordance between
- * steps two and one; a wrong mode choice means cancelling and starting over.</p>
+ * <p><strong>Zero grand total is rejected on every path.</strong> A totalled empty basket would
+ * otherwise let a mis-tap complete a sale of nothing. {@link #tenderableTransaction()} rejects a
+ * grand total of $0.00 with an {@code INVALID_ARGUMENT} error rather than tendering — the last
+ * checkpoint before the terminal one-tap transitions.</p>
+ *
+ * <p><strong>Cancel vs Back.</strong> Cancel on the mode-choice dialog (or ESC on either dialog)
+ * dispatches {@link PosEventType#CASH_CANCEL_PRESSED} and abandons the flow: both dialogs close
+ * and the transaction stays {@link TransactionState#TOTALED}, re-tenderable. The entry dialog's
+ * footer button is <em>Back</em>, not Cancel: {@link PosEventType#CASH_ENTRY_BACK_PRESSED}
+ * returns to the mode choice without tendering, so a cashier who meant Exact Amount need not
+ * re-open Pay Cash. ESC on the entry dialog is the separate full-exit path. Cancelling or
+ * backing out at any point dispatches no tender event.</p>
  *
  * <p><strong>Journal.</strong> The dispatched events themselves feed {@link
- * com.rocketpartners.onboarding.possystem.component.JournalListener}: opening the flow, the
- * mode selected, the confirmed tender with change due, and cancellation at either step all
- * land on the wire without any explicit journal call here.</p>
+ * com.rocketpartners.onboarding.possystem.component.JournalListener}. For the one-tap modes both
+ * the mode-selection event (Exact / Next Dollar) and the {@link PosEventType#CASH_TENDERED}
+ * event (tender type, amount tendered, amountDue, change due) land on the wire, so the log shows
+ * which mode produced the tender even though selection and tender were a single action.</p>
  */
 public class PayWithCashViewController implements IController, IPosEventListener {
 
@@ -56,7 +67,9 @@ public class PayWithCashViewController implements IController, IPosEventListener
             PosEventType.TENDER_CASH_PRESSED,
             PosEventType.CASH_EXACT_PRESSED,
             PosEventType.CASH_NEXT_DOLLAR_PRESSED,
+            PosEventType.OTHER_CASH_AMOUNT_PRESSED,
             PosEventType.CASH_CONFIRM_PRESSED,
+            PosEventType.CASH_ENTRY_BACK_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED));
 
     private final CashModeChoiceView choiceView;
@@ -64,23 +77,22 @@ public class PayWithCashViewController implements IController, IPosEventListener
     private PosComponent parent;
 
     /**
-     * The transaction's grand total (tax included) at the moment the flow opened. The mode
-     * inflection is applied on top when step two opens. Cached at flow-open time so a stale
-     * confirm still validates against the amount the cashier saw on screen.
+     * The transaction's grand total (tax included) at the moment the flow opened. Cached so the
+     * mode-choice and entry dialogs stay stable across re-opens (Back), and so a stale confirm
+     * still validates against the amount the cashier saw on screen. Reset on tender or abandon.
      */
     private BigDecimal grandTotal;
 
     /**
-     * The mode-inflected amount the customer must pay — equal to {@link #grandTotal} for
-     * {@link PayWithCashView.Mode#EXACT}, or that total ceiling'd to the next whole dollar for
-     * {@link PayWithCashView.Mode#NEXT_DOLLAR}. This is what the entry dialog shows and what
-     * change is measured against.
+     * The amount the manual-entry (Other Amount) dialog validates against and measures change
+     * from — the grand total. Non-null only while the entry dialog is open. Change is
+     * {@code cashReceived − amountDue}, so Other Amount computes against the true grand total.
      */
     private BigDecimal amountDue;
 
     /**
-     * @param choiceView step-one modal; must not be {@code null}
-     * @param entryView  step-two modal; must not be {@code null}
+     * @param choiceView mode-choice modal; must not be {@code null}
+     * @param entryView  Other-Amount entry modal; must not be {@code null}
      */
     public PayWithCashViewController(CashModeChoiceView choiceView, PayWithCashView entryView) {
         if (choiceView == null) throw new IllegalArgumentException("choiceView must not be null");
@@ -118,44 +130,69 @@ public class PayWithCashViewController implements IController, IPosEventListener
     public void onPosEvent(PosEvent event) {
         switch (event.getType()) {
             case TENDER_CASH_PRESSED -> openChoice();
-            case CASH_EXACT_PRESSED -> openEntryFromMode(event, PayWithCashView.Mode.EXACT);
-            case CASH_NEXT_DOLLAR_PRESSED ->
-                    openEntryFromMode(event, PayWithCashView.Mode.NEXT_DOLLAR);
+            case CASH_EXACT_PRESSED -> tenderExact();
+            case CASH_NEXT_DOLLAR_PRESSED -> tenderNextDollar();
+            case OTHER_CASH_AMOUNT_PRESSED -> openEntry();
             case CASH_CONFIRM_PRESSED -> confirm(event);
+            case CASH_ENTRY_BACK_PRESSED -> backToChoice();
             case CASH_CANCEL_PRESSED -> cancel();
             default -> { /* not subscribed */ }
         }
     }
 
-    // ---- Handlers ---------------------------------------------------------
+    // ---- Step one: mode choice --------------------------------------------
 
     private void openChoice() {
-        BigDecimal total = currentGrandTotal();
-        if (total == null) return;
-        grandTotal = total.setScale(2, RoundingMode.HALF_UP);
+        Transaction tx = tenderableTransaction();
+        if (tx == null) return;
+        grandTotal = tx.grandTotal().setScale(2, RoundingMode.HALF_UP);
         choiceView.openFor(grandTotal, nextDollar(grandTotal));
     }
 
-    private void openEntryFromMode(PosEvent event, PayWithCashView.Mode mode) {
-        if (grandTotal == null) return;
-        BigDecimal prefill = event.getProperty("prefillAmount", BigDecimal.class);
-        if (prefill == null) {
-            // Defensive — mode events should always carry a prefill. Fall back to exact.
-            prefill = grandTotal;
+    // ---- One-tap tenders ---------------------------------------------------
+
+    private void tenderExact() {
+        Transaction tx = tenderableTransaction();
+        if (tx == null) return;
+        // Two-arg tenderCash leaves amountDue null; Transaction#amountDue() then falls back to
+        // grandTotal(), and change is grandTotal − grandTotal = $0.00.
+        BigDecimal exact = tx.grandTotal().setScale(2, RoundingMode.HALF_UP);
+        Transaction paid;
+        try {
+            paid = parent.getTransactionService().tenderCash(exact);
+        } catch (RuntimeException ex) {
+            return; // service already dispatched ERROR
         }
-        amountDue = prefill.setScale(2, RoundingMode.HALF_UP);
-        // Close the choice dialog before opening the entry dialog so exactly one modal is on
-        // screen at any time.
-        choiceView.closeDialog();
-        entryView.openFor(amountDue, mode);
+        completeCashTender(paid);
     }
 
-    /**
-     * Rounds up to the next whole dollar at scale 2. A whole-dollar input returns unchanged
-     * ($7.00 → $7.00), a fractional input rounds up ($7.30 → $8.00).
-     */
-    static BigDecimal nextDollar(BigDecimal amount) {
-        return amount.setScale(0, RoundingMode.CEILING).setScale(2);
+    private void tenderNextDollar() {
+        Transaction tx = tenderableTransaction();
+        if (tx == null) return;
+        // payNextDollar ceils the grand total, records that ceiled figure as both cash tendered
+        // and amountDue, and tenders it — change $0.00. Choosing this asserts the customer handed
+        // over exactly the ceiled amount; a larger bill goes through Other Amount.
+        Transaction paid;
+        try {
+            paid = parent.getTransactionService().payNextDollar();
+        } catch (RuntimeException ex) {
+            return; // service already dispatched ERROR
+        }
+        completeCashTender(paid);
+    }
+
+    // ---- Other Amount: entry + confirm ------------------------------------
+
+    private void openEntry() {
+        Transaction tx = tenderableTransaction();
+        if (tx == null) return;
+        grandTotal = tx.grandTotal().setScale(2, RoundingMode.HALF_UP);
+        // Other Amount owes the exact grand total; the entry dialog validates the keyed cash
+        // against it and measures change from it. Close the choice dialog first so exactly one
+        // modal is on screen.
+        amountDue = grandTotal;
+        choiceView.closeDialog();
+        entryView.openFor(amountDue, PayWithCashView.Mode.EXACT);
     }
 
     private void confirm(PosEvent event) {
@@ -188,43 +225,85 @@ public class PayWithCashViewController implements IController, IPosEventListener
 
         Transaction paid;
         try {
-            // Three-arg tender: record the settled amount alongside the cash presented so
-            // Transaction#changeDue() measures against the mode-inflected total.
-            paid = parent.getTransactionService().tenderCash(cashReceived, amountDue);
+            // Two-arg tenderCash: amountDue left null so change is measured against the grand
+            // total — an overpayment on Other Amount yields real change, coins included.
+            paid = parent.getTransactionService().tenderCash(cashReceived);
         } catch (RuntimeException ex) {
             entryView.showError("Tender rejected: " + ex.getMessage());
             return;
         }
+        completeCashTender(paid);
+    }
 
-        BigDecimal changeDue = paid.changeDue();
-        Map<String, Object> props = new HashMap<>();
-        props.put("transaction", paid);
-        props.put("tenderType", TenderType.CASH);
-        props.put("amountTendered", cashReceived);
-        props.put("amountDue", amountDue);
-        props.put("changeDue", changeDue);
-        parent.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED, props));
-        entryView.closeDialog();
-        grandTotal = null;
+    // ---- Navigation / cancel ----------------------------------------------
+
+    private void backToChoice() {
+        // Return to the mode choice without tendering. No tender event; transaction stays
+        // TOTALED. Re-seed from the cached grand total so the tiles show the same figures.
+        if (grandTotal == null) return;
         amountDue = null;
-        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED, props));
+        entryView.closeDialog();
+        choiceView.openFor(grandTotal, nextDollar(grandTotal));
     }
 
     private void cancel() {
-        // Cancel is fired by either dialog. Close both defensively — one will be a no-op — so
-        // no matter which step the cashier bailed at, the flow lands back on the totaled
-        // transaction with tender buttons live.
+        // Abandon the whole flow — Cancel on the choice dialog or ESC on either. Close both
+        // defensively (one is a no-op) so the lane lands back on the totaled transaction with
+        // tender buttons live. No tender event was or will be dispatched.
         choiceView.closeDialog();
         entryView.closeDialog();
         grandTotal = null;
         amountDue = null;
     }
 
+    // ---- Shared tender completion -----------------------------------------
+
+    /**
+     * Emits {@link PosEventType#CASH_TENDERED} and {@link PosEventType#TRANSACTION_COMPLETED} for
+     * a paid transaction, reading tender type, amount tendered, amountDue, and change due off the
+     * aggregate so all three paths report consistent figures. Closes both dialogs and clears the
+     * cached amounts.
+     */
+    private void completeCashTender(Transaction paid) {
+        Map<String, Object> props = new HashMap<>();
+        props.put("transaction", paid);
+        props.put("tenderType", TenderType.CASH);
+        props.put("amountTendered", paid.getCashTendered());
+        props.put("amountDue", paid.amountDue());
+        props.put("changeDue", paid.changeDue());
+
+        choiceView.closeDialog();
+        entryView.closeDialog();
+        grandTotal = null;
+        amountDue = null;
+        parent.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDERED, props));
+        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED, props));
+    }
+
     // ---- helpers ----------------------------------------------------------
 
-    private BigDecimal currentGrandTotal() {
+    /**
+     * Rounds up to the next whole dollar at scale 2. A whole-dollar input returns unchanged
+     * ($7.00 → $7.00), a fractional input rounds up ($7.30 → $8.00).
+     */
+    static BigDecimal nextDollar(BigDecimal amount) {
+        return amount.setScale(0, RoundingMode.CEILING).setScale(2);
+    }
+
+    /**
+     * @return the current transaction if it is present and has a positive grand total; otherwise
+     *         {@code null}. A zero grand total is rejected with an {@code INVALID_ARGUMENT} error
+     *         so a totalled empty basket can never be tendered — the guard that keeps a mis-tap
+     *         from completing a sale of nothing.
+     */
+    private Transaction tenderableTransaction() {
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
-        return tx == null ? null : tx.grandTotal();
+        if (tx == null) return null; // nothing open; service would reject any tender too
+        if (tx.grandTotal().signum() <= 0) {
+            dispatchTenderError("INVALID_ARGUMENT", "cannot tender a zero-total transaction");
+            return null;
+        }
+        return tx;
     }
 
     private void dispatchTenderError(String code, String message) {
