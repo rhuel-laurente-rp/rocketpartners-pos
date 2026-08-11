@@ -75,8 +75,9 @@ public enum PosEventType {
 
     /**
      * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
-     * dialog (step one of the two-step cash flow). Actual tender waits for
-     * {@link #CASH_CONFIRM_PRESSED} in step two.
+     * dialog. From there {@link #CASH_EXACT_PRESSED} and {@link #CASH_NEXT_DOLLAR_PRESSED} tender
+     * immediately (one tap, straight to the receipt); only {@link #OTHER_CASH_AMOUNT_PRESSED}
+     * opens the amount-entry dialog and defers tender to {@link #CASH_CONFIRM_PRESSED}.
      */
     TENDER_CASH_PRESSED,
 
@@ -87,31 +88,48 @@ public enum PosEventType {
     TENDER_CREDIT_PRESSED,
 
     /**
-     * The Exact Amount button on the cash-mode-choice dialog was pressed. Input event; carries
-     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total) that the
-     * entry dialog is opened with pre-filled. Does not tender; the cashier still has to confirm
-     * the amount in step two.
+     * The Exact Amount tile on the cash-mode-choice dialog was pressed. Input event; carries a
+     * {@code prefillAmount} property (BigDecimal, the transaction's grand total) for journalling
+     * which mode produced the tender. <strong>Tenders immediately</strong> — the controller
+     * settles the grand total in cash and goes straight to the receipt, no entry dialog.
      */
     CASH_EXACT_PRESSED,
 
     /**
-     * The Next Dollar button on the cash-mode-choice dialog was pressed. Input event; carries
-     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total rounded up
-     * to the next whole dollar) that the entry dialog is opened with pre-filled. Does not
-     * tender.
+     * The Next Dollar tile on the cash-mode-choice dialog was pressed. Input event; carries a
+     * {@code prefillAmount} property (BigDecimal, the grand total rounded up to the next whole
+     * dollar) for journalling. <strong>Tenders immediately</strong> — the controller settles the
+     * ceiled amount in cash (change $0.00) and goes straight to the receipt, no entry dialog.
      */
     CASH_NEXT_DOLLAR_PRESSED,
 
     /**
-     * The Confirm button on the cash dialog was pressed. Input event; carries the raw
-     * {@code cashReceived} string entered by the cashier for the controller to validate.
+     * The Other Amount button on the cash-mode-choice dialog was pressed. Input event; no
+     * meaningful properties (the amount is unknown until typed). Opens the amount-entry dialog
+     * so the cashier can key what the customer actually handed over; tender is deferred to
+     * {@link #CASH_CONFIRM_PRESSED}, and change is computed against the true grand total.
+     */
+    OTHER_CASH_AMOUNT_PRESSED,
+
+    /**
+     * The Confirm button on the cash-entry dialog was pressed (Other Amount path only). Input
+     * event; carries the raw {@code cashReceived} string entered by the cashier for the
+     * controller to validate.
      */
     CASH_CONFIRM_PRESSED,
 
     /**
-     * The Cancel button on either cash dialog (mode-choice or entry) was pressed. Input event;
-     * no properties. Closes both dialogs; the transaction remains {@code TOTALED} and
-     * re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}.
+     * The Back button on the cash-entry dialog was pressed. Input event; no properties. Returns
+     * to the mode-choice dialog without tendering — the cashier who meant Exact or Next Dollar
+     * need not re-open Pay Cash. The transaction stays {@code TOTALED}.
+     */
+    CASH_ENTRY_BACK_PRESSED,
+
+    /**
+     * The cash flow was abandoned entirely — Cancel on the mode-choice dialog, or ESC on either
+     * cash dialog. Input event; no properties. Closes both dialogs; the transaction remains
+     * {@code TOTALED} and re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}. Dispatches no
+     * tender event.
      */
     CASH_CANCEL_PRESSED,
 
@@ -157,8 +175,10 @@ public enum PosEventType {
     TRANSACTION_TOTALED,
 
     /**
-     * Cash tender recorded. Carries {@code amountTendered} (BigDecimal, cash presented) and
-     * {@code changeDue} (BigDecimal, change owed to the customer) properties.
+     * Cash tender recorded. Carries {@code tenderType} (TenderType, always CASH),
+     * {@code amountTendered} (BigDecimal, cash presented), {@code amountDue} (BigDecimal, the
+     * settled amount the customer owed — the grand total, or the ceiled figure for Next Dollar),
+     * and {@code changeDue} (BigDecimal, change owed to the customer) properties.
      */
     CASH_TENDERED,
 

@@ -264,6 +264,30 @@ public class Transaction {
     }
 
     /**
+     * Cash tender using the Next Dollar shortcut. Ceils {@link #grandTotal()} up to the next
+     * whole dollar, records that ceiled figure as <em>both</em> the cash tendered and the
+     * settled {@link #amountDue}, and moves to {@link TransactionState#PAID}. Terminal.
+     *
+     * <p>Because tendered equals amountDue, {@link #changeDue()} is exactly zero — the cashier
+     * hands back no coins. On a $17.70 basket the amount due becomes $18.00, the customer pays
+     * $18.00, and change is $0.00.</p>
+     *
+     * <p><strong>What this asserts.</strong> Calling this commits to the customer having handed
+     * over exactly the ceiled amount. It is a single, immediate action with no intermediate
+     * entry step — a customer offering a larger bill (e.g. $20.00 on a $17.70 basket) must be
+     * handled through the manual cash-entry path instead, where change is computed against the
+     * true grand total. The ceiled figure is always {@code >= grandTotal()}, so the settled
+     * amount can never underpay.</p>
+     *
+     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
+     */
+    public void payNextDollar() {
+        requireState("payNextDollar", TransactionState.TOTALED);
+        BigDecimal ceiled = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2, RoundingMode.HALF_UP);
+        tender(TenderType.CASH, ceiled, ceiled);
+    }
+
+    /**
      * Sum of {@link LineItem#extendedTotal()} across all non-voided line items. Not rounded.
      *
      * @return the raw subtotal; never {@code null}

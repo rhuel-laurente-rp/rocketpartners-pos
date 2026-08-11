@@ -58,14 +58,16 @@ Every constant on `PosEventType` appears below, grouped by phase of the sale.
 | --- | --- | --- |
 | `TOTAL_PRESSED` | `CustomerView` → `CustomerViewController` | Freezes the basket. |
 | `TRANSACTION_TOTALED` | `CustomerViewController` → all listeners | Basket is finalised; tender is next. |
-| `TENDER_CASH_PRESSED` | `CustomerView` → `PayWithCashViewController` | Opens `CashModeChoiceView`. |
-| `CASH_EXACT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Carries `prefillAmount` = grand total. Opens `PayWithCashView` pre-filled. |
-| `CASH_NEXT_DOLLAR_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Carries `prefillAmount` = grand total ceiled to the next dollar. |
-| `CASH_CONFIRM_PRESSED` | `PayWithCashView` → `PayWithCashViewController` | Carries raw `cashReceived` string. Controller validates and dispatches `CASH_TENDERED` on success, `ERROR` (`INVALID_CASH_AMOUNT` / `UNDERPAYMENT`) on failure. |
-| `CASH_CANCEL_PRESSED` | Either cash dialog → `PayWithCashViewController` | Closes both dialogs; transaction stays `TOTALED` and re-tenderable. |
+| `TENDER_CASH_PRESSED` | `CustomerView` → `PayWithCashViewController` | Opens `CashModeChoiceView`. Rejected with `INVALID_ARGUMENT` if the grand total is $0.00. |
+| `CASH_EXACT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | **Tenders immediately** — settles the grand total in cash (change $0.00) and goes straight to the receipt. No entry dialog. `prefillAmount` carried only for journalling which mode produced the tender. |
+| `CASH_NEXT_DOLLAR_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | **Tenders immediately** via `Transaction.payNextDollar()` — settles the ceiled amount (change $0.00). No entry dialog. Disabled on whole-dollar totals. |
+| `OTHER_CASH_AMOUNT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens `PayWithCashView` seeded with the grand total. The only path through the entry dialog; tender deferred to `CASH_CONFIRM_PRESSED`. |
+| `CASH_CONFIRM_PRESSED` | `PayWithCashView` → `PayWithCashViewController` | Other Amount path only. Carries raw `cashReceived` string; change is `cashReceived − grandTotal()`. Controller validates and dispatches `CASH_TENDERED` on success, `ERROR` (`INVALID_CASH_AMOUNT` / `UNDERPAYMENT`) on failure. |
+| `CASH_ENTRY_BACK_PRESSED` | `PayWithCashView` → `PayWithCashViewController` | Back button on the entry dialog: returns to `CashModeChoiceView` without tendering. |
+| `CASH_CANCEL_PRESSED` | Cancel on the mode choice, or ESC on either dialog → `PayWithCashViewController` | Abandons the flow; closes both dialogs; transaction stays `TOTALED` and re-tenderable. No tender event. |
 | `TENDER_DEBIT_PRESSED` | `CustomerView` → `PayWithCardViewController` | Opens `PayWithCardView`, schedules simulated approval off the EDT. |
 | `TENDER_CREDIT_PRESSED` | `CustomerView` → `PayWithCardViewController` | As above. |
-| `CASH_TENDERED` | `PayWithCashViewController` → all listeners | Carries `amountTendered`, `changeDue`. |
+| `CASH_TENDERED` | `PayWithCashViewController` → all listeners | Carries `tenderType`, `amountTendered`, `amountDue`, `changeDue`. |
 | `CARD_TENDERED` | `PayWithCardViewController` → all listeners | Carries `amountTendered` (= grand total), `changeDue` (= zero), `tenderType` (DEBIT or CREDIT). |
 | `TRANSACTION_COMPLETED` | Tender controller → `ReceiptViewController` (and all listeners) | Carries the paid `transaction`, `tenderType`, `amountTendered`, `changeDue`. Consumers render the receipt. |
 

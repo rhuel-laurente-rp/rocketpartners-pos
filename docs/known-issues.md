@@ -12,7 +12,7 @@ Severity is the impact if the code path fires, not how easy it is to reach. Seve
 The three-argument tender overload writes whatever `amountDue` is passed in, no comparison against `grandTotal()`. If a caller ever passed a settled amount below the grand total, `changeDue()` would still compute positive change: an underpayment silently framed as change owed.
 
 - **Severity:** medium — this contradicts the aggregate's own claim in its Javadoc that state-machine and money invariants live here rather than in callers.
-- **Reachable today?** No. The three-argument overload has two callers: `payNextDollar()` which passes the ceiled figure, and `TransactionService.tenderCash(BigDecimal, BigDecimal)` — itself only called by `PayWithCashViewController`, which validates that cash received ≥ grand total upstream.
+- **Reachable today?** No. The three-argument overload's callers all pass an `amountDue` at or above the grand total: `Transaction.payNextDollar()` passes the ceiled figure (always ≥ grand total), and `TransactionService.tenderCash(BigDecimal, BigDecimal)` — reached from `PayWithCashViewController`'s Other Amount path, which validates that cash received ≥ grand total upstream. (`payNextDollar()` is no longer dead code: the restructured cash flow puts it on the live path — Next Dollar tenders through it directly.)
 - **Disposition:** add the guard; do not fix on a doc branch. Reject with `IllegalArgumentException` (or an ERROR event) rather than trying to salvage the tender — a caller that reaches this branch is asking the wrong question.
 - **Suggested branch:** `fix/transaction-guard-amount-due`.
 

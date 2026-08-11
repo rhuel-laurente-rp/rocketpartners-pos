@@ -201,9 +201,9 @@ class PayWithCashViewTest {
     // ---- Footer button parity -------------------------------------------
 
     @Test
-    void confirmAndCancel_reportIdenticalSizes() {
+    void confirmAndBack_reportIdenticalSizes() {
         assertThat(view.getConfirmButtonForTest().getPreferredSize())
-                .isEqualTo(view.getCancelButtonForTest().getPreferredSize());
+                .isEqualTo(view.getBackButtonForTest().getPreferredSize());
     }
 
     // ---- Title/header parity --------------------------------------------
@@ -221,14 +221,27 @@ class PayWithCashViewTest {
         assertThat(view.getHeaderAmountLabelForTest().getText()).isEqualTo("$7.30");
     }
 
-    // ---- Cancel ---------------------------------------------------------
+    // ---- Back (returns to mode choice; ESC is the separate full-exit) ---
 
     @Test
-    void cancelClick_dispatchesCancelEvent() throws Exception {
+    void backClick_dispatchesBackEvent_notCancelOrConfirm() throws Exception {
         openWith("7.30", "7.30");
-        SwingUtilities.invokeAndWait(() -> view.getCancelButtonForTest().doClick());
-        assertThat(dispatcher.eventsOf(PosEventType.CASH_CANCEL_PRESSED)).hasSize(1);
+        SwingUtilities.invokeAndWait(() -> view.getBackButtonForTest().doClick());
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_ENTRY_BACK_PRESSED)).hasSize(1);
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_CANCEL_PRESSED)).isEmpty();
         assertThat(dispatcher.eventsOf(PosEventType.CASH_CONFIRM_PRESSED)).isEmpty();
+    }
+
+    @Test
+    void escAction_dispatchesCancelEvent_soThereIsASeparateWayOut() throws Exception {
+        openWith("7.30", "7.30");
+        // ESC is wired to the dialog's cancel action (full abandon), distinct from Back. PosDialog
+        // installs it on the content pane's action map.
+        SwingUtilities.invokeAndWait(() ->
+                ((javax.swing.JComponent) view.getContentPane())
+                        .getActionMap().get("cancel").actionPerformed(null));
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_CANCEL_PRESSED)).hasSize(1);
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_ENTRY_BACK_PRESSED)).isEmpty();
     }
 
     // ---- helpers --------------------------------------------------------

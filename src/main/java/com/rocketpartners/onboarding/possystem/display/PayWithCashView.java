@@ -30,10 +30,17 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Modal cash-entry-and-confirm dialog: {@link PosDialog}-shelled, register-shaped. This is
- * dialog two of the two-step cash flow — {@link CashModeChoiceView} is dialog one, and its
- * mode choice decides both what the cash-received field is pre-filled with and how the amount
- * due is described in the body.
+ * Modal cash-entry-and-confirm dialog: {@link PosDialog}-shelled, register-shaped. This is the
+ * <em>Other Amount</em> step of the cash flow — reached only when the cashier picks Other Amount
+ * on {@link CashModeChoiceView} rather than the two terminal one-tap tiles. The cashier keys
+ * what the customer handed over; change is computed against the true grand total.
+ *
+ * <p><strong>Back, not Cancel — and a separate way out.</strong> The footer secondary is
+ * labelled <em>Back</em>: it dispatches {@link PosEventType#CASH_ENTRY_BACK_PRESSED}, returning
+ * to the mode choice without tendering, so a cashier who meant Exact Amount need not re-open Pay
+ * Cash. Because Back is a sub-step navigation rather than a full exit, ESC is wired separately to
+ * {@link PosEventType#CASH_CANCEL_PRESSED} — the way to abandon the cash flow entirely from here.
+ * Either way, no tender event is dispatched and the transaction stays re-tenderable.</p>
  *
  * <p><strong>Body layout, top to bottom:</strong></p>
  * <ol>
@@ -110,7 +117,7 @@ public class PayWithCashView extends PosDialog {
     private final JFormattedTextField cashReceivedField;
     private final JLabel statusLine = new JLabel(" ");
     private final PosButton confirmButton;
-    private final PosButton cancelButton;
+    private final PosButton backButton;
 
     /** Single shared filter instance; reused across document swaps. */
     private final MoneyFilter moneyFilter = new MoneyFilter(MAX_INPUT_LENGTH);
@@ -132,15 +139,18 @@ public class PayWithCashView extends PosDialog {
 
         this.cashReceivedField = buildCashField();
         this.confirmButton = PosButtons.primary("Confirm Payment");
-        this.cancelButton = PosButtons.danger("Cancel");
+        this.backButton = PosButtons.secondary("Back");
 
         setBody(buildBody());
 
         confirmButton.addActionListener(e -> onConfirm());
         setPrimary(confirmButton);
 
-        cancelButton.addActionListener(e -> fireCancel());
-        addSecondary(cancelButton);
+        // Back returns to the mode choice (a sub-step navigation, no tender). ESC is wired
+        // separately to full abandon (CASH_CANCEL_PRESSED) so the cashier still has a way out of
+        // the whole flow from here — see the class Javadoc.
+        backButton.addActionListener(e -> fireBack());
+        addSecondary(backButton);
         setCancelAction(this::fireCancel);
         setInitialFocus(cashReceivedField);
 
@@ -224,6 +234,12 @@ public class PayWithCashView extends PosDialog {
         dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CASH_CONFIRM_PRESSED, props));
     }
 
+    /** Back: return to the mode choice without tendering. */
+    private void fireBack() {
+        dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CASH_ENTRY_BACK_PRESSED));
+    }
+
+    /** ESC: abandon the cash flow entirely. */
     private void fireCancel() {
         dispatcher.dispatchPosEvent(new PosEvent(PosEventType.CASH_CANCEL_PRESSED));
     }
@@ -319,8 +335,8 @@ public class PayWithCashView extends PosDialog {
         return confirmButton;
     }
 
-    PosButton getCancelButtonForTest() {
-        return cancelButton;
+    PosButton getBackButtonForTest() {
+        return backButton;
     }
 
     // ---- Layout -----------------------------------------------------------
@@ -411,12 +427,12 @@ public class PayWithCashView extends PosDialog {
 
     private void matchFooterButtonSizes() {
         Dimension confirmPref = confirmButton.getPreferredSize();
-        Dimension cancelPref = cancelButton.getPreferredSize();
+        Dimension backPref = backButton.getPreferredSize();
         Dimension shared = new Dimension(
-                Math.max(confirmPref.width, cancelPref.width),
-                Math.max(confirmPref.height, cancelPref.height));
+                Math.max(confirmPref.width, backPref.width),
+                Math.max(confirmPref.height, backPref.height));
         confirmButton.setPreferredSize(shared);
-        cancelButton.setPreferredSize(shared);
+        backButton.setPreferredSize(shared);
     }
 
     /** Refreshes the status strip on every document mutation. */

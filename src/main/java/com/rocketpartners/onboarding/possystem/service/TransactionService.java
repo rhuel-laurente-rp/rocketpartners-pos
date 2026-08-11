@@ -350,6 +350,33 @@ public class TransactionService {
     }
 
     /**
+     * Records a cash tender using the Next Dollar shortcut. Delegates to
+     * {@link Transaction#payNextDollar()}: the current transaction's grand total is ceiled up to
+     * the next whole dollar, that ceiled figure is recorded as both the cash presented and the
+     * settled amount due (so {@link Transaction#changeDue()} is zero), and the transaction
+     * transitions to {@link TransactionState#PAID}. The "current" slot is released.
+     *
+     * @return the paid transaction
+     * @throws IllegalStateException if no transaction is open, or it is not
+     *                               {@link TransactionState#TOTALED}
+     */
+    public Transaction payNextDollar() {
+        requireCurrentTransaction("payNextDollar");
+        Transaction tx = currentTransaction;
+        try {
+            tx.payNextDollar();
+        } catch (IllegalStateException e) {
+            dispatchError("TOTALED_INVARIANT", e.getMessage(), e, "operation", "payNextDollar");
+            throw e;
+        } catch (IllegalArgumentException e) {
+            dispatchError("INVALID_ARGUMENT", e.getMessage(), e, "operation", "payNextDollar");
+            throw e;
+        }
+        currentTransaction = null;
+        return tx;
+    }
+
+    /**
      * Records a card tender (debit or credit). The caller is responsible for passing an amount
      * equal to {@link Transaction#grandTotal()} — cards do not produce change. The current
      * transaction transitions to {@link TransactionState#PAID} and the "current" slot is released.
