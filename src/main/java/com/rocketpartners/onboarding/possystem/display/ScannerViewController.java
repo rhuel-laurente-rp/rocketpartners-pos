@@ -455,20 +455,25 @@ public class ScannerViewController implements IController, IPosEventListener {
         switch (event.getType()) {
             case SCAN_SUBMIT_PRESSED -> handleManualSubmit(event);
 
-            // Suspend while modals are up. Card modal opens on TENDER_*_PRESSED; the modal
-            // closes when the payment completes (CASH_TENDERED / CARD_TENDERED). The
-            // change-qty dialog opens on CHANGE_QTY_PRESSED and closes on the confirm/cancel
-            // events.
+            // Modal opens → suspend capture so a scanner burst can't leak into the modal or ring
+            // up against a transaction that's mid-tender or already paid. The cash/card tender
+            // modals open on TENDER_*_PRESSED; the change-qty dialog on CHANGE_QTY_PRESSED; the
+            // void-basket confirm on VOID_BASKET_PRESSED; and the receipt modal on
+            // TRANSACTION_COMPLETED (payment done, currentTransaction already released).
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
                  CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
-                 TRANSACTION_COMPLETED -> resumeCapture();
+                 TRANSACTION_COMPLETED -> suspendCapture();
+            // Modal closes → resume capture. Tender modals close on completion/cancel
+            // (CASH_TENDERED / CARD_TENDERED / *_CANCELLED); the change-qty and void-basket
+            // dialogs on their confirm/cancel/decline events.
             case CASH_CANCEL_PRESSED, CARD_TENDER_CANCELLED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
-            // Receipt dismissal semantically starts a fresh sale: force unlocked
-            // unconditionally, independent of the transaction-state check resumeCapture
-            // uses, so a lingering TOTALED state (or a late TRANSACTION_COMPLETED handler
-            // firing after this) cannot leave the scan bar showing the locked hint.
+            // Receipt dismissal closes the receipt modal and semantically starts a fresh sale:
+            // resume capture and force unlocked unconditionally, independent of the
+            // transaction-state check resumeCapture uses, so a lingering TOTALED state (or a late
+            // TRANSACTION_COMPLETED handler firing after this) cannot leave the scan bar showing
+            // the locked hint.
             case RECEIPT_DISMISSED -> resumeReady();
 
             case TRANSACTION_TOTALED -> view.setLocked(true);
@@ -565,6 +570,19 @@ public class ScannerViewController implements IController, IPosEventListener {
             default -> { /* not a scan-bar concern — ErrorPopupViewController handles it */ }
         }
         restoreScanFocus();
+    }
+
+    /**
+     * Suspends burst capture while a modal dialog is open. Sets the {@link #suspended} flag —
+     * which makes {@link #onKeyEvent(KeyEvent)} drop buffered input and pass keystrokes through
+     * to the modal — and clears any in-flight burst. Deliberately does not touch focus or the
+     * locked hint: the modal owns focus, and the lock state is restored on the matching resume.
+     */
+    private void suspendCapture() {
+        suspended = true;
+        cancelStaleFlush();
+        heldDigits.setLength(0);
+        buffer.reset();
     }
 
     private void resumeCapture() {

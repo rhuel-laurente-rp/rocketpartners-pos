@@ -22,9 +22,9 @@ import java.util.Map;
  * Modal void-basket confirmation dialog: {@link PosDialog}-shelled, matches
  * {@link ChangeQuantityView} conventions in structure and footer.
  *
- * <p><strong>Vocabulary discipline.</strong> "Void basket" ends the transaction; a dialog's
+ * <p><strong>Vocabulary discipline.</strong> "Void Basket" ends the transaction; a dialog's
  * "Cancel" only dismisses. The two words mean different things and are kept apart on purpose,
- * so this dialog names its secondary button {@code Keep basket} rather than {@code Cancel} —
+ * so this dialog names its secondary button {@code Keep Basket} rather than {@code Cancel} —
  * a cashier who mis-taps and reaches for a familiar Cancel button must never lose a basket.</p>
  *
  * <p><strong>Footer.</strong> Positional order matches {@link ChangeQuantityView} — the danger
@@ -33,9 +33,9 @@ import java.util.Map;
  *
  * <p><strong>Keyboard defaults are deliberately inverted.</strong> Every other dialog in the
  * POS makes the primary (affirmative) action the keyboard default. This dialog is the single
- * exception: Void basket keeps the danger-styled primary slot on the right so the layout is
+ * exception: Void Basket keeps the danger-styled primary slot on the right so the layout is
  * predictable, but initial focus, the root pane's default button, and ESC all point at
- * {@code Keep basket}. A destructive action must not fire from a stray Enter or a barcode
+ * {@code Keep Basket}. A destructive action must not fire from a stray Enter or a barcode
  * scanner's terminator keystroke — the only path to a void is a deliberate tap on the danger
  * button. Without this inversion the dialog would look identical to every other one and read
  * like an oversight in review.</p>
@@ -67,12 +67,12 @@ public class VoidBasketConfirmView extends PosDialog {
      * @param dispatcher target for view-input events; must not be {@code null}
      */
     public VoidBasketConfirmView(JFrame owner, IPosEventDispatcher dispatcher) {
-        super(owner, "Void basket?");
+        super(owner, "Void Basket?");
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         this.dispatcher = dispatcher;
 
-        this.voidButton = PosButtons.danger("Void basket");
-        this.keepButton = PosButtons.secondary("Keep basket");
+        this.voidButton = PosButtons.danger("Void Basket");
+        this.keepButton = PosButtons.secondary("Keep Basket");
 
         setBody(buildBody());
 

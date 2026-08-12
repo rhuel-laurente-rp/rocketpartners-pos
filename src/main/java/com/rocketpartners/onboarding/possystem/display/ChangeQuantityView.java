@@ -73,9 +73,12 @@ import java.util.Map;
  * <p>{@code TransactionService} keeps validating independently. This dialog making bad input
  * unreachable is a convenience for the cashier, not the guarantee the domain relies on.</p>
  *
- * <p>Copy is sentence case throughout — title, body, field label, validation message, and both
- * button labels. Uppercase eyebrow rules on {@code PosTheme.EYEBROW} labels come from the
- * theme's font and tracking, not from capitalising the string.</p>
+ * <p>Copy follows the app-wide convention: the dialog title ({@code Change Quantity}) and both
+ * button labels ({@code Confirm Change}, {@code Cancel}) are Title Case, enforced by
+ * {@code ButtonLabelTitleCaseTest}. Body copy, the field eyebrow, and the validation message
+ * stay sentence case — they are prose, not action labels. Uppercase eyebrow rendering on
+ * {@code PosTheme.EYEBROW} labels comes from the theme's font and tracking, not from
+ * capitalising the string.</p>
  */
 public class ChangeQuantityView extends PosDialog {
 
