@@ -29,13 +29,10 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
-import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
@@ -43,7 +40,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,19 +47,22 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * The customer-facing basket screen: a dumb Swing renderer laid out as a three-column POS shell.
+ * The customer-facing basket screen: a dumb Swing renderer laid out as a two-column proportional
+ * POS shell.
  *
- * <p>Columns, left to right, weighted 30/46/24 rather than equal thirds — the basket is still
- * what the cashier reads, but the quick-add grid now carries 16 tiles and needs a bit more
- * width so the top-line product name doesn't ellipsize:</p>
+ * <p>The window is a fixed 1512×982 non-resizable surface, so the layout is proportional, not
+ * responsive: every split is an exact fraction via {@link ProportionalLayout}. Four nesting
+ * levels — content width 30/70, each column 80/20, and the bottom-right row 60/40:</p>
  * <ul>
- *   <li><strong>Quick Add.</strong> Fixed-height tiles in a scrolling two-column grid; each
- *       dispatches a {@link PosEventType#QUICK_ADD_PRESSED} event carrying its bound UPC.</li>
- *   <li><strong>Basket.</strong> North: scan-bar mount point. Center: line-item list, or an
- *       empty-state prompt when the basket is clear. South: summary tape (subtotal, discount,
- *       tax, total) above the basket actions — sticky, never scrolls with the list.</li>
- *   <li><strong>Tender.</strong> Amount due, then {@code Pay Cash}, {@code Pay Debit},
- *       {@code Pay Credit}. Disabled until Total is pressed.</li>
+ *   <li><strong>Left 30%.</strong> Top 80%: the <strong>Basket</strong> — scan-bar mount point
+ *       above the line-item list (or an empty-state prompt). Bottom 20%: the <strong>Summary</strong>
+ *       tape — Subtotal, Discount, Tax, then the large TOTAL.</li>
+ *   <li><strong>Right 70%.</strong> Top 80%: <strong>Quick Add</strong> — a searchable, sortable,
+ *       paged grid of tiles over the whole pricebook (see {@link QuickAddPanel}), each dispatching
+ *       a {@link PosEventType#QUICK_ADD_PRESSED} event carrying its bound UPC. Bottom 20%: split
+ *       60/40 into <strong>Actions</strong> — one row of five tall buttons: Void Basket, Void Line,
+ *       Change Qty, Discount, Total — and <strong>Payment</strong> — one row of three: Pay Cash,
+ *       Pay Debit, Pay Credit (disabled until Total is pressed).</li>
  * </ul>
  *
  * <p>All palette and type tokens live in {@link PosTheme}; button variants in {@link PosButtons}.
@@ -79,25 +78,40 @@ import java.util.Objects;
 public class CustomerView extends JFrame {
 
     // ---- Window sizing -----------------------------------------------------
-    // The POS runs full-screen on the register hardware. Opening maximized (rather than at a
-    // fixed size) lets the same build ship to laptops, external monitors, or a kiosk without a
-    // magic-number swap per environment. Resizing stays off so the cashier can't accidentally
-    // drag the frame into a shape the layout wasn't designed for. Layout is proportional
-    // (GridBagLayout weights, not pixel widths), so it scales down cleanly on small displays.
-    // FALLBACK_* is used only in headless test harnesses and as the pre-maximize preferred size
-    // so the frame reports a sane bounds before the WM extends it.
-    private static final int FALLBACK_WIDTH = 1512;
-    private static final int FALLBACK_HEIGHT = 944;
+    // The POS terminal is a fixed 1512×982 register display. The window opens at exactly that
+    // size and is non-resizable — the cashier can't drag it into a shape the layout wasn't
+    // designed for. Because the surface never changes size, the shell is *proportional*, not
+    // responsive: every split is an exact fraction of the available space (see
+    // {@link ProportionalLayout}), with no breakpoints and no reflow. GridBagLayout weights can't
+    // express that — they distribute only the surplus left after preferred sizes are met — so the
+    // nesting here is ProportionalLayout the whole way down.
+    private static final int WINDOW_WIDTH = 1512;
+    private static final int WINDOW_HEIGHT = 982;
 
-    private static final int QUICK_ADD_COLS = 2;
-    private static final int QUICK_ADD_TILE_HEIGHT = 92;
-    private static final int GUTTER = 10;
-    /** Gap between the amount-due readout and the tender stack. Sized to breathe, not to
-     *  minimise; the tender buttons carry the column now. */
-    private static final int TENDER_TOP_GAP = 20;
-    /** Vertical gap between the three tender buttons. Larger than the standard button gap
-     *  because these are the biggest targets in the app and shouldn't crowd each other. */
-    private static final int TENDER_VERTICAL_GAP = 14;
+    /** Padding inside the content area, between the window edge and the outer columns. */
+    private static final int OUTER_PAD = 12;
+    /** Gap between adjacent cards (columns, rows, and the actions/payment split). */
+    private static final int CARD_GAP = 12;
+
+
+    // ---- Proportional split fractions --------------------------------------
+    /** Left column (basket + summary) share of the content width. */
+    private static final float LEFT_FRACTION = 0.30f;
+    /** Right column (quick add + actions/payment) share of the content width. */
+    private static final float RIGHT_FRACTION = 0.70f;
+    /** Basket / Quick Add share of a column's height; the summary / bottom row take the rest. */
+    private static final float TOP_ROW_FRACTION = 0.80f;
+    private static final float BOTTOM_ROW_FRACTION = 0.20f;
+    /** Actions share of the bottom-right row; Payment takes the rest. Payment is the terminal
+     *  action and carries more visual weight than a single edit control, so tender buttons come
+     *  out wider than action buttons at this split. */
+    private static final float ACTIONS_FRACTION = 0.60f;
+    private static final float PAYMENT_FRACTION = 0.40f;
+
+    /** Bottom padding beneath the actions/payment row, matched to {@link #OUTER_PAD} so the
+     *  window inset reads as uniform. A control flush to the panel edge is measurably harder to
+     *  hit on a touchscreen — the bezel interferes with the finger's approach angle. */
+    private static final int BOTTOM_ROW_PAD = 12;
 
     // ---- Density animation -------------------------------------------------
     /** Duration of the row-height glide between Comfortable and Compact. */
@@ -139,9 +153,17 @@ public class CustomerView extends JFrame {
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
 
-    private final List<PosButton> quickAddButtons = new ArrayList<>();
-    private final PosButton changeQtyButton = PosButtons.secondary("Change Quantity");
+    /** The Quick Add card body: search + sort + paged tile grid over the whole pricebook. */
+    private QuickAddPanel quickAddPanel;
+    // "Change Qty" rather than the dialog's full "Change Quantity": five buttons now share the
+    // actions strip, so the label is shortened to fit its narrower target while the dialog title
+    // stays "Change Quantity".
+    private final PosButton changeQtyButton = PosButtons.secondary("Change Qty");
     private final PosButton voidLineButton = PosButtons.secondary("Void Line");
+    // Discount lives in the actions row but is disabled: applying a discount mid-transaction is a
+    // domain change (see PosEventType#DISCOUNT_PRESSED) scheduled for feature/in-progress-discounts.
+    // The button and its listener are wired so the slot is real; it never fires while disabled.
+    private final PosButton discountButton = PosButtons.secondary("Discount");
     private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
@@ -172,9 +194,19 @@ public class CustomerView extends JFrame {
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
 
-    /** Reference to the built tender column, kept so tests and the snapshot harness can render
-     *  the column standalone without cropping the whole frame. Assigned during layout. */
-    private JPanel tenderColumn;
+    /** The bottom-right payment card (Pay Cash + Debit/Credit). Kept so tests and the snapshot
+     *  harness can render it standalone without cropping the whole frame. Assigned during layout. */
+    private JPanel paymentPanel;
+
+    // ---- Layout containers (test hooks) ------------------------------------
+    // The proportional split containers, retained so layout tests can assert the exact 30/70,
+    // 80/20, and 70/30 divisions without walking the whole component tree.
+    private JPanel columnsRow;   // horizontal: left 30% | right 70%
+    private JPanel leftColumn;   // vertical: basket 80% / summary 20%
+    private JPanel rightColumn;  // vertical: quick add 80% / bottom row 20%
+    private JPanel bottomRow;    // horizontal: actions 70% | payment 30%
+    private JPanel actionsPanel; // actions card (four buttons + Total)
+    private JPanel cardTenderRow; // Pay Debit | Pay Credit split
 
     /**
      * Snapshot of quantities keyed by {@link LineItem} identity from the last render. Used to
@@ -207,20 +239,18 @@ public class CustomerView extends JFrame {
         if (dispatcher == null) throw new IllegalArgumentException("dispatcher must not be null");
         this.dispatcher = dispatcher;
 
-        // Preferred size gives the layout a target to compute against before the WM has said
-        // anything; the actual on-screen bounds are set by MAXIMIZED_BOTH below. Resizing off
-        // pins whatever the WM hands us — dragging or double-clicking the title bar can't reshape
-        // the frame out from under the layout.
-        setPreferredSize(new Dimension(FALLBACK_WIDTH, FALLBACK_HEIGHT));
-        setSize(new Dimension(FALLBACK_WIDTH, FALLBACK_HEIGHT));
-        setExtendedState(getExtendedState() | JFrame.MAXIMIZED_BOTH);
+        // Fixed register-display size, non-resizable. No MAXIMIZED_BOTH: the proportional shell
+        // is designed against exactly this surface, so the window is pinned to it rather than
+        // stretched to whatever the WM hands us.
+        setPreferredSize(new Dimension(WINDOW_WIDTH, WINDOW_HEIGHT));
+        setSize(new Dimension(WINDOW_WIDTH, WINDOW_HEIGHT));
         setResizable(false);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(PosTheme.PAPER);
         root.add(buildHeader(title), BorderLayout.NORTH);
-        root.add(buildColumns(quickAddItems), BorderLayout.CENTER);
+        root.add(buildMainArea(quickAddItems), BorderLayout.CENTER);
         setContentPane(root);
 
         refreshTotalButton();
@@ -342,7 +372,7 @@ public class CustomerView extends JFrame {
      */
     public void setBasketInputEnabled(boolean enabled) {
         basketInputEnabled = enabled;
-        for (PosButton b : quickAddButtons) b.setEnabled(enabled);
+        if (quickAddPanel != null) quickAddPanel.setTilesEnabled(enabled);
         refreshTotalButton();
         refreshSelectionDependentButtons();
         refreshStatusPill();
@@ -448,6 +478,28 @@ public class CustomerView extends JFrame {
         return totalButton.isEnabled();
     }
 
+    /** For tests: whether the Discount button is enabled. It stays disabled until the
+     *  in-progress-discount feature lands (see {@link PosEventType#DISCOUNT_PRESSED}). */
+    boolean isDiscountEnabledForTest() {
+        return discountButton.isEnabled();
+    }
+
+    /** For tests: whether the three tender buttons (cash/debit/credit) are enabled. */
+    boolean isTenderEnabledForTest() {
+        return payCashButton.isEnabled() && payDebitButton.isEnabled()
+                && payCreditButton.isEnabled();
+    }
+
+    /**
+     * Dismisses the Quick Add search keyboard, if it's open. Called by the controller when an
+     * item is added — a successful scan or a tapped tile means the cashier no longer needs the
+     * search fallback, and leaving the keyboard up would be stale UI. Leaves the search text and
+     * grid filter untouched. No-op if the keyboard is already hidden.
+     */
+    public void dismissSearchKeyboard() {
+        if (quickAddPanel != null) quickAddPanel.hideKeyboard();
+    }
+
     /**
      * Installs the given component as the scan bar at the top of the Basket column. Idempotent
      * — a subsequent call replaces the previous scan bar.
@@ -497,6 +549,13 @@ public class CustomerView extends JFrame {
         return new PosButton[]{payCashButton, payDebitButton, payCreditButton};
     }
 
+    /** For tests/snapshots: the five action buttons in on-screen (left-to-right) order:
+     *  Void Basket, Void Line, Change Qty, Discount, Total. */
+    PosButton[] getActionButtonsForTest() {
+        return new PosButton[]{voidBasketButton, voidLineButton, changeQtyButton,
+                discountButton, totalButton};
+    }
+
     // Summary tape test hooks — expose the four labels and the tape container so tests can
     // assert order, values, colours, and layout-stability without reflecting on private fields.
     JLabel getSubtotalLabelForTest() { return subtotalLabel; }
@@ -511,12 +570,25 @@ public class CustomerView extends JFrame {
     JPanel getSummaryTapeForTest() { return summaryTape; }
 
     /**
-     * For the snapshot harness: the outermost tender-column card in the shown frame, so a
-     * caller can render the column standalone without cropping by pixel proportion.
+     * For the snapshot harness: the payment card (Pay Cash + Debit/Credit), so a caller can
+     * render it standalone without cropping by pixel proportion. Named for backward
+     * compatibility with the snapshot tool that predates the two-column layout.
      */
     JPanel getTenderColumnForTest() {
-        return tenderColumn;
+        return paymentPanel;
     }
+
+    // ---- Layout-split test hooks -------------------------------------------
+    // The proportional containers, so layout tests can assert the 30/70, 80/20, and 70/30
+    // divisions directly rather than walking the tree.
+    JPanel getColumnsRowForTest() { return columnsRow; }
+    JPanel getLeftColumnForTest() { return leftColumn; }
+    JPanel getRightColumnForTest() { return rightColumn; }
+    JPanel getBottomRowForTest() { return bottomRow; }
+    JPanel getActionsPanelForTest() { return actionsPanel; }
+    JPanel getPaymentPanelForTest() { return paymentPanel; }
+    JPanel getCardTenderRowForTest() { return cardTenderRow; }
+    QuickAddPanel getQuickAddPanelForTest() { return quickAddPanel; }
 
     // ---- Layout helpers ----------------------------------------------------
 
@@ -564,70 +636,80 @@ public class CustomerView extends JFrame {
         return journalIndicator.isConnected();
     }
 
-    private JPanel buildColumns(List<Item> quickAddItems) {
-        JPanel columns = new JPanel(new GridBagLayout());
-        columns.setBackground(PosTheme.PAPER);
-        columns.setBorder(BorderFactory.createEmptyBorder(GUTTER, GUTTER, GUTTER, GUTTER));
+    /**
+     * The two-column proportional shell. Four nesting levels, every split an exact fraction via
+     * {@link ProportionalLayout}:
+     * <pre>
+     *   columnsRow (H)  ── left 30% | right 70%
+     *     leftColumn (V)  ── basket 80% / summary 20%
+     *     rightColumn (V) ── quick add 80% / bottomRow 20%
+     *       bottomRow (H)   ── actions 70% | payment 30%
+     * </pre>
+     * Inter-card gutters are applied as {@link #CARD_GAP} borders on the leading child of each
+     * split, so the fraction ProportionalLayout measures (which includes the child's border) is
+     * still the exact split the sketch calls for.
+     */
+    private JPanel buildMainArea(List<Item> quickAddItems) {
+        columnsRow = new JPanel(new ProportionalLayout(ProportionalLayout.HORIZONTAL));
+        columnsRow.setBackground(PosTheme.PAPER);
+        columnsRow.setBorder(BorderFactory.createEmptyBorder(OUTER_PAD, OUTER_PAD, OUTER_PAD, OUTER_PAD));
 
-        GridBagConstraints c = new GridBagConstraints();
-        c.fill = GridBagConstraints.BOTH;
-        c.weighty = 1;
-        c.gridy = 0;
-        c.insets = new Insets(0, 0, 0, GUTTER);
-
-        // Column weights: give Quick Add a little more room now that it carries 16 tiles rather
-        // than 12 — an extra ~4% of the window keeps two comfortable columns of tiles that don't
-        // ellipsize product names on the first line. Basket and Tender each give up ~2%.
-        c.gridx = 0;
-        c.weightx = 0.30;
-        columns.add(buildQuickAddColumn(quickAddItems), c);
-
-        c.gridx = 1;
-        c.weightx = 0.46;
-        columns.add(buildBasketColumn(), c);
-
-        c.gridx = 2;
-        c.weightx = 0.24;
-        c.insets = new Insets(0, 0, 0, 0);
-        this.tenderColumn = buildTenderColumn();
-        columns.add(tenderColumn, c);
-        return columns;
+        JPanel left = buildLeftColumn();
+        left.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, CARD_GAP));
+        columnsRow.add(left, LEFT_FRACTION);
+        columnsRow.add(buildRightColumn(quickAddItems), RIGHT_FRACTION);
+        return columnsRow;
     }
 
-    private JPanel buildQuickAddColumn(List<Item> quickAddItems) {
-        int rows = Math.max(1, (int) Math.ceil(quickAddItems.size() / (double) QUICK_ADD_COLS));
-        JPanel grid = new JPanel(new GridLayout(rows, QUICK_ADD_COLS,
-                PosTheme.BUTTON_GAP, PosTheme.BUTTON_GAP));
-        grid.setOpaque(false);
-        grid.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+    private JPanel buildLeftColumn() {
+        leftColumn = new JPanel(new ProportionalLayout(ProportionalLayout.VERTICAL));
+        leftColumn.setOpaque(false);
 
-        for (Item item : quickAddItems) {
-            QuickAddTile tile = new QuickAddTile(
-                    item.getDisplayLabel().trim(),
-                    PosTheme.money(item.getUnitPrice()));
-            tile.addActionListener(e -> {
-                Map<String, Object> props = new HashMap<>();
-                props.put("upc", item.getUpc());
-                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.QUICK_ADD_PRESSED, props));
-            });
-            quickAddButtons.add(tile);
-            grid.add(tile);
-        }
-
-        JPanel top = new JPanel(new BorderLayout());
-        top.setOpaque(false);
-        top.add(grid, BorderLayout.NORTH);
-
-        JScrollPane scroll = new JScrollPane(top);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getViewport().setBackground(PosTheme.SURFACE);
-        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        styleThinScrollBar(scroll.getVerticalScrollBar());
-        return PosTheme.card("Quick add", scroll);
+        JPanel basket = buildBasketCard();
+        basket.setBorder(BorderFactory.createEmptyBorder(0, 0, CARD_GAP, 0));
+        leftColumn.add(basket, TOP_ROW_FRACTION);
+        leftColumn.add(buildSummaryCard(), BOTTOM_ROW_FRACTION);
+        return leftColumn;
     }
 
-    private JPanel buildBasketColumn() {
+    private JPanel buildRightColumn(List<Item> quickAddItems) {
+        rightColumn = new JPanel(new ProportionalLayout(ProportionalLayout.VERTICAL));
+        rightColumn.setOpaque(false);
+
+        JPanel quickAdd = buildQuickAddCard(quickAddItems);
+        quickAdd.setBorder(BorderFactory.createEmptyBorder(0, 0, CARD_GAP, 0));
+        rightColumn.add(quickAdd, TOP_ROW_FRACTION);
+        rightColumn.add(buildBottomRow(), BOTTOM_ROW_FRACTION);
+        return rightColumn;
+    }
+
+    private JPanel buildBottomRow() {
+        bottomRow = new JPanel(new ProportionalLayout(ProportionalLayout.HORIZONTAL));
+        bottomRow.setOpaque(false);
+        // Bottom padding so the tender/action strip doesn't sit flush against the window edge —
+        // ProportionalLayout honours the container insets, so this simply shortens the row's
+        // usable height by BOTTOM_ROW_PAD without disturbing the 60/40 horizontal split.
+        bottomRow.setBorder(BorderFactory.createEmptyBorder(0, 0, BOTTOM_ROW_PAD, 0));
+
+        JPanel actions = buildActionsCard();
+        actions.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, CARD_GAP));
+        bottomRow.add(actions, ACTIONS_FRACTION);
+        bottomRow.add(buildPaymentCard(), PAYMENT_FRACTION);
+        return bottomRow;
+    }
+
+    private JPanel buildQuickAddCard(List<Item> quickAddItems) {
+        // The grid spans the whole pricebook, paged, with its own search + sort. Each tile press
+        // dispatches QUICK_ADD_PRESSED carrying the bound UPC — the panel stays a dumb view.
+        quickAddPanel = new QuickAddPanel(quickAddItems, item -> {
+            Map<String, Object> props = new HashMap<>();
+            props.put("upc", item.getUpc());
+            dispatcher.dispatchPosEvent(new PosEvent(PosEventType.QUICK_ADD_PRESSED, props));
+        });
+        return PosTheme.card("Quick add", quickAddPanel);
+    }
+
+    private JPanel buildBasketCard() {
         JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
 
@@ -659,14 +741,56 @@ public class CustomerView extends JFrame {
         basketLayer.setLayout(new BorderLayout());
         basketLayer.add(listScroll, BorderLayout.CENTER);
 
+        // The "list" card carries a fixed column-header row above the scrolling rows, aligned to
+        // the same column geometry the renderer uses. The empty-state card has no header.
+        JPanel listCard = new JPanel(new BorderLayout());
+        listCard.setBackground(PosTheme.SURFACE);
+        listCard.add(buildBasketColumnHeader(), BorderLayout.NORTH);
+        listCard.add(basketLayer, BorderLayout.CENTER);
+
         basketCenter.setBackground(PosTheme.SURFACE);
-        basketCenter.add(basketLayer, "list");
+        basketCenter.add(listCard, "list");
         basketCenter.add(buildEmptyState(), "empty");
         basketCards.show(basketCenter, "empty");
         body.add(basketCenter, BorderLayout.CENTER);
 
-        body.add(buildSummaryAndActions(), BorderLayout.SOUTH);
+        // The summary tape and the basket actions no longer live under the list — they moved to
+        // the left column's bottom cell and the bottom-right actions card respectively. The list
+        // now owns the full height of the basket card.
+        basketList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) refreshSelectionDependentButtons();
+        });
         return PosTheme.card("Basket", body);
+    }
+
+    /**
+     * The basket table's column-header row: {@code Item} left, {@code Price / Qty / Total} right,
+     * all EYEBROW. Built from {@link BasketCellRenderer#numericColumns} at the shared fixed widths
+     * and the same {@link BasketCellRenderer#ITEM_INSET_LEFT}/{@code RIGHT} insets so the headers
+     * sit directly above the values the renderer paints.
+     */
+    private JPanel buildBasketColumnHeader() {
+        JLabel item = headerEyebrow("Item", SwingConstants.LEFT);
+        JLabel priceHead = headerEyebrow("Price", SwingConstants.RIGHT);
+        JLabel qtyHead = headerEyebrow("Qty", SwingConstants.CENTER);
+        JLabel totalHead = headerEyebrow("Total", SwingConstants.RIGHT);
+
+        JPanel header = new JPanel(new BorderLayout(BasketCellRenderer.COL_GAP, 0));
+        header.setOpaque(false);
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, PosTheme.RULE),
+                BorderFactory.createEmptyBorder(8, BasketCellRenderer.ITEM_INSET_LEFT,
+                        8, BasketCellRenderer.ITEM_INSET_RIGHT)));
+        header.add(item, BorderLayout.CENTER);
+        header.add(BasketCellRenderer.numericColumns(priceHead, qtyHead, totalHead), BorderLayout.EAST);
+        return header;
+    }
+
+    private static JLabel headerEyebrow(String text, int alignment) {
+        JLabel label = new JLabel(text, alignment);
+        label.setFont(PosTheme.eyebrow());
+        label.setForeground(PosTheme.MUTED);
+        return label;
     }
 
     private JPanel buildEmptyState() {
@@ -694,47 +818,64 @@ public class CustomerView extends JFrame {
         return empty;
     }
 
-    private JPanel buildSummaryAndActions() {
-        JPanel south = new JPanel(new BorderLayout(0, 10));
-        south.setBackground(PosTheme.SURFACE);
-        south.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, PosTheme.RULE),
-                BorderFactory.createEmptyBorder(12, 16, 14, 16)));
-
+    /** Left column, bottom cell: the summary tape (Subtotal / Discount / Tax / TOTAL). */
+    private JPanel buildSummaryCard() {
         summaryTape = buildSummaryTape();
         renderVerticalSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
-        south.add(summaryTape, BorderLayout.NORTH);
 
-        JPanel actions = new JPanel(new BorderLayout(0, 8));
-        actions.setOpaque(false);
+        JPanel body = new JPanel(new BorderLayout());
+        body.setBackground(PosTheme.SURFACE);
+        body.setBorder(BorderFactory.createEmptyBorder(12, 16, 14, 16));
+        body.add(summaryTape, BorderLayout.NORTH);
+        return PosTheme.card("Summary", body);
+    }
 
-        JPanel minor = new JPanel(new GridLayout(1, 3, PosTheme.BUTTON_GAP, 0));
-        minor.setOpaque(false);
+    /**
+     * Bottom-right, left 60%: the basket actions as a single row of five tall buttons — Void
+     * Basket │ Void Line │ Change Qty │ Discount │ Total. One row means no vertical neighbours to
+     * mis-tap between, and each button uses the full row height as a single generous target.
+     *
+     * <p>The order is deliberate. Total is the most-pressed button in the lane and Void Basket
+     * destroys the sale, so they must not be adjacent — a fat-finger between the two would be
+     * catastrophic. With this ordering Total's only neighbour is Discount (harmless) and the strip
+     * reads left-to-right as edit → finalise, flowing into the tender group beside it.</p>
+     */
+    private JPanel buildActionsCard() {
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
+        // Discount is wired but disabled — enabling it requires the IN_PROGRESS-discount domain
+        // change tracked on feature/in-progress-discounts (see PosEventType#DISCOUNT_PRESSED).
+        discountButton.addActionListener(e ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.DISCOUNT_PRESSED)));
         // Void basket is destructive and one tap away on a touchscreen. Dispatch the "pressed"
         // event and let the controller open the {@link VoidBasketConfirmView} — the view stays
         // dumb, and the confirmation dialog owns the two-step commit through its own event
         // vocabulary (VOID_BASKET_CONFIRM_PRESSED / VOID_BASKET_DECLINED).
         voidBasketButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
-        changeQtyButton.setEnabled(false);
-        minor.add(changeQtyButton);
-        minor.add(voidLineButton);
-        minor.add(voidBasketButton);
-        actions.add(minor, BorderLayout.NORTH);
-
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
-        // The primary factory already enforces BUTTON_HEIGHT_PRIMARY + SHADOW_INSET via
-        // PosButton.getPreferredSize(); no override needed here.
-        actions.add(totalButton, BorderLayout.CENTER);
-        south.add(actions, BorderLayout.CENTER);
+        changeQtyButton.setEnabled(false);
+        discountButton.setEnabled(false);
 
-        basketList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) refreshSelectionDependentButtons();
-        });
-        return south;
+        // Single horizontal row; GridLayout stretches every button to the full section height, so
+        // each fills the ~180px row as one tall target. Order: destructive-and-edit on the left,
+        // Total on the right, Void Basket kept far from Total.
+        JPanel row = new JPanel(new GridLayout(1, 5, PosTheme.BUTTON_GAP, 0));
+        row.setOpaque(false);
+        row.add(voidBasketButton);
+        row.add(voidLineButton);
+        row.add(changeQtyButton);
+        row.add(discountButton);
+        row.add(totalButton);
+
+        JPanel body = new JPanel(new BorderLayout());
+        body.setBackground(PosTheme.SURFACE);
+        body.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
+        body.add(row, BorderLayout.CENTER);
+
+        actionsPanel = PosTheme.card("Actions", body);
+        return actionsPanel;
     }
 
     // ---- Summary tape (vertical stack) ------------------------------------
@@ -863,48 +1004,40 @@ public class CustomerView extends JFrame {
         dispatcher.dispatchPosEvent(new PosEvent(type, props));
     }
 
-    private JPanel buildTenderColumn() {
-        JPanel body = new JPanel(new BorderLayout());
-        body.setBackground(PosTheme.SURFACE);
-        body.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-
-        // Amount due — pinned at the top, DISPLAY weight so the number reads at register scale
-        // now that the column no longer trails off into empty space.
-        JPanel due = new JPanel(new BorderLayout());
-        due.setOpaque(false);
-        JLabel dueLabel = new JLabel("AMOUNT DUE");
-        dueLabel.setFont(PosTheme.eyebrow());
-        dueLabel.setForeground(PosTheme.MUTED);
-        amountDueValue.setFont(PosTheme.base(Font.BOLD, PosTheme.DISPLAY));
-        amountDueValue.setForeground(PosTheme.INK);
-        amountDueValue.setHorizontalAlignment(SwingConstants.LEFT);
-        due.add(dueLabel, BorderLayout.NORTH);
-        due.add(amountDueValue, BorderLayout.CENTER);
-        due.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, PosTheme.RULE),
-                BorderFactory.createEmptyBorder(0, 0, 14, 0)));
-        body.add(due, BorderLayout.NORTH);
-
-        // Three tender buttons, equal-height, filling the column's full remaining height rather
-        // than pinned to the north with dead space beneath. The vertical gap is oversized on
-        // purpose — the tender trio are the largest touch targets in the app and get the widest
-        // spacing to match.
-        JPanel stack = new JPanel(new GridLayout(3, 1, 0, TENDER_VERTICAL_GAP));
-        stack.setOpaque(false);
-        stack.setBorder(BorderFactory.createEmptyBorder(TENDER_TOP_GAP, 0, 0, 0));
+    /**
+     * Bottom-right, right 40%: the tender controls as a single row of three tall buttons — Pay
+     * Cash │ Pay Debit │ Pay Credit. One row, no vertical neighbours, each filling the full
+     * section height. At this width the colour, not the label, is what tells the three tenders
+     * apart — so each keeps its own fill (cash green, debit blue, credit indigo). All three are
+     * disabled until Total.
+     */
+    private JPanel buildPaymentCard() {
         payCashButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED)));
         payDebitButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TENDER_DEBIT_PRESSED)));
         payCreditButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CREDIT_PRESSED)));
-        for (PosButton b : new PosButton[]{payCashButton, payDebitButton, payCreditButton}) {
-            b.setEnabled(false);
-            stack.add(b);
-        }
+        payCashButton.setEnabled(false);
+        payDebitButton.setEnabled(false);
+        payCreditButton.setEnabled(false);
 
-        body.add(stack, BorderLayout.CENTER);
-        return PosTheme.card("Tender", body);
+        // The three tenders in one horizontal row; GridLayout gives them equal width and stretches
+        // each to the full section height. Retained in the cardTenderRow field so layout tests can
+        // read the split directly.
+        cardTenderRow = new JPanel(new GridLayout(1, 3, PosTheme.BUTTON_GAP, 0));
+        cardTenderRow.setOpaque(false);
+        cardTenderRow.add(payCashButton);
+        cardTenderRow.add(payDebitButton);
+        cardTenderRow.add(payCreditButton);
+
+        JPanel body = new JPanel(new BorderLayout());
+        body.setBackground(PosTheme.SURFACE);
+        body.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
+        body.add(cardTenderRow, BorderLayout.CENTER);
+
+        paymentPanel = PosTheme.card("Payment", body);
+        return paymentPanel;
     }
 
     // ---- Density animation -------------------------------------------------
@@ -1033,97 +1166,6 @@ public class CustomerView extends JFrame {
                 g2.dispose();
             }
         });
-    }
-
-    // ---- Quick-add tile ----------------------------------------------------
-
-    /**
-     * A quick-add tile: description wrapped to at most two lines above the price. Drawn rather
-     * than composed from HTML so the price keeps its accent colour and the whole tile dims
-     * correctly when basket input is disabled. Inherits {@link PosButton} elevation, so the
-     * tile reads as a pressable card, not a static decoration.
-     */
-    private static class QuickAddTile extends PosButton {
-        private static final int PAD = 10;
-        private static final Font DESC_FONT = PosTheme.base(Font.PLAIN, PosTheme.BODY);
-        private static final Font PRICE_FONT = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
-
-        private final String description;
-        private final String price;
-
-        QuickAddTile(String description, String price) {
-            super("", PosTheme.SURFACE, PosTheme.INK, PosTheme.base(Font.PLAIN, PosTheme.BODY));
-            this.description = description;
-            this.price = price;
-            setPreferredSize(new Dimension(10, QUICK_ADD_TILE_HEIGHT + SHADOW_INSET));
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            // Delegate shadow/fill/lip/highlight chrome to PosButton, then paint our custom
-            // description/price on top so tap-and-hold still visibly compresses.
-            super.paintComponent(g);
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-
-            boolean on = isEnabled();
-            boolean pressed = on && getModel().isPressed();
-            // Match the PosButton label sink exactly so the tile's text moves with the button's
-            // label — otherwise the description slides 1 px while the label slides 2 and the
-            // press feels loose.
-            int sink = pressed ? PRESSED_SINK : 0;
-            int height = getHeight() - SHADOW_INSET;
-            int maxWidth = getWidth() - PAD * 2;
-
-            g2.setFont(DESC_FONT);
-            FontMetrics dfm = g2.getFontMetrics();
-            List<String> lines = wrap(description, dfm, maxWidth, 2);
-            g2.setColor(on ? PosTheme.INK : PosTheme.DISABLED_FG);
-            int y = PAD + dfm.getAscent() + sink;
-            for (String line : lines) {
-                g2.drawString(line, PAD, y);
-                y += dfm.getHeight();
-            }
-
-            g2.setFont(PRICE_FONT);
-            FontMetrics pfm = g2.getFontMetrics();
-            g2.setColor(on ? PosTheme.GO : PosTheme.DISABLED_FG);
-            g2.drawString(price, PAD, height - PAD - pfm.getDescent() + sink);
-
-            g2.dispose();
-        }
-
-        static List<String> wrap(String text, FontMetrics fm, int maxWidth, int maxLines) {
-            List<String> out = new ArrayList<>();
-            StringBuilder current = new StringBuilder();
-            for (String word : text.split("\\s+")) {
-                String candidate = current.length() == 0 ? word : current + " " + word;
-                if (fm.stringWidth(candidate) <= maxWidth) {
-                    current.setLength(0);
-                    current.append(candidate);
-                } else {
-                    if (current.length() > 0) out.add(current.toString());
-                    current.setLength(0);
-                    current.append(word);
-                    if (out.size() == maxLines) break;
-                }
-            }
-            if (out.size() < maxLines && current.length() > 0) out.add(current.toString());
-            while (out.size() > maxLines) out.remove(out.size() - 1);
-            if (!out.isEmpty()) {
-                int last = out.size() - 1;
-                String tail = out.get(last);
-                if (fm.stringWidth(tail) > maxWidth) {
-                    while (tail.length() > 1 && fm.stringWidth(tail + "…") > maxWidth) {
-                        tail = tail.substring(0, tail.length() - 1);
-                    }
-                    out.set(last, tail + "…");
-                }
-            }
-            return out;
-        }
     }
 
     // ---- Journal status indicator -----------------------------------------

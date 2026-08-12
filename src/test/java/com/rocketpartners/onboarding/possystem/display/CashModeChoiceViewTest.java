@@ -117,6 +117,29 @@ class CashModeChoiceViewTest {
     }
 
     @Test
+    void otherAmountClick_dispatchesOtherCashAmount() throws Exception {
+        SwingUtilities.invokeAndWait(() ->
+                view.openFor(new BigDecimal("7.30"), new BigDecimal("8.00")));
+
+        SwingUtilities.invokeAndWait(() -> view.getOtherAmountButtonForTest().doClick());
+
+        assertThat(dispatcher.eventsOf(PosEventType.OTHER_CASH_AMOUNT_PRESSED)).hasSize(1);
+        // Other Amount is navigation, not a mode selection — no tender-mode event fires.
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_EXACT_PRESSED)).isEmpty();
+        assertThat(dispatcher.eventsOf(PosEventType.CASH_NEXT_DOLLAR_PRESSED)).isEmpty();
+    }
+
+    @Test
+    void tiles_showTheirTenderFigures_afterOpen() throws Exception {
+        SwingUtilities.invokeAndWait(() ->
+                view.openFor(new BigDecimal("7.30"), new BigDecimal("8.00")));
+
+        // Each terminal tile must show the amount it will tender before the cashier commits.
+        assertThat(view.getExactButtonForTest().getText()).contains("$7.30");
+        assertThat(view.getNextDollarButtonForTest().getText()).contains("$8.00");
+    }
+
+    @Test
     void cancelClick_dispatchesCancel() throws Exception {
         SwingUtilities.invokeAndWait(() ->
                 view.openFor(new BigDecimal("7.30"), new BigDecimal("8.00")));

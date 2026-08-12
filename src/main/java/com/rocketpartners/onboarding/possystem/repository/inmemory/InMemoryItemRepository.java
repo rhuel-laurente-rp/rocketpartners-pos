@@ -5,8 +5,11 @@ import com.rocketpartners.onboarding.possystem.repository.ItemRepository;
 import com.rocketpartners.onboarding.possystem.repository.PricebookTsv;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -46,6 +49,16 @@ public class InMemoryItemRepository implements ItemRepository {
     public Optional<Item> findByUpc(String upc) {
         if (upc == null) return Optional.empty();
         return Optional.ofNullable(itemsByUpc.get(upc));
+    }
+
+    @Override
+    public List<Item> getAll() {
+        List<Item> all = new ArrayList<>(itemsByUpc.values());
+        // Stable default order — by description then UPC — so the Quick Add grid's paging is
+        // deterministic before the view applies its own sort.
+        all.sort(Comparator.comparing(Item::getDescription, String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(Item::getUpc));
+        return all;
     }
 
     @Override

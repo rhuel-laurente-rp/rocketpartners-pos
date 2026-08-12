@@ -93,6 +93,10 @@ public class ChangeQuantityView extends PosDialog {
     private final PosButton confirmButton;
     private final PosButton cancelButton;
 
+    /** Always-visible numeric keypad for typing a quantity outright — the terminal is touch-only.
+     *  Complements the spinner's increment arrows rather than replacing them. */
+    private OnScreenKeypad keypad;
+
     /**
      * Single shared filter instance; reused across document swaps by
      * {@link #attachFilterToCurrentDocument()}.
@@ -243,6 +247,11 @@ public class ChangeQuantityView extends PosDialog {
         return confirmButton;
     }
 
+    /** For tests: the on-screen numeric keypad. */
+    OnScreenKeypad getKeypadForTest() {
+        return keypad;
+    }
+
     /** For tests: the cancel button. */
     PosButton getCancelButtonForTest() {
         return cancelButton;
@@ -291,7 +300,15 @@ public class ChangeQuantityView extends PosDialog {
         validationMessage.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(Box.createVerticalStrut(8));
         body.add(validationMessage);
-        body.add(validationMessage);
+
+        // Numeric keypad (no decimal — quantities are whole numbers) for typing a quantity
+        // outright, alongside the spinner's arrows for the common ±1 nudge. Types into the
+        // spinner's editor field through its Document, so the digit-only DocumentFilter and the
+        // >=1 / <=max validation are inherited unchanged.
+        body.add(Box.createVerticalStrut(14));
+        keypad = new OnScreenKeypad(editorField(), false);
+        keypad.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(keypad);
 
         return body;
     }

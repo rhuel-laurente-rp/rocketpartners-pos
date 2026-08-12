@@ -151,6 +151,8 @@ public class JournalListener implements IController, IPosEventListener {
                 if (tender != null) fields.put("tender", tender.name());
                 BigDecimal tendered = event.getProperty("amountTendered", BigDecimal.class);
                 if (tendered != null) fields.put("amount", money(tendered));
+                BigDecimal amountDue = event.getProperty("amountDue", BigDecimal.class);
+                if (amountDue != null) fields.put("amountDue", money(amountDue));
                 BigDecimal change = event.getProperty("changeDue", BigDecimal.class);
                 if (change != null) fields.put("change", money(change));
             }

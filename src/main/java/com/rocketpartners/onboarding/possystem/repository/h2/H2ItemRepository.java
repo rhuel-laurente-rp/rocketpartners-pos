@@ -45,6 +45,10 @@ public class H2ItemRepository implements ItemRepository, AutoCloseable {
 
     private static final String COUNT_SQL = "SELECT COUNT(*) FROM ITEMS";
 
+    private static final String FIND_ALL_SQL =
+            "SELECT UPC, DESCRIPTION, UNIT_PRICE, DISPLAY_NAME FROM ITEMS "
+                    + "ORDER BY DESCRIPTION, UPC";
+
     private static final String INSERT_SQL =
             "INSERT INTO ITEMS (UPC, DESCRIPTION, UNIT_PRICE, DISPLAY_NAME) VALUES (?, ?, ?, ?)";
 
@@ -152,6 +156,24 @@ public class H2ItemRepository implements ItemRepository, AutoCloseable {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("H2 lookup failed for upc '" + upc + "'", e);
+        }
+    }
+
+    @Override
+    public java.util.List<Item> getAll() {
+        java.util.List<Item> out = new java.util.ArrayList<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(FIND_ALL_SQL)) {
+            while (rs.next()) {
+                out.add(new Item(
+                        rs.getString("UPC"),
+                        rs.getString("DESCRIPTION"),
+                        normalisePrice(rs.getBigDecimal("UNIT_PRICE")),
+                        rs.getString("DISPLAY_NAME")));
+            }
+            return out;
+        } catch (SQLException e) {
+            throw new IllegalStateException("H2 getAll failed", e);
         }
     }
 

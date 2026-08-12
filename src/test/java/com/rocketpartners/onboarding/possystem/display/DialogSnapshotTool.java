@@ -1,9 +1,12 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.commons.model.Item;
+import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 
 import javax.imageio.ImageIO;
 import javax.swing.ButtonModel;
+import javax.swing.JComponent;
 import javax.swing.JPanel;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -85,7 +88,150 @@ public final class DialogSnapshotTool {
         ImageIO.write(composeSummaryTape(), "PNG", summaryFile);
         System.out.println("wrote " + summaryFile.getName());
 
+        // Cash-mode-choice dialog: Next Dollar enabled (fractional total) vs disabled
+        // (whole-dollar total), side by side. Shows the two terminal tiles, their tender figures,
+        // the hairline, and the full-width Other Amount button.
+        File choiceFile = new File(out, "cash-mode-choice.png");
+        ImageIO.write(composeCashModeChoice(), "PNG", choiceFile);
+        System.out.println("wrote " + choiceFile.getName());
+
+        // Cash dialog with its always-on numeric keypad, and the change-quantity dialog with its
+        // spinner + keypad. Rendered from the shipping dialogs so the on-screen input components
+        // appear exactly as the cashier sees them. Each prints its packed height so a reviewer can
+        // confirm the dialog still fits inside the 982px terminal.
+        File cashKeypad = new File(out, "cash-dialog-keypad.png");
+        ImageIO.write(composeCashDialogWithKeypad(), "PNG", cashKeypad);
+        System.out.println("wrote " + cashKeypad.getName());
+
+        File qtyKeypad = new File(out, "quantity-dialog-keypad.png");
+        ImageIO.write(composeQuantityDialogWithKeypad(), "PNG", qtyKeypad);
+        System.out.println("wrote " + qtyKeypad.getName());
+
         System.exit(0);
+    }
+
+    /** The cash dialog primed on a $7.30 basket, keypad in place. Prints its packed height. */
+    private static BufferedImage composeCashDialogWithKeypad() {
+        PayWithCashView dialog = new PayWithCashView(null, noop());
+        dialog.setModal(false);
+        try {
+            dialog.openFor(new BigDecimal("7.30"), PayWithCashView.Mode.EXACT);
+            System.out.println("[measurement] PayWithCashView packed height with keypad = "
+                    + dialog.getHeight() + "px");
+            dialog.setVisible(false);   // paint offscreen from a forced layout, not the live window
+            return composeDialogContent(dialog, "CASH PAYMENT — KEYPAD");
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    /** The change-quantity dialog with spinner + keypad. Prints its packed height. */
+    private static BufferedImage composeQuantityDialogWithKeypad() {
+        ChangeQuantityView dialog = new ChangeQuantityView(null, noop(), 999);
+        dialog.setModal(false);
+        try {
+            dialog.openFor(new LineItem(new Item("UPC-W", "Widget 12 oz", new BigDecimal("1.99")), 2));
+            System.out.println("[measurement] ChangeQuantityView packed height with keypad = "
+                    + dialog.getHeight() + "px");
+            dialog.setVisible(false);   // paint offscreen from a forced layout, not the live window
+            return composeDialogContent(dialog, "CHANGE QUANTITY — SPINNER + KEYPAD");
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    /** Paints a single dialog's content pane onto a PAPER tile with a caption underneath. */
+    private static BufferedImage composeDialogContent(javax.swing.JDialog dialog, String label) {
+        JComponent pane = (JComponent) dialog.getContentPane();
+        int dialogW = pane.getWidth();
+        int dialogH = pane.getHeight();
+        int labelH = 26;
+        int pad = 24;
+        int totalW = dialogW + pad * 2;
+        int totalH = dialogH + labelH + pad * 2;
+
+        BufferedImage img = new BufferedImage(totalW, totalH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = img.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(PosTheme.PAPER);
+            g.fillRect(0, 0, totalW, totalH);
+            paintContentPane(g, pane, pad, pad, dialogW, dialogH);
+            g.setFont(PosTheme.base(Font.BOLD, PosTheme.EYEBROW));
+            g.setColor(PosTheme.MUTED);
+            g.drawString(label, pad + (dialogW - g.getFontMetrics().stringWidth(label)) / 2,
+                    pad + dialogH + labelH - 8);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    /**
+     * Renders the actual {@link CashModeChoiceView} content pane twice: once on a fractional
+     * total ($17.70 → Next Dollar live at $18.00) and once on a whole-dollar total ($18.00 →
+     * Next Dollar disabled because it would duplicate Exact Amount). Uses the shipping dialog
+     * body so tile figures, the hairline, and the Other Amount button are the real thing.
+     */
+    private static BufferedImage composeCashModeChoice() {
+        CashModeChoiceView enabled = new CashModeChoiceView(null, noop());
+        CashModeChoiceView disabled = new CashModeChoiceView(null, noop());
+        try {
+            enabled.applyAmounts(new BigDecimal("17.70"), new BigDecimal("18.00"));
+            disabled.applyAmounts(new BigDecimal("18.00"), new BigDecimal("18.00"));
+            enabled.pack();
+            disabled.pack();
+
+            JComponent c1 = (JComponent) enabled.getContentPane();
+            JComponent c2 = (JComponent) disabled.getContentPane();
+            int dialogW = Math.max(c1.getWidth(), c2.getWidth());
+            int dialogH = Math.max(c1.getHeight(), c2.getHeight());
+
+            int gap = 40;
+            int labelH = 26;
+            int pad = 24;
+            int totalW = dialogW * 2 + gap + pad * 2;
+            int totalH = dialogH + labelH + pad * 2;
+
+            BufferedImage img = new BufferedImage(totalW, totalH, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(PosTheme.PAPER);
+                g.fillRect(0, 0, totalW, totalH);
+                g.setFont(PosTheme.base(Font.BOLD, PosTheme.EYEBROW));
+                g.setColor(PosTheme.MUTED);
+
+                paintContentPane(g, c1, pad, pad, dialogW, dialogH);
+                String lbl1 = "NEXT DOLLAR ENABLED ($17.70)";
+                g.drawString(lbl1, pad + (dialogW - g.getFontMetrics().stringWidth(lbl1)) / 2,
+                        pad + dialogH + labelH - 8);
+
+                int x2 = pad + dialogW + gap;
+                paintContentPane(g, c2, x2, pad, dialogW, dialogH);
+                String lbl2 = "NEXT DOLLAR DISABLED ($18.00)";
+                g.drawString(lbl2, x2 + (dialogW - g.getFontMetrics().stringWidth(lbl2)) / 2,
+                        pad + dialogH + labelH - 8);
+            } finally {
+                g.dispose();
+            }
+            return img;
+        } finally {
+            enabled.dispose();
+            disabled.dispose();
+        }
+    }
+
+    private static void paintContentPane(Graphics2D dst, JComponent pane, int x, int y,
+                                         int w, int h) {
+        pane.setSize(w, h);
+        layoutAll(pane);
+        Graphics2D sub = (Graphics2D) dst.create(x, y, w, h);
+        try {
+            pane.paint(sub);
+        } finally {
+            sub.dispose();
+        }
     }
 
     private static BufferedImage compose(Variant v) {
@@ -310,7 +456,7 @@ public final class DialogSnapshotTool {
         // it directly; today it lives inside CustomerView so we construct one via reflection.
         try {
             Class<?> tileClass = Class.forName(
-                    "com.rocketpartners.onboarding.possystem.display.CustomerView$QuickAddTile");
+                    "com.rocketpartners.onboarding.possystem.display.QuickAddPanel$QuickAddTile");
             java.lang.reflect.Constructor<?> ctor =
                     tileClass.getDeclaredConstructor(String.class, String.class);
             ctor.setAccessible(true);

@@ -18,11 +18,17 @@ import java.util.Set;
 
 /**
  * Owns the card-tender flow — one controller serving both {@link TenderType#DEBIT} and
- * {@link TenderType#CREDIT}, parameterized by the pressed event. Opens a modal
- * {@link PayWithCardView}, shows "processing", schedules a short simulated-approval delay off
- * the EDT, then commits the tender via
+ * {@link TenderType#CREDIT}, parameterized by the pressed event.
+ *
+ * <p><strong>Confirm, then process.</strong> {@link PosEventType#TENDER_DEBIT_PRESSED} and
+ * {@link PosEventType#TENDER_CREDIT_PRESSED} open a {@link TenderConfirmView} showing the amount
+ * about to be charged; the card is not touched until the cashier confirms via
+ * {@link PosEventType#CARD_TENDER_CONFIRM_PRESSED}. {@link PosEventType#CARD_TENDER_CANCELLED}
+ * abandons the tender and leaves the transaction re-tenderable. On confirm the controller opens
+ * the modal {@link PayWithCardView}, shows "processing", schedules a short simulated-approval delay
+ * off the EDT, then commits the tender via
  * {@link com.rocketpartners.onboarding.possystem.service.TransactionService#tenderCard(TenderType, BigDecimal)}
- * for the full amount due (no change).
+ * for the full amount due (no change).</p>
  *
  * <p>The delay is scheduled via {@link javax.swing.Timer} so it runs off {@link Thread#sleep} on
  * the Swing event dispatch thread — freezing the whole UI mid-"approval" is the specific bug the
@@ -45,26 +51,41 @@ public class PayWithCardViewController implements IController, IPosEventListener
 
     private static final Set<PosEventType> LISTEN_TYPES = Collections.unmodifiableSet(EnumSet.of(
             PosEventType.TENDER_DEBIT_PRESSED,
-            PosEventType.TENDER_CREDIT_PRESSED));
+            PosEventType.TENDER_CREDIT_PRESSED,
+            PosEventType.CARD_TENDER_CONFIRM_PRESSED,
+            PosEventType.CARD_TENDER_CANCELLED));
 
     private final PayWithCardView view;
+    private final TenderConfirmView confirmView;
     private final ApprovalScheduler approvalScheduler;
     private PosComponent parent;
 
     /**
-     * @param view the modal card dialog this controller drives; must not be {@code null}
+     * The tender type the cashier chose and is now confirming — DEBIT or CREDIT. Non-null only
+     * while the tender-confirmation dialog is open; the confirm handler reads it to begin the right
+     * card flow. Cleared on confirm or cancel.
      */
-    public PayWithCardViewController(PayWithCardView view) {
-        this(view, defaultScheduler());
+    private TenderType pendingTenderType;
+
+    /**
+     * @param view        the modal card dialog this controller drives; must not be {@code null}
+     * @param confirmView the tender-confirmation modal shown before processing; must not be
+     *                    {@code null}
+     */
+    public PayWithCardViewController(PayWithCardView view, TenderConfirmView confirmView) {
+        this(view, confirmView, defaultScheduler());
     }
 
     /**
      * Test-facing constructor: inject a synchronous scheduler to avoid a live Swing timer.
      */
-    PayWithCardViewController(PayWithCardView view, ApprovalScheduler approvalScheduler) {
+    PayWithCardViewController(PayWithCardView view, TenderConfirmView confirmView,
+                             ApprovalScheduler approvalScheduler) {
         if (view == null) throw new IllegalArgumentException("view must not be null");
+        if (confirmView == null) throw new IllegalArgumentException("confirmView must not be null");
         if (approvalScheduler == null) throw new IllegalArgumentException("approvalScheduler must not be null");
         this.view = view;
+        this.confirmView = confirmView;
         this.approvalScheduler = approvalScheduler;
     }
 
@@ -90,6 +111,7 @@ public class PayWithCardViewController implements IController, IPosEventListener
             parent.unregister(this);
             parent = null;
         }
+        confirmView.closeDialog();
         view.closeDialog();
     }
 
@@ -103,13 +125,46 @@ public class PayWithCardViewController implements IController, IPosEventListener
     @Override
     public void onPosEvent(PosEvent event) {
         switch (event.getType()) {
-            case TENDER_DEBIT_PRESSED -> beginCardTender(TenderType.DEBIT);
-            case TENDER_CREDIT_PRESSED -> beginCardTender(TenderType.CREDIT);
+            case TENDER_DEBIT_PRESSED -> openConfirm(TenderType.DEBIT);
+            case TENDER_CREDIT_PRESSED -> openConfirm(TenderType.CREDIT);
+            case CARD_TENDER_CONFIRM_PRESSED -> confirmTender();
+            case CARD_TENDER_CANCELLED -> cancel();
             default -> { /* not subscribed */ }
         }
     }
 
     // ---- Handlers ---------------------------------------------------------
+
+    /**
+     * Opens the tender-confirmation dialog for a card type. The Pay Debit / Pay Credit press no
+     * longer starts processing on its own — it stages the tender type and asks the cashier to
+     * confirm the amount first, so a mis-tap is recoverable. Processing begins on
+     * {@link PosEventType#CARD_TENDER_CONFIRM_PRESSED}.
+     */
+    private void openConfirm(TenderType tenderType) {
+        Transaction tx = parent.getTransactionService().getCurrentTransaction();
+        if (tx == null) return;
+        pendingTenderType = tenderType;
+        BigDecimal amountDue = tx.grandTotal();
+        String title = tenderType == TenderType.DEBIT ? "Pay Debit" : "Pay Credit";
+        String instrument = tenderType == TenderType.DEBIT ? "Debit Card" : "Credit Card";
+        confirmView.openFor(title, "Confirm the card payment below.",
+                instrument + " · " + PosTheme.money(amountDue), amountDue);
+    }
+
+    private void confirmTender() {
+        if (pendingTenderType == null) return;
+        TenderType tenderType = pendingTenderType;
+        pendingTenderType = null;
+        beginCardTender(tenderType);
+    }
+
+    private void cancel() {
+        // Abandon the tender — Cancel or ESC on the confirmation dialog. No tender event was or
+        // will be dispatched; the transaction stays TOTALED and re-tenderable.
+        pendingTenderType = null;
+        confirmView.closeDialog();
+    }
 
     private void beginCardTender(TenderType tenderType) {
         Transaction tx = parent.getTransactionService().getCurrentTransaction();

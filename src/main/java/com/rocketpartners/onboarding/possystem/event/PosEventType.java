@@ -74,44 +74,116 @@ public enum PosEventType {
     TOTAL_PRESSED,
 
     /**
+     * The Discount button on the main window was pressed. Input event; no properties.
+     *
+     * <p><strong>Not yet wired to a feature.</strong> The button is present in the actions row
+     * but disabled — applying a discount while a transaction is {@code IN_PROGRESS} is a domain
+     * change (widening {@link com.rocketpartners.onboarding.commons.model.Transaction#applyDiscount()}'s
+     * state rule and making running-subtotal discounts track basket mutations) that belongs on a
+     * dedicated {@code feature/in-progress-discounts} branch with its own tests, not bundled into
+     * a layout refactor. This event constant and the button's listener exist so the wiring is in
+     * place; nothing dispatches it until the button is enabled by that feature.</p>
+     */
+    DISCOUNT_PRESSED,
+
+    /**
      * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
-     * dialog (step one of the two-step cash flow). Actual tender waits for
-     * {@link #CASH_CONFIRM_PRESSED} in step two.
+     * dialog. From there {@link #CASH_EXACT_PRESSED} and {@link #CASH_NEXT_DOLLAR_PRESSED} open a
+     * confirmation dialog and defer tender to {@link #CASH_TENDER_CONFIRM_PRESSED}; only
+     * {@link #OTHER_CASH_AMOUNT_PRESSED} opens the amount-entry dialog and defers tender to
+     * {@link #CASH_CONFIRM_PRESSED}.
      */
     TENDER_CASH_PRESSED,
 
-    /** The Pay Debit button was pressed. Input event; no properties. */
+    /**
+     * The Pay Debit button was pressed. Input event; no properties. Opens the card-tender
+     * confirmation dialog; the actual card processing is deferred to
+     * {@link #CARD_TENDER_CONFIRM_PRESSED}.
+     */
     TENDER_DEBIT_PRESSED,
 
-    /** The Pay Credit button was pressed. Input event; no properties. */
+    /**
+     * The Pay Credit button was pressed. Input event; no properties. Opens the card-tender
+     * confirmation dialog; the actual card processing is deferred to
+     * {@link #CARD_TENDER_CONFIRM_PRESSED}.
+     */
     TENDER_CREDIT_PRESSED,
 
     /**
-     * The Exact Amount button on the cash-mode-choice dialog was pressed. Input event; carries
-     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total) that the
-     * entry dialog is opened with pre-filled. Does not tender; the cashier still has to confirm
-     * the amount in step two.
+     * The Confirm button on the card-tender confirmation dialog was pressed. Input event; no
+     * properties. The controller reacts by opening the card-processing dialog and committing the
+     * tender for the pending tender type (DEBIT or CREDIT). The confirmation dialog alone must not
+     * charge the card — that is deferred to this event so a mis-tap on Pay Debit / Pay Credit is
+     * recoverable.
+     */
+    CARD_TENDER_CONFIRM_PRESSED,
+
+    /**
+     * The card-tender confirmation was cancelled — Cancel or ESC on the confirmation dialog.
+     * Input event; no properties. Closes the dialog with no tender; the transaction remains
+     * {@code TOTALED} and re-tenderable.
+     */
+    CARD_TENDER_CANCELLED,
+
+    /**
+     * The Exact Amount tile on the cash-mode-choice dialog was pressed. Input event; carries a
+     * {@code prefillAmount} property (BigDecimal, the transaction's grand total) for journalling
+     * which mode produced the tender. <strong>Opens the cash-tender confirmation dialog</strong>
+     * seeded with the grand total; the tender is deferred to {@link #CASH_TENDER_CONFIRM_PRESSED}.
      */
     CASH_EXACT_PRESSED,
 
     /**
-     * The Next Dollar button on the cash-mode-choice dialog was pressed. Input event; carries
-     * a {@code prefillAmount} property (BigDecimal, the transaction's grand total rounded up
-     * to the next whole dollar) that the entry dialog is opened with pre-filled. Does not
-     * tender.
+     * The Next Dollar tile on the cash-mode-choice dialog was pressed. Input event; carries a
+     * {@code prefillAmount} property (BigDecimal, the grand total rounded up to the next whole
+     * dollar) for journalling. <strong>Opens the cash-tender confirmation dialog</strong> seeded
+     * with the ceiled amount; the tender is deferred to {@link #CASH_TENDER_CONFIRM_PRESSED}.
      */
     CASH_NEXT_DOLLAR_PRESSED,
 
     /**
-     * The Confirm button on the cash dialog was pressed. Input event; carries the raw
-     * {@code cashReceived} string entered by the cashier for the controller to validate.
+     * The Confirm button on the cash-tender confirmation dialog was pressed (Exact Amount / Next
+     * Dollar paths). Input event; no properties. The controller settles the pending cash amount
+     * for the pending mode (grand total for Exact, ceiled figure for Next Dollar) and goes
+     * straight to the receipt. Deferring the tender to this event makes a mis-tap on a mode tile
+     * recoverable.
+     */
+    CASH_TENDER_CONFIRM_PRESSED,
+
+    /**
+     * The Back button on the cash-tender confirmation dialog was pressed. Input event; no
+     * properties. Returns to the mode-choice dialog without tendering — a cashier who mis-tapped
+     * a mode tile can pick another. The transaction stays {@code TOTALED}.
+     */
+    CASH_TENDER_BACK_PRESSED,
+
+    /**
+     * The Other Amount button on the cash-mode-choice dialog was pressed. Input event; no
+     * meaningful properties (the amount is unknown until typed). Opens the amount-entry dialog
+     * so the cashier can key what the customer actually handed over; tender is deferred to
+     * {@link #CASH_CONFIRM_PRESSED}, and change is computed against the true grand total.
+     */
+    OTHER_CASH_AMOUNT_PRESSED,
+
+    /**
+     * The Confirm button on the cash-entry dialog was pressed (Other Amount path only). Input
+     * event; carries the raw {@code cashReceived} string entered by the cashier for the
+     * controller to validate.
      */
     CASH_CONFIRM_PRESSED,
 
     /**
-     * The Cancel button on either cash dialog (mode-choice or entry) was pressed. Input event;
-     * no properties. Closes both dialogs; the transaction remains {@code TOTALED} and
-     * re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}.
+     * The Back button on the cash-entry dialog was pressed. Input event; no properties. Returns
+     * to the mode-choice dialog without tendering — the cashier who meant Exact or Next Dollar
+     * need not re-open Pay Cash. The transaction stays {@code TOTALED}.
+     */
+    CASH_ENTRY_BACK_PRESSED,
+
+    /**
+     * The cash flow was abandoned entirely — Cancel on the mode-choice dialog, or ESC on either
+     * cash dialog. Input event; no properties. Closes both dialogs; the transaction remains
+     * {@code TOTALED} and re-tenderable via a fresh {@link #TENDER_CASH_PRESSED}. Dispatches no
+     * tender event.
      */
     CASH_CANCEL_PRESSED,
 
@@ -126,6 +198,15 @@ public enum PosEventType {
      * apart.
      */
     SCAN_SUBMIT_PRESSED,
+
+    /**
+     * The cashier tapped the scan bar's keypad button to open the on-screen numeric keypad for
+     * manual barcode entry. UI-open event: {@link com.rocketpartners.onboarding.possystem.display.ManualBarcodeEntryViewController}
+     * opens the modal keypad dialog in response. The dialog's own confirm re-uses
+     * {@link #SCAN_SUBMIT_PRESSED}, so manual keypad entry validates on the same path as a typed
+     * or scanned barcode. Carries no properties.
+     */
+    MANUAL_ENTRY_PRESSED,
 
     /** An item was added to the basket (new line or quantity increment). */
     ITEM_ADDED,
@@ -157,8 +238,10 @@ public enum PosEventType {
     TRANSACTION_TOTALED,
 
     /**
-     * Cash tender recorded. Carries {@code amountTendered} (BigDecimal, cash presented) and
-     * {@code changeDue} (BigDecimal, change owed to the customer) properties.
+     * Cash tender recorded. Carries {@code tenderType} (TenderType, always CASH),
+     * {@code amountTendered} (BigDecimal, cash presented), {@code amountDue} (BigDecimal, the
+     * settled amount the customer owed — the grand total, or the ceiled figure for Next Dollar),
+     * and {@code changeDue} (BigDecimal, change owed to the customer) properties.
      */
     CASH_TENDERED,
 

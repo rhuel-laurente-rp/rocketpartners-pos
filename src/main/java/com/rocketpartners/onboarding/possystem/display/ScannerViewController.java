@@ -10,6 +10,9 @@ import com.rocketpartners.onboarding.possystem.event.IPosEventListener;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 
+import javax.swing.Timer;
+import javax.swing.text.JTextComponent;
+import java.awt.Component;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.event.KeyEvent;
@@ -19,6 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Owns the barcode-input flow.
@@ -97,6 +101,19 @@ public class ScannerViewController implements IController, IPosEventListener {
         long millis();
     }
 
+    /**
+     * Schedules the deferred "stale flush" that replays held digits when a human types some
+     * digits and then stops. Production uses a one-shot {@link javax.swing.Timer} on the EDT;
+     * tests inject a controllable scheduler so the flush fires deterministically.
+     */
+    @FunctionalInterface
+    public interface ReplayScheduler {
+        /**
+         * @return a {@link Runnable} that cancels the pending task if run before it fires
+         */
+        Runnable after(long delayMs, Runnable task);
+    }
+
     private static final Set<PosEventType> LISTEN_TYPES = Collections.unmodifiableSet(EnumSet.of(
             PosEventType.SCAN_SUBMIT_PRESSED,
             // The scan bar suspends during any modal-driving flow so keystrokes can't leak.
@@ -106,6 +123,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.CHANGE_QTY_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED,
+            PosEventType.CARD_TENDER_CANCELLED,
             PosEventType.CASH_TENDERED,
             PosEventType.CARD_TENDERED,
             PosEventType.CHANGE_QTY_CONFIRM_PRESSED,
@@ -127,6 +145,20 @@ public class ScannerViewController implements IController, IPosEventListener {
     private final KeyDispatchInstaller keyInstaller;
     private final Clock clock;
     private final boolean debug;
+    private final Supplier<Component> focusOwnerSupplier;
+    private final ReplayScheduler replayScheduler;
+
+    /**
+     * Digits captured optimistically for the burst currently in flight — a mirror of the buffer's
+     * pending payload. When the burst turns out to be human typing (an inter-digit gap exceeds the
+     * burst threshold, the stale timeout fires, or a non-digit/terminator interrupts), these are
+     * replayed into the focused component instead of being swallowed. When a terminator closes a
+     * fast-enough burst they are discarded — the scan was dispatched, the field never saw them.
+     */
+    private final StringBuilder heldDigits = new StringBuilder();
+
+    /** Canceller for the pending stale-flush, or {@code null} when none is scheduled. */
+    private Runnable pendingFlushCancel;
 
     private PosComponent parent;
     private Runnable uninstallDispatcher;
@@ -156,20 +188,45 @@ public class ScannerViewController implements IController, IPosEventListener {
     }
 
     /**
-     * Test-facing constructor: inject the focus-manager installer and clock so tests can
-     * feed synthetic keystrokes at controlled timestamps without touching real Swing state.
+     * Test-facing constructor with default replay wiring: replays into the real focus owner and
+     * flushes stale holds via a one-shot Swing {@link Timer}.
      */
     ScannerViewController(ScannerView view, BarcodeInputBuffer buffer, boolean debug,
                           KeyDispatchInstaller keyInstaller, Clock clock) {
+        this(view, buffer, debug, keyInstaller, clock,
+                () -> KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner(),
+                defaultReplayScheduler());
+    }
+
+    /**
+     * Full test-facing constructor: also inject the focus-owner supplier (so a test can point
+     * replays at a real field) and the replay scheduler (so the stale flush fires on demand).
+     */
+    ScannerViewController(ScannerView view, BarcodeInputBuffer buffer, boolean debug,
+                          KeyDispatchInstaller keyInstaller, Clock clock,
+                          Supplier<Component> focusOwnerSupplier, ReplayScheduler replayScheduler) {
         if (view == null) throw new IllegalArgumentException("view must not be null");
         if (buffer == null) throw new IllegalArgumentException("buffer must not be null");
         if (keyInstaller == null) throw new IllegalArgumentException("keyInstaller must not be null");
         if (clock == null) throw new IllegalArgumentException("clock must not be null");
+        if (focusOwnerSupplier == null) throw new IllegalArgumentException("focusOwnerSupplier must not be null");
+        if (replayScheduler == null) throw new IllegalArgumentException("replayScheduler must not be null");
         this.view = view;
         this.buffer = buffer;
         this.debug = debug;
         this.keyInstaller = keyInstaller;
         this.clock = clock;
+        this.focusOwnerSupplier = focusOwnerSupplier;
+        this.replayScheduler = replayScheduler;
+    }
+
+    private static ReplayScheduler defaultReplayScheduler() {
+        return (delayMs, task) -> {
+            Timer t = new Timer((int) delayMs, e -> task.run());
+            t.setRepeats(false);
+            t.start();
+            return t::stop;
+        };
     }
 
     // ---- IController ------------------------------------------------------
@@ -185,6 +242,8 @@ public class ScannerViewController implements IController, IPosEventListener {
 
     @Override
     public void onEnd() {
+        cancelStaleFlush();
+        heldDigits.setLength(0);
         if (uninstallDispatcher != null) {
             try {
                 uninstallDispatcher.run();
@@ -223,34 +282,165 @@ public class ScannerViewController implements IController, IPosEventListener {
             return true;
         }
         if (e.getID() != KeyEvent.KEY_TYPED) return false;
-        // Suspend while a modal dialog is open: buffer stays reset, events pass through so
-        // the modal's own text fields (e.g. cash-received) receive normal typing.
+        // Suspend while a modal dialog is open: drop the buffer and any held digits, and pass
+        // events through so the modal's own text fields (e.g. cash-received) receive typing.
         if (suspended) {
+            cancelStaleFlush();
+            heldDigits.setLength(0);
             buffer.reset();
             return false;
         }
-        // Any keystroke that reaches an inline-error state clears the error — the cashier is
-        // rescanning or retyping, and the error hint is now stale.
-        view.clearInlineError();
         // Filter on KEY_TYPED's keyChar rather than keyCode: KEY_TYPED synthesises the character
         // regardless of whether the physical key was top-row or numeric-keypad, so a scanner
-        // emitting VK_NUMPAD0..VK_NUMPAD9 still surfaces the '0'..'9' char here. Filtering on
-        // keyCode would silently drop numeric-keypad scans.
+        // emitting VK_NUMPAD0..VK_NUMPAD9 still surfaces the '0'..'9' char here.
         char c = e.getKeyChar();
-        Optional<String> completed = buffer.accept(c, clock.millis());
-        if (completed.isPresent()) {
-            if (debug) {
-                buffer.pollLastBurstStats().ifPresent(stats -> System.err.printf(
-                        "[scan-calibration] chars=%d gaps=%d min=%dms max=%dms mean=%.1fms%n",
-                        stats.getCharCount(), stats.getGapCount(),
-                        stats.getMinGapMs(), stats.getMaxGapMs(), stats.getMeanGapMs()));
-            }
-            handleCompleted(completed.get());
-            // Consume the terminator so a scanner Enter doesn't ALSO fire the scan field's
-            // Enter action (which would double-dispatch as a manual submit).
-            return true;
+        boolean terminator = buffer.getTerminators().contains(c);
+
+        // A fresh non-terminator keystroke clears a stale inline error — the cashier is rescanning
+        // or retyping. The terminator is deliberately excluded: Enter is a submit, not new input.
+        // For manual entry the focused field's Enter action fires on the preceding KEY_PRESSED and
+        // has already produced this submit's result — which may itself be a fresh inline error such
+        // as "Item Not Found — 012345678905" — so clearing on the trailing KEY_TYPED('\n') would
+        // immediately wipe it. On the hardware path any error is set later in this same call (see
+        // handleCompleted below), after this point, so skipping the clear here changes nothing there.
+        if (!terminator) {
+            view.clearInlineError();
         }
-        return false;
+
+        // Manual entry: when the scan field itself holds focus, the cashier is deliberately typing
+        // a UPC (or a scanner is firing straight into the field, which submits on its own Enter).
+        // Let every keystroke reach the field untouched. Routing scan-field input through the burst
+        // detector holds digits back optimistically and, on a human-speed entry, submits only a
+        // fragment — e.g. the trailing digit as its own scan ("Item Not Found — 2") — or garbles the
+        // text so validation never sees it and no inline error fires. The field's own Enter action
+        // dispatches SCAN_SUBMIT_PRESSED for both input styles, so nothing is lost by staying out.
+        if (isScanFieldFocused()) {
+            // Any digits still held belong to a burst that targeted some other component; drop them
+            // so they can't later replay into this field out of order.
+            cancelStaleFlush();
+            heldDigits.setLength(0);
+            buffer.reset();
+            return false;
+        }
+
+        long now = clock.millis();
+
+        if (terminator) {
+            Optional<String> completed = buffer.accept(c, now);
+            if (completed.isPresent()) {
+                if (debug) {
+                    buffer.pollLastBurstStats().ifPresent(stats -> System.err.printf(
+                            "[scan-calibration] chars=%d gaps=%d min=%dms max=%dms mean=%.1fms%n",
+                            stats.getCharCount(), stats.getGapCount(),
+                            stats.getMinGapMs(), stats.getMaxGapMs(), stats.getMeanGapMs()));
+                }
+                // A fast-enough burst closed: the held digits were the scan, never the field's.
+                // Discard them, dispatch, and consume the terminator so a scanner Enter doesn't
+                // ALSO fire the scan field's Enter action (a double manual submit).
+                cancelStaleFlush();
+                heldDigits.setLength(0);
+                handleCompleted(completed.get());
+                return true;
+            }
+            // A terminator that did not close a burst (empty buffer, or CR+LF suppression): flush
+            // any held digits back to the field, then let the terminator through untouched.
+            flushHeldDigits();
+            return false;
+        }
+
+        if (!isDigit(c)) {
+            // A non-digit is human typing (product searches contain letters). Flush any held
+            // digits first so ordering is preserved ("20" then "Z"), then let it pass through so
+            // it reaches the focused field.
+            flushHeldDigits();
+            return false;
+        }
+
+        // Optimistic digit capture. Feed the buffer, then read its pending length: if it dropped
+        // its prior payload and restarted with just this digit, the gap since the last digit
+        // exceeded the burst threshold (or the stale timeout elapsed) — the prior digits were
+        // human typing, so replay them. Either way this digit is held (consumed), so nothing
+        // reaches the focused component while the burst is still ambiguous.
+        int before = buffer.pendingLength();
+        buffer.accept(c, now);
+        int after = buffer.pendingLength();
+        if (before > 0 && after <= before) {
+            replayToFocusOwner(heldDigits.toString());
+            heldDigits.setLength(0);
+        }
+        heldDigits.append(c);
+        scheduleStaleFlush();
+        return true;
+    }
+
+    private static boolean isDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    /**
+     * @return {@code true} when the platform focus owner is this bar's own scan field — the one
+     *         component where keystrokes are intended as manual UPC entry and must pass through
+     *         to the field rather than being captured as a scanner burst.
+     */
+    private boolean isScanFieldFocused() {
+        Component focusOwner = focusOwnerSupplier.get();
+        return focusOwner != null && focusOwner == view.getScanField();
+    }
+
+    /**
+     * Replays held digits into the focused component and clears the hold. Called when a burst is
+     * abandoned by a slow gap, a non-digit, a non-closing terminator, or the stale timeout.
+     */
+    private void flushHeldDigits() {
+        cancelStaleFlush();
+        if (heldDigits.length() > 0) {
+            replayToFocusOwner(heldDigits.toString());
+            heldDigits.setLength(0);
+        }
+        buffer.reset();
+    }
+
+    /**
+     * Inserts the given digits into the focused component if it is an editable text field —
+     * exactly where a human's typing would have landed. Non-text targets (a button, a tile) can't
+     * show digits, so there is nothing to replay into and the digits are simply dropped, which is
+     * also what real typing on such a component would do.
+     */
+    private void replayToFocusOwner(String digits) {
+        if (digits.isEmpty()) return;
+        Component target = focusOwnerSupplier.get();
+        if (target instanceof JTextComponent tc && tc.isEditable()) {
+            // Append at the document end rather than replaceSelection: a cashier types at the end
+            // of the field, and appending is order-preserving regardless of caret state (an
+            // unfocused field's caret sits at 0, which would reverse the digits).
+            javax.swing.text.Document doc = tc.getDocument();
+            try {
+                doc.insertString(doc.getLength(), digits, null);
+            } catch (javax.swing.text.BadLocationException ignored) {
+                // getLength() is always a valid offset; unreachable in practice.
+            }
+        }
+    }
+
+    private void scheduleStaleFlush() {
+        cancelStaleFlush();
+        // After staleTimeout of silence with digits still held, the input was human typing that
+        // stopped — replay it so the digits appear in the field rather than vanishing.
+        pendingFlushCancel = replayScheduler.after(buffer.getStaleTimeoutMs(), () -> {
+            pendingFlushCancel = null;
+            if (heldDigits.length() > 0) {
+                replayToFocusOwner(heldDigits.toString());
+                heldDigits.setLength(0);
+            }
+            buffer.reset();
+        });
+    }
+
+    private void cancelStaleFlush() {
+        if (pendingFlushCancel != null) {
+            pendingFlushCancel.run();
+            pendingFlushCancel = null;
+        }
     }
 
     // ---- IPosEventListener ------------------------------------------------
@@ -272,7 +462,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
                  CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
                  TRANSACTION_COMPLETED -> resumeCapture();
-            case CASH_CANCEL_PRESSED, CASH_TENDERED, CARD_TENDERED,
+            case CASH_CANCEL_PRESSED, CARD_TENDER_CANCELLED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
             // Receipt dismissal semantically starts a fresh sale: force unlocked
@@ -379,6 +569,8 @@ public class ScannerViewController implements IController, IPosEventListener {
 
     private void resumeCapture() {
         suspended = false;
+        cancelStaleFlush();
+        heldDigits.setLength(0);
         buffer.reset();
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
         boolean totaled = tx != null && tx.getState() == TransactionState.TOTALED;
@@ -397,6 +589,8 @@ public class ScannerViewController implements IController, IPosEventListener {
      */
     private void resumeReady() {
         suspended = false;
+        cancelStaleFlush();
+        heldDigits.setLength(0);
         buffer.reset();
         view.setLocked(false);
         restoreScanFocus();
