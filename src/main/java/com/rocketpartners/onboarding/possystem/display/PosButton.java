@@ -21,7 +21,7 @@ import java.awt.Shape;
  *
  * <p><strong>Elevation, resting state.</strong> The POS runs on a touchscreen, so in production
  * the hover state is never seen — a finger arrives directly at pressed. Resting therefore
- * carries the entire affordance burden. Four layers, painted in this order:</p>
+ * carries the entire affordance burden. Five layers, painted in this order:</p>
  * <ol>
  *   <li>Two concentric translucent-black drop shadows offset 2 px down, alphas from
  *       {@link PosTheme#BUTTON_SHADOW_ALPHA_INNER} / {@link PosTheme#BUTTON_SHADOW_ALPHA_OUTER}.</li>
@@ -33,6 +33,10 @@ import java.awt.Shape;
  *   <li>A 1 px inside-top-edge highlight in translucent white, painted only when the base fill
  *       is dark enough for it to register. Skipped on the pale secondary / danger tints where
  *       it would just look like a paint smear.</li>
+ *   <li>A 1 px solid border in the base fill darkened by {@link PosTheme#BUTTON_BORDER_SHADE},
+ *       tracing the rounded rect. Against a white surface the drop shadow washes out and the
+ *       fill reads as a flat region; the border restores the edge. It is derived from the fill,
+ *       not a neutral grey, so it reads as the object's own edge rather than a frame on top.</li>
  * </ol>
  *
  * <p><strong>Pressed state.</strong> The whole illusion collapses immediately — no shadow, no
@@ -79,6 +83,7 @@ class PosButton extends JButton {
     private final Color shadowInner;
     private final Color shadowOuter;
     private final Color lipColor;
+    private final Color borderColor;
     private final Color hoverFill;
     private final Color topHighlight;
     private final boolean paintTopHighlight;
@@ -90,6 +95,7 @@ class PosButton extends JButton {
         this.shadowInner = new Color(0, 0, 0, PosTheme.BUTTON_SHADOW_ALPHA_INNER);
         this.shadowOuter = new Color(0, 0, 0, PosTheme.BUTTON_SHADOW_ALPHA_OUTER);
         this.lipColor = PosTheme.shade(bg, PosTheme.BUTTON_LIP_SHADE);
+        this.borderColor = PosTheme.shade(bg, PosTheme.BUTTON_BORDER_SHADE);
         this.hoverFill = PosTheme.shade(bg, 1.06f);
         this.topHighlight = new Color(255, 255, 255, PosTheme.BUTTON_TOP_HIGHLIGHT_ALPHA);
         this.paintTopHighlight = PosTheme.isDarkFill(bg);
@@ -199,6 +205,14 @@ class PosButton extends JButton {
                 g2.drawLine(arc / 2, 1, w - arc / 2, 1);
             }
         }
+
+        // 5. Border — a 1px solid line in the fill darkened by BUTTON_BORDER_SHADE, tracing the
+        //    same rounded rect as the fill. Painted in every live state (resting, hover, pressed)
+        //    so the button reads as a pressable object against a white surface where the shadow
+        //    alone washes out. It joins the shadow and lip rather than replacing them: border
+        //    defines the edge, lip gives thickness, shadow lifts it off the surface.
+        g2.setColor(borderColor);
+        g2.drawRoundRect(0, 0, w - 1, fillH - 1, arc, arc);
 
         g2.dispose();
         setForeground(fg);

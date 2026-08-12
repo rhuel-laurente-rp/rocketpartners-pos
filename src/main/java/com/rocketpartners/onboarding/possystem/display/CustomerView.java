@@ -52,7 +52,7 @@ import java.util.Objects;
  *
  * <p>The window is a fixed 1512×982 non-resizable surface, so the layout is proportional, not
  * responsive: every split is an exact fraction via {@link ProportionalLayout}. Four nesting
- * levels — content width 30/70, each column 80/20, and the bottom-right row 70/30:</p>
+ * levels — content width 30/70, each column 80/20, and the bottom-right row 60/40:</p>
  * <ul>
  *   <li><strong>Left 30%.</strong> Top 80%: the <strong>Basket</strong> — scan-bar mount point
  *       above the line-item list (or an empty-state prompt). Bottom 20%: the <strong>Summary</strong>
@@ -60,9 +60,9 @@ import java.util.Objects;
  *   <li><strong>Right 70%.</strong> Top 80%: <strong>Quick Add</strong> — a searchable, sortable,
  *       paged grid of tiles over the whole pricebook (see {@link QuickAddPanel}), each dispatching
  *       a {@link PosEventType#QUICK_ADD_PRESSED} event carrying its bound UPC. Bottom 20%: split
- *       70/30 into <strong>Actions</strong> (Change Quantity,
- *       Void Line, Discount, Void Basket, then Total) and <strong>Payment</strong> (Pay Cash, then
- *       Pay Debit / Pay Credit — disabled until Total is pressed).</li>
+ *       60/40 into <strong>Actions</strong> — one row of five tall buttons: Void Basket, Void Line,
+ *       Change Qty, Discount, Total — and <strong>Payment</strong> — one row of three: Pay Cash,
+ *       Pay Debit, Pay Credit (disabled until Total is pressed).</li>
  * </ul>
  *
  * <p>All palette and type tokens live in {@link PosTheme}; button variants in {@link PosButtons}.
@@ -102,9 +102,16 @@ public class CustomerView extends JFrame {
     /** Basket / Quick Add share of a column's height; the summary / bottom row take the rest. */
     private static final float TOP_ROW_FRACTION = 0.80f;
     private static final float BOTTOM_ROW_FRACTION = 0.20f;
-    /** Actions share of the bottom-right row; Payment takes the rest. */
-    private static final float ACTIONS_FRACTION = 0.70f;
-    private static final float PAYMENT_FRACTION = 0.30f;
+    /** Actions share of the bottom-right row; Payment takes the rest. Payment is the terminal
+     *  action and carries more visual weight than a single edit control, so tender buttons come
+     *  out wider than action buttons at this split. */
+    private static final float ACTIONS_FRACTION = 0.60f;
+    private static final float PAYMENT_FRACTION = 0.40f;
+
+    /** Bottom padding beneath the actions/payment row, matched to {@link #OUTER_PAD} so the
+     *  window inset reads as uniform. A control flush to the panel edge is measurably harder to
+     *  hit on a touchscreen — the bezel interferes with the finger's approach angle. */
+    private static final int BOTTOM_ROW_PAD = 12;
 
     // ---- Density animation -------------------------------------------------
     /** Duration of the row-height glide between Comfortable and Compact. */
@@ -148,7 +155,10 @@ public class CustomerView extends JFrame {
 
     /** The Quick Add card body: search + sort + paged tile grid over the whole pricebook. */
     private QuickAddPanel quickAddPanel;
-    private final PosButton changeQtyButton = PosButtons.secondary("Change Quantity");
+    // "Change Qty" rather than the dialog's full "Change Quantity": five buttons now share the
+    // actions strip, so the label is shortened to fit its narrower target while the dialog title
+    // stays "Change Quantity".
+    private final PosButton changeQtyButton = PosButtons.secondary("Change Qty");
     private final PosButton voidLineButton = PosButtons.secondary("Void Line");
     // Discount lives in the actions row but is disabled: applying a discount mid-transaction is a
     // domain change (see PosEventType#DISCOUNT_PRESSED) scheduled for feature/in-progress-discounts.
@@ -468,6 +478,18 @@ public class CustomerView extends JFrame {
         return totalButton.isEnabled();
     }
 
+    /** For tests: whether the Discount button is enabled. It stays disabled until the
+     *  in-progress-discount feature lands (see {@link PosEventType#DISCOUNT_PRESSED}). */
+    boolean isDiscountEnabledForTest() {
+        return discountButton.isEnabled();
+    }
+
+    /** For tests: whether the three tender buttons (cash/debit/credit) are enabled. */
+    boolean isTenderEnabledForTest() {
+        return payCashButton.isEnabled() && payDebitButton.isEnabled()
+                && payCreditButton.isEnabled();
+    }
+
     /**
      * Dismisses the Quick Add search keyboard, if it's open. Called by the controller when an
      * item is added — a successful scan or a tapped tile means the cashier no longer needs the
@@ -525,6 +547,13 @@ public class CustomerView extends JFrame {
     /** For tests: the three tender buttons in cash / debit / credit order. */
     PosButton[] getTenderButtonsForTest() {
         return new PosButton[]{payCashButton, payDebitButton, payCreditButton};
+    }
+
+    /** For tests/snapshots: the five action buttons in on-screen (left-to-right) order:
+     *  Void Basket, Void Line, Change Qty, Discount, Total. */
+    PosButton[] getActionButtonsForTest() {
+        return new PosButton[]{voidBasketButton, voidLineButton, changeQtyButton,
+                discountButton, totalButton};
     }
 
     // Summary tape test hooks — expose the four labels and the tape container so tests can
@@ -657,6 +686,10 @@ public class CustomerView extends JFrame {
     private JPanel buildBottomRow() {
         bottomRow = new JPanel(new ProportionalLayout(ProportionalLayout.HORIZONTAL));
         bottomRow.setOpaque(false);
+        // Bottom padding so the tender/action strip doesn't sit flush against the window edge —
+        // ProportionalLayout honours the container insets, so this simply shortens the row's
+        // usable height by BOTTOM_ROW_PAD without disturbing the 60/40 horizontal split.
+        bottomRow.setBorder(BorderFactory.createEmptyBorder(0, 0, BOTTOM_ROW_PAD, 0));
 
         JPanel actions = buildActionsCard();
         actions.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, CARD_GAP));
@@ -798,12 +831,16 @@ public class CustomerView extends JFrame {
     }
 
     /**
-     * Bottom-right, left 70%: the basket actions. Row one is four equal buttons — Change
-     * Quantity, Void Line, Discount, Void Basket; row two is Total spanning the full width.
+     * Bottom-right, left 60%: the basket actions as a single row of five tall buttons — Void
+     * Basket │ Void Line │ Change Qty │ Discount │ Total. One row means no vertical neighbours to
+     * mis-tap between, and each button uses the full row height as a single generous target.
+     *
+     * <p>The order is deliberate. Total is the most-pressed button in the lane and Void Basket
+     * destroys the sale, so they must not be adjacent — a fat-finger between the two would be
+     * catastrophic. With this ordering Total's only neighbour is Discount (harmless) and the strip
+     * reads left-to-right as edit → finalise, flowing into the tender group beside it.</p>
      */
     private JPanel buildActionsCard() {
-        JPanel fourUp = new JPanel(new GridLayout(1, 4, PosTheme.BUTTON_GAP, 0));
-        fourUp.setOpaque(false);
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
         // Discount is wired but disabled — enabling it requires the IN_PROGRESS-discount domain
@@ -816,21 +853,26 @@ public class CustomerView extends JFrame {
         // vocabulary (VOID_BASKET_CONFIRM_PRESSED / VOID_BASKET_DECLINED).
         voidBasketButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.VOID_BASKET_PRESSED)));
-        changeQtyButton.setEnabled(false);
-        discountButton.setEnabled(false);
-        fourUp.add(changeQtyButton);
-        fourUp.add(voidLineButton);
-        fourUp.add(discountButton);
-        fourUp.add(voidBasketButton);
-
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
+        changeQtyButton.setEnabled(false);
+        discountButton.setEnabled(false);
 
-        JPanel body = new JPanel(new GridLayout(2, 1, 0, PosTheme.BUTTON_GAP));
+        // Single horizontal row; GridLayout stretches every button to the full section height, so
+        // each fills the ~180px row as one tall target. Order: destructive-and-edit on the left,
+        // Total on the right, Void Basket kept far from Total.
+        JPanel row = new JPanel(new GridLayout(1, 5, PosTheme.BUTTON_GAP, 0));
+        row.setOpaque(false);
+        row.add(voidBasketButton);
+        row.add(voidLineButton);
+        row.add(changeQtyButton);
+        row.add(discountButton);
+        row.add(totalButton);
+
+        JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
-        body.add(fourUp);
-        body.add(totalButton);
+        body.add(row, BorderLayout.CENTER);
 
         actionsPanel = PosTheme.card("Actions", body);
         return actionsPanel;
@@ -963,10 +1005,11 @@ public class CustomerView extends JFrame {
     }
 
     /**
-     * Bottom-right, right 30%: the tender controls. Row one is Pay Cash across the full width;
-     * row two splits Pay Debit / Pay Credit evenly (≈15% of the right panel apiece). At that
-     * width the colour, not the label, is what tells the three tenders apart — so each keeps its
-     * own fill (cash green, debit blue, credit indigo). All three are disabled until Total.
+     * Bottom-right, right 40%: the tender controls as a single row of three tall buttons — Pay
+     * Cash │ Pay Debit │ Pay Credit. One row, no vertical neighbours, each filling the full
+     * section height. At this width the colour, not the label, is what tells the three tenders
+     * apart — so each keeps its own fill (cash green, debit blue, credit indigo). All three are
+     * disabled until Total.
      */
     private JPanel buildPaymentCard() {
         payCashButton.addActionListener(e ->
@@ -979,16 +1022,19 @@ public class CustomerView extends JFrame {
         payDebitButton.setEnabled(false);
         payCreditButton.setEnabled(false);
 
-        cardTenderRow = new JPanel(new GridLayout(1, 2, PosTheme.BUTTON_GAP, 0));
+        // The three tenders in one horizontal row; GridLayout gives them equal width and stretches
+        // each to the full section height. Retained in the cardTenderRow field so layout tests can
+        // read the split directly.
+        cardTenderRow = new JPanel(new GridLayout(1, 3, PosTheme.BUTTON_GAP, 0));
         cardTenderRow.setOpaque(false);
+        cardTenderRow.add(payCashButton);
         cardTenderRow.add(payDebitButton);
         cardTenderRow.add(payCreditButton);
 
-        JPanel body = new JPanel(new GridLayout(2, 1, 0, PosTheme.BUTTON_GAP));
+        JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(10, 12, 12, 12));
-        body.add(payCashButton);
-        body.add(cardTenderRow);
+        body.add(cardTenderRow, BorderLayout.CENTER);
 
         paymentPanel = PosTheme.card("Payment", body);
         return paymentPanel;

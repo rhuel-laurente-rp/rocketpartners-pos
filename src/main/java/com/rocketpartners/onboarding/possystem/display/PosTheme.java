@@ -59,10 +59,6 @@ public final class PosTheme {
     public static final Color HOVER_ROW = new Color(0xF5, 0xF6, 0xF3);
     /** Muted rule inside the basket list between rows. */
     public static final Color ROW_RULE = new Color(0xF1, 0xEF, 0xEA);
-    /** Fill for the compact quantity badge (non-voided). */
-    public static final Color BADGE_BG = new Color(0x0B, 0x6E, 0x4F);
-    /** Text colour on the compact quantity badge. */
-    public static final Color BADGE_FG = Color.WHITE;
     /** Fill for disabled controls. */
     public static final Color DISABLED_BG = new Color(0xF0, 0xEF, 0xEB);
     /** Foreground for disabled control text. */
@@ -97,6 +93,12 @@ public final class PosTheme {
     public static final int BUTTON_LIP_HEIGHT = 3;
     /** Multiplier applied to the base fill to derive the lip colour: ~12% darker. */
     public static final float BUTTON_LIP_SHADE = 0.88f;
+    /** Multiplier applied to the base fill to derive the 1px solid border colour: ~14% darker.
+     *  A hair darker than {@link #BUTTON_LIP_SHADE} so the border reads as the edge of the button
+     *  itself rather than a frame laid on top — a neutral-grey outline around a coloured fill looks
+     *  like a separate rectangle, a darker shade of the fill looks like the object's own edge.
+     *  Precomputed once per button (see {@code PosButton}); no call site does its own arithmetic. */
+    public static final float BUTTON_BORDER_SHADE = 0.86f;
     /** Alpha of the 1px inside-top-edge highlight painted only on dark-fill buttons. */
     public static final int BUTTON_TOP_HIGHLIGHT_ALPHA = 38;
     /** Corner radius of every rounded button rect. */

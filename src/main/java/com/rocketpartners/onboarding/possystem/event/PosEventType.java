@@ -199,6 +199,15 @@ public enum PosEventType {
      */
     SCAN_SUBMIT_PRESSED,
 
+    /**
+     * The cashier tapped the scan bar's keypad button to open the on-screen numeric keypad for
+     * manual barcode entry. UI-open event: {@link com.rocketpartners.onboarding.possystem.display.ManualBarcodeEntryViewController}
+     * opens the modal keypad dialog in response. The dialog's own confirm re-uses
+     * {@link #SCAN_SUBMIT_PRESSED}, so manual keypad entry validates on the same path as a typed
+     * or scanned barcode. Carries no properties.
+     */
+    MANUAL_ENTRY_PRESSED,
+
     /** An item was added to the basket (new line or quantity increment). */
     ITEM_ADDED,
 

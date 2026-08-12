@@ -37,11 +37,154 @@ public final class CustomerViewSnapshotTool {
             throw new IllegalStateException("could not create " + out.getAbsolutePath());
         }
         snapshot(0, new File(out, "customerview-empty.png"));
-        snapshot(3, new File(out, "customerview-3.png"));
+        // Basket at 5 / 15 / 40 items brackets the density transition (threshold 9): 5 comfortable,
+        // 15 and 40 compact, so the padding tightening is visible across the trio.
+        snapshot(5, new File(out, "customerview-5.png"));
+        snapshot(15, new File(out, "customerview-15.png"));
         snapshot(40, new File(out, "customerview-40.png"));
         snapshotWithKeyboard(new File(out, "quickadd-qwerty-open.png"));
+
+        // Bottom strip standalone, both enable states, so the border/60-40/single-row work can be
+        // judged without the rest of the window.
+        snapshotBottomStrip(true, new File(out, "bottomstrip-enabled.png"));
+        snapshotBottomStrip(false, new File(out, "bottomstrip-disabled.png"));
+
+        // Quick Add footer on the first, a middle, and the last page — pager controls disabled at
+        // the boundaries, the current-page pill and "N of M pages" indicator moving with the page.
+        snapshotQuickAddFooter("first", new File(out, "quickadd-footer-first.png"));
+        snapshotQuickAddFooter("middle", new File(out, "quickadd-footer-middle.png"));
+        snapshotQuickAddFooter("last", new File(out, "quickadd-footer-last.png"));
+
+        measure();
+
         System.out.println("Wrote full-window snapshots to " + out.getAbsolutePath());
         System.exit(0);
+    }
+
+    /**
+     * Prints the measured width×height of every action and tender button, plus the visible basket
+     * row counts at both densities. Uses forced layout at the true 1512×982 register surface (a
+     * laptop screen would clamp a shown window shorter and understate the numbers).
+     */
+    static void measure() {
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        try {
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            view.updateBasket(basket(40), new BigDecimal("40.00"), BigDecimal.ZERO,
+                    BigDecimal.ZERO, new BigDecimal("40.00"));
+            layoutAll(content);
+
+            PosButton[] actions = view.getActionButtonsForTest();
+            String[] actionNames = {"Void Basket", "Void Line", "Change Qty", "Discount", "Total"};
+            System.out.println("[measurement] Action buttons (60% of bottom row):");
+            for (int i = 0; i < actions.length; i++) {
+                System.out.println("  " + actionNames[i] + ": "
+                        + actions[i].getWidth() + " x " + actions[i].getHeight() + " px");
+            }
+            PosButton[] tenders = view.getTenderButtonsForTest();
+            String[] tenderNames = {"Pay Cash", "Pay Debit", "Pay Credit"};
+            System.out.println("[measurement] Tender buttons (40% of bottom row):");
+            for (int i = 0; i < tenders.length; i++) {
+                System.out.println("  " + tenderNames[i] + ": "
+                        + tenders[i].getWidth() + " x " + tenders[i].getHeight() + " px");
+            }
+
+            int viewportH = view.getBasketListForTest().getParent().getHeight();
+            int comfyRows = viewportH / BasketCellRenderer.COMFORTABLE_ROW_HEIGHT;
+            int compactRows = viewportH / BasketCellRenderer.COMPACT_ROW_HEIGHT;
+            System.out.println("[measurement] Basket viewport height: " + viewportH + "px");
+            System.out.println("  Comfortable (" + BasketCellRenderer.COMFORTABLE_ROW_HEIGHT
+                    + "px rows): ~" + comfyRows + " visible rows");
+            System.out.println("  Compact (" + BasketCellRenderer.COMPACT_ROW_HEIGHT
+                    + "px rows): ~" + compactRows + " visible rows");
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /**
+     * Renders the bottom strip (actions + payment) standalone in one enable state. Enabled selects
+     * a basket row first so the selection-dependent actions (Change Qty / Void Line) light up too;
+     * disabled locks basket input and tender, leaving Discount and the tenders dark.
+     */
+    static void snapshotBottomStrip(boolean enabled, File target) throws Exception {
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        try {
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            view.updateBasket(basket(3), new BigDecimal("3.00"), BigDecimal.ZERO,
+                    BigDecimal.ZERO, new BigDecimal("3.00"));
+            if (enabled) {
+                view.setBasketInputEnabled(true);
+                view.getBasketListForTest().setSelectedIndex(0);
+                view.setTenderInputEnabled(true);
+            } else {
+                view.setBasketInputEnabled(false);
+                view.setTenderInputEnabled(false);
+            }
+            layoutAll(content);
+
+            java.awt.Container strip = view.getBottomRowForTest();
+            BufferedImage img = new BufferedImage(Math.max(1, strip.getWidth()),
+                    Math.max(1, strip.getHeight()), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                g.setColor(PosTheme.PAPER);
+                g.fillRect(0, 0, img.getWidth(), img.getHeight());
+                strip.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /**
+     * Renders the Quick Add footer on the requested page ({@code first} / {@code middle} /
+     * {@code last}) so the disabled-at-boundary pager controls and the current-page pill can be
+     * eyeballed. A deterministic capacity is forced so the page count doesn't depend on the
+     * laid-out grid size.
+     */
+    static void snapshotQuickAddFooter(String which, File target) throws Exception {
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        try {
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            QuickAddPanel qp = view.getQuickAddPanelForTest();
+            // Lay out FIRST — the grid's resize listener recomputes capacity from the laid-out size,
+            // which would clobber a capacity forced beforehand. The resize event is delivered
+            // asynchronously on the EDT, so drain the queue before forcing capacity; otherwise a
+            // late componentResized fires after we've set it and quietly resets the page count.
+            layoutAll(content);
+            javax.swing.SwingUtilities.invokeAndWait(() -> { });
+            qp.setCapacityForTest(4, 8); // 20 items → 3 pages
+            switch (which) {
+                case "first" -> qp.firstForTest();
+                case "last" -> qp.lastForTest();
+                default -> qp.nextForTest(); // middle
+            }
+
+            java.awt.Container footer = (java.awt.Container) qp.getComponent(qp.getComponentCount() - 1);
+            BufferedImage img = new BufferedImage(Math.max(1, footer.getWidth()),
+                    Math.max(1, footer.getHeight()), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                g.setColor(PosTheme.SURFACE);
+                g.fillRect(0, 0, img.getWidth(), img.getHeight());
+                footer.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName() + " (page "
+                    + (qp.getPageForTest() + 1) + " of " + qp.getPageCountForTest() + ")");
+        } finally {
+            view.dispose();
+        }
     }
 
     /**

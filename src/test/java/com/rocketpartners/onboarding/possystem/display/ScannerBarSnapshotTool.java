@@ -19,12 +19,14 @@ import java.io.File;
  * a Gradle task if one is registered. Skips silently when the JVM is headless so CI never bombs.
  *
  * <p>Renders each state at a fixed width, labels it, and writes a single composite PNG to
- * {@code build/snapshots/scan-bar.png} so the four are visually comparable.</p>
+ * {@code build/snapshots/scan-bar.png} so the states — idle, focused, locked, error — are
+ * visually comparable. The bar is now two stacked rows (field over a reserved message row), so
+ * each cell is sized to the bar's full preferred height rather than a single-row strip.</p>
  */
 public final class ScannerBarSnapshotTool {
 
     private static final int CELL_W = 780;
-    private static final int CELL_H = 90;
+    private static final int CELL_H = 104;
     private static final int LABEL_H = 26;
     private static final int PAD = 24;
 
@@ -89,8 +91,11 @@ public final class ScannerBarSnapshotTool {
         JPanel host = new JPanel(null);
         host.setBackground(PosTheme.SURFACE);
         host.setSize(CELL_W, CELL_H);
-        view.setSize(CELL_W - PAD * 2, CELL_H - PAD);
-        view.setLocation(PAD, PAD / 2);
+        // Size to the bar's full preferred height so both rows (field + reserved message) render;
+        // a fixed single-row height would clip the message row.
+        int barH = view.getPreferredSize().height;
+        view.setSize(CELL_W - PAD * 2, barH);
+        view.setLocation(PAD, (CELL_H - barH) / 2);
         host.add(view);
 
         setup.apply(view);

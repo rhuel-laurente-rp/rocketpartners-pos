@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -178,6 +179,29 @@ class ScannerViewControllerTest {
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.ITEM_SCANNED)
                 .getProperty("source", String.class)).isEqualTo("manualScan");
+    }
+
+    @Test
+    void hardwareBurstAndManualEntry_carryDistinctSourceTags() {
+        // The journal distinguishes hardware reads from manual entry via the ITEM_SCANNED "source"
+        // tag: a fast burst is "scan", a field submit is "manualScan". Removing the Scan button
+        // (Enter is now the only manual trigger) must not collapse that distinction.
+        ensureInProgress();
+
+        burst("049000053418", 5);
+        typed('\n');
+        String hardwareSource = notifications.lastOf(PosEventType.ITEM_SCANNED)
+                .getProperty("source", String.class);
+
+        Map<String, Object> props = new HashMap<>();
+        props.put("raw", "049000053418");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
+        String manualSource = notifications.lastOf(PosEventType.ITEM_SCANNED)
+                .getProperty("source", String.class);
+
+        assertThat(hardwareSource).isEqualTo("scan");
+        assertThat(manualSource).isEqualTo("manualScan");
+        assertThat(hardwareSource).isNotEqualTo(manualSource);
     }
 
     @Test
@@ -450,6 +474,79 @@ class ScannerViewControllerTest {
 
         // No inline call for a non-scan code.
         verify(view, times(0)).setInlineError(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    // ---- Manual entry into the focused scan field -------------------------
+
+    @Test
+    void humanTypingIntoFocusedScanField_passesThrough_isNotHeldOrCapturedAsBurst() {
+        // Regression: with focus on the bar's own scan field, the app-wide dispatcher must NOT run
+        // its optimistic digit capture. Previously each digit was consumed and held, so a
+        // human-speed UPC left only a fragment in the field — Enter then submitted the trailing
+        // digit as its own scan ("Item Not Found — 2"), or the text was garbled and no inline
+        // error fired at all. Every keystroke must pass straight through (dispatcher returns false)
+        // so the field accumulates the full text.
+        installCaptureController(() -> scanField, new ManualScheduler());
+        ensureInProgress();
+
+        for (char c : "012345678905".toCharArray()) {
+            boolean consumed = typed(c);
+            assertThat(consumed)
+                    .as("digit '%s' typed into the focused scan field must pass through, not be consumed", c)
+                    .isFalse();
+            tickAdvance(120);   // human speed — each gap exceeds the 50ms burst threshold
+        }
+
+        // The dispatcher must not have manufactured a scan from the held fragments, and the Enter
+        // terminator likewise passes through so the field's own action submits the whole text.
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED))
+                .as("no scan may be dispatched from held fragments while typing into the field")
+                .isZero();
+        assertThat(typed('\n'))
+                .as("Enter into the focused scan field passes through to the field's own submit")
+                .isFalse();
+    }
+
+    @Test
+    void manualSubmitOfUnknownUpc_inlineErrorSurvivesTheTrailingEnterKeystroke() {
+        // Reproduces the reported regression: hand-typing an unknown UPC and pressing Enter showed
+        // no inline error. Swing fires the field's Enter action on KEY_PRESSED — that sets
+        // "Item Not Found — …" — and then delivers KEY_TYPED('\n') for the same keypress. The
+        // dispatcher must NOT clear the inline error on that trailing terminator, or the just-shown
+        // message is wiped before the cashier can read it.
+        pos.getTransactionService().startTransaction();
+        pos.addController(new CustomerViewController(mock(CustomerView.class)));
+        installCaptureController(() -> scanField, new ManualScheduler());
+
+        // The field's Enter action, as Swing fires it on KEY_PRESSED.
+        Map<String, Object> props = new HashMap<>();
+        props.put("raw", "012345678905");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
+        verify(view).setInlineError(
+                ScannerViewController.MSG_ITEM_NOT_FOUND_PREFIX + "012345678905");
+
+        // The trailing terminator keystroke for the same Enter must leave the error alone.
+        clearInvocations(view);
+        typed('\n');
+        verify(view, times(0)).clearInlineError();
+    }
+
+    @Test
+    void fastTypingIntoFocusedScanField_stillPassesThrough_notCapturedAsBurst() {
+        // Even at scanner speed, input into the *focused scan field* is not the "wrong component"
+        // problem the burst detector exists to solve — the field handles it and submits on Enter.
+        // So a fast entry here must not be swallowed and re-dispatched as an ITEM_SCANNED by the
+        // dispatcher; it passes through, leaving submission to the field's Enter action.
+        installCaptureController(() -> scanField, new ManualScheduler());
+        ensureInProgress();
+
+        for (char c : "049000053418".toCharArray()) {
+            assertThat(typed(c)).isFalse();
+            tickAdvance(5);     // scanner speed
+        }
+        assertThat(typed('\n')).isFalse();
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
     }
 
     // ---- Global scanning: optimistic capture + replay ---------------------
