@@ -80,6 +80,29 @@ class QuickAddPanelTest {
         assertThat(p.getPageForTest()).isZero();
     }
 
+    @Test
+    void pagerControls_disableRatherThanHide_atBoundaries() {
+        QuickAddPanel p = panelOf(widgets(25));
+        p.setCapacityForTest(5, 10); // 3 pages: 0,1,2
+
+        // First page: First/Prev are dead ends, Next/Last live — but all four stay visible. Hiding
+        // First/Prev would shift the cluster sideways and move Next under a finger already aimed.
+        p.firstForTest();
+        assertThat(p.firstEnabledForTest()).isFalse();
+        assertThat(p.prevEnabledForTest()).isFalse();
+        assertThat(p.nextEnabledForTest()).isTrue();
+        assertThat(p.lastEnabledForTest()).isTrue();
+        assertThat(p.pagerControlsAllVisibleForTest()).isTrue();
+
+        // Last page: the mirror image — Next/Last dead, First/Prev live, all still visible.
+        p.lastForTest();
+        assertThat(p.nextEnabledForTest()).isFalse();
+        assertThat(p.lastEnabledForTest()).isFalse();
+        assertThat(p.firstEnabledForTest()).isTrue();
+        assertThat(p.prevEnabledForTest()).isTrue();
+        assertThat(p.pagerControlsAllVisibleForTest()).isTrue();
+    }
+
     // ---- Tile count matches capacity --------------------------------------
 
     @Test

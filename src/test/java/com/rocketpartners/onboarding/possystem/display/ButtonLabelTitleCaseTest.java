@@ -27,7 +27,9 @@ class ButtonLabelTitleCaseTest {
     private static final Map<String, String> LABELS = new LinkedHashMap<>();
     static {
         // ---- Buttons: main window --------------------------------------
-        LABELS.put("CustomerView.changeQty",   "Change Quantity");
+        // The main-window action button is "Change Qty" (shortened to fit the five-button strip);
+        // the Change Quantity dialog title below keeps the full form.
+        LABELS.put("CustomerView.changeQty",   "Change Qty");
         LABELS.put("CustomerView.voidLine",    "Void Line");
         LABELS.put("CustomerView.voidBasket",  "Void Basket");
         LABELS.put("CustomerView.total",       "Total");

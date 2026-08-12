@@ -16,11 +16,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.FontMetrics;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.GridBagLayout;
-import java.awt.RenderingHints;
 
 /**
  * Renders one basket row as a dense four-column table row: <strong>Item · Price · Qty ·
@@ -31,24 +27,27 @@ import java.awt.RenderingHints;
  * the same column geometry exposed by {@link #numericColumns(JComponent, JComponent, JComponent)}
  * and {@link #ITEM_INSET_LEFT}.
  *
- * <p><strong>Qty is the badge.</strong> The quantity column is the {@link BadgePanel} pill: a
- * multi-quantity line jumps out of the list — a wrong quantity is the expensive mistake — while a
- * quantity of one reads as blank, the same convenience-store convention the previous design used.
- * Keeping the badge as the qty indicator also means the density regression tests, which probe the
- * badge's paint behaviour, keep describing a real element rather than a vestige.</p>
+ * <p><strong>Qty is plain text.</strong> The quantity column renders the number directly — no
+ * pill, no ellipse. In a four-column table the column itself is the distinction, so a badge would
+ * be redundant chrome. Every line shows its count, including {@code 1}: an empty cell in a table
+ * column reads as missing data, whereas a badge could sensibly stay blank at one.</p>
  *
- * <p>Two density modes change only the row height, not the columns:</p>
+ * <p><strong>Density is padding, not font.</strong> Two modes change the row's vertical padding
+ * (and therefore its height) while the type stays put at {@link PosTheme#BODY} — legible at
+ * counter distance under fluorescent light, where a smaller face starts getting price digits
+ * misread. Comfortable breathes; compact tightens the padding so more rows fit once the basket
+ * grows:</p>
  * <ul>
  *   <li><strong>Comfortable</strong> (≤ {@value #DENSITY_THRESHOLD} items, {@value
- *       #COMFORTABLE_ROW_HEIGHT}px rows).</li>
+ *       #COMFORTABLE_ROW_PAD}px vertical padding, {@value #COMFORTABLE_ROW_HEIGHT}px rows).</li>
  *   <li><strong>Compact</strong> (&gt; {@value #DENSITY_THRESHOLD} items, {@value
- *       #COMPACT_ROW_HEIGHT}px rows).</li>
+ *       #COMPACT_ROW_PAD}px vertical padding, {@value #COMPACT_ROW_HEIGHT}px rows).</li>
  * </ul>
  *
  * <p>Row states, in precedence order (highest first): <em>flash</em> (a green tint painted by the
- * container at row bounds; the renderer only pulses the badge in sympathy), <em>selected</em>
- * ({@link PosTheme#SELECTED}), <em>hover</em> ({@link PosTheme#HOVER_ROW}). Voided lines are struck
- * through and muted but stay visible — a void is not a delete.</p>
+ * container at row bounds), <em>selected</em> ({@link PosTheme#SELECTED}), <em>hover</em>
+ * ({@link PosTheme#HOVER_ROW}). Voided lines are struck through and muted but stay visible — a
+ * void is not a delete.</p>
  *
  * <p>All components, fonts, and colours are allocated once in the constructor and mutated per
  * call; {@link #getListCellRendererComponent} allocates no {@code Component}, {@code Font},
@@ -57,10 +56,14 @@ import java.awt.RenderingHints;
  */
 public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineItem> {
 
-    /** Row height when the basket has few enough items to breathe. */
-    public static final int COMFORTABLE_ROW_HEIGHT = 52;
+    /** Vertical padding above and below the row content when the basket can breathe. */
+    public static final int COMFORTABLE_ROW_PAD = 6;
+    /** Vertical padding once the basket is dense — tightened, but the type is unchanged. */
+    public static final int COMPACT_ROW_PAD = 2;
+    /** Row height when the basket has few enough items to breathe (BODY line height + padding). */
+    public static final int COMFORTABLE_ROW_HEIGHT = 30;
     /** Row height when the basket is dense and every pixel counts. */
-    public static final int COMPACT_ROW_HEIGHT = 42;
+    public static final int COMPACT_ROW_HEIGHT = 22;
     /** The threshold at which the list switches from Comfortable to Compact. */
     public static final int DENSITY_THRESHOLD = 9;
 
@@ -71,7 +74,7 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     public static final int ITEM_INSET_RIGHT = 12;
     /** Fixed width of the Price column. */
     public static final int PRICE_COL_WIDTH = 66;
-    /** Fixed width of the Qty column (holds the {@link BadgePanel}). */
+    /** Fixed width of the Qty column (holds the plain-text quantity). */
     public static final int QTY_COL_WIDTH = 40;
     /** Fixed width of the Total column. */
     public static final int TOTAL_COL_WIDTH = 66;
@@ -81,10 +84,15 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     private final JLabel description = new JLabel();
     private final JLabel price = new JLabel("", SwingConstants.RIGHT);
     private final JLabel extended = new JLabel("", SwingConstants.RIGHT);
-    private final BadgePanel badge = new BadgePanel();
+    private final JLabel qty = new JLabel("", SwingConstants.CENTER);
 
     private final Font valueFont = PosTheme.base(Font.PLAIN, PosTheme.BODY);
     private final Font totalFont = PosTheme.base(Font.BOLD, PosTheme.BODY);
+
+    // Two prebuilt borders — one per density. Precomputed so a density switch is a field swap,
+    // not an allocation, and getListCellRendererComponent never touches border construction.
+    private final javax.swing.border.Border comfortableBorder = rowBorder(COMFORTABLE_ROW_PAD);
+    private final javax.swing.border.Border compactBorder = rowBorder(COMPACT_ROW_PAD);
 
     private Density density = Density.COMFORTABLE;
 
@@ -102,19 +110,26 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
 
     public BasketCellRenderer() {
         super(new BorderLayout(COL_GAP, 0));
-        // Symmetric vertical inset keeps content centred in both densities — only the list's
-        // fixed cell height changes between modes. A hairline rule separates rows.
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, PosTheme.ROW_RULE),
-                BorderFactory.createEmptyBorder(6, ITEM_INSET_LEFT, 6, ITEM_INSET_RIGHT)));
+        // The vertical inset IS the density knob — comfortable padding by default, tightened in
+        // compact mode — while the type stays fixed. A hairline rule separates rows.
+        setBorder(comfortableBorder);
 
         description.setFont(valueFont);
         price.setFont(valueFont);
         price.setForeground(PosTheme.MUTED);
+        qty.setFont(valueFont);
         extended.setFont(totalFont);
 
         add(description, BorderLayout.CENTER);
-        add(numericColumns(price, badge, extended), BorderLayout.EAST);
+        add(numericColumns(price, qty, extended), BorderLayout.EAST);
+    }
+
+    /** A row border: the shared bottom hairline plus the density-specific vertical padding. */
+    private static javax.swing.border.Border rowBorder(int verticalPad) {
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, PosTheme.ROW_RULE),
+                BorderFactory.createEmptyBorder(verticalPad, ITEM_INSET_LEFT,
+                        verticalPad, ITEM_INSET_RIGHT));
     }
 
     /**
@@ -165,6 +180,8 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
 
     public void setDensity(Density density) {
         this.density = density;
+        // The density switch changes padding, not font: swap the prebuilt border for the mode.
+        setBorder(density == Density.COMPACT ? compactBorder : comfortableBorder);
     }
 
     public Density getDensity() {
@@ -222,8 +239,10 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
                 : PosTheme.SURFACE;
         setBackground(bg);
 
-        int qty = value.getQuantity();
-        badge.setQuantity(qty, voided, index == flashIndex && flashIsBump);
+        // Plain-text quantity, always shown — including 1. The column is the distinction, so the
+        // number needs no badge; a blank cell would read as missing data.
+        qty.setText(String.valueOf(value.getQuantity()));
+        qty.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
 
         String label = value.getItem().getDisplayLabel().trim();
         // Voided rows use HTML so the strike is a real strike; non-voided stays plain text so the
@@ -249,60 +268,20 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    /**
-     * A compact pill/circle drawn in the Qty column. Hidden when quantity is 1 while its width
-     * stays reserved — Square/Shopify do this so a multi-quantity line jumps out of the list,
-     * which is the actual goal since a wrong quantity is the expensive mistake.
-     */
-    static final class BadgePanel extends JPanel {
-        static final int WIDTH = 34;
-        static final int HEIGHT = 22;
+    // ---- Test hooks --------------------------------------------------------
 
-        private int quantity = 1;
-        private boolean voided;
-        private boolean pulsing;
+    /** For tests: the quantity column's rendered text after the last render pass. */
+    String getQtyTextForTest() {
+        return qty.getText();
+    }
 
-        BadgePanel() {
-            setOpaque(false);
-            setPreferredSize(new Dimension(WIDTH, HEIGHT));
-            setMinimumSize(new Dimension(WIDTH, HEIGHT));
-        }
+    /** For tests: the current vertical padding (top inset) — the density knob. */
+    int getVerticalPaddingForTest() {
+        return getInsets().top;
+    }
 
-        void setQuantity(int quantity, boolean voided, boolean pulsing) {
-            this.quantity = quantity;
-            this.voided = voided;
-            this.pulsing = pulsing;
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            if (quantity <= 1) return;
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-
-            int w = Math.min(WIDTH, getWidth());
-            int h = Math.min(HEIGHT, getHeight());
-            int x = (getWidth() - w) / 2;
-            int y = (getHeight() - h) / 2;
-
-            Color fill = voided ? PosTheme.DISABLED_BG
-                    : pulsing ? PosTheme.LIVE
-                    : PosTheme.BADGE_BG;
-            g2.setColor(fill);
-            g2.fillRoundRect(x, y, w, h, h, h);
-
-            String text = String.valueOf(quantity);
-            g2.setFont(getFont() != null
-                    ? getFont().deriveFont(Font.BOLD, 12f)
-                    : new Font(Font.SANS_SERIF, Font.BOLD, 12));
-            FontMetrics fm = g2.getFontMetrics();
-            int tx = x + (w - fm.stringWidth(text)) / 2;
-            int ty = y + (h - fm.getHeight()) / 2 + fm.getAscent();
-            g2.setColor(voided ? PosTheme.DISABLED_FG : PosTheme.BADGE_FG);
-            g2.drawString(text, tx, ty);
-            g2.dispose();
-        }
+    /** For tests: the value font, so a density test can assert the font is unchanged by a switch. */
+    Font getValueFontForTest() {
+        return valueFont;
     }
 }

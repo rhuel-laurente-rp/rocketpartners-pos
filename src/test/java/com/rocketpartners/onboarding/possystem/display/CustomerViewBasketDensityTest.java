@@ -16,8 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
- * Real-Swing tests for basket density, badge, flash, and hover behaviour. Skipped in headless CI
- * environments — the JFrame constructor requires a display.
+ * Real-Swing tests for basket density, the quantity column, flash, and hover behaviour. Skipped
+ * in headless CI environments — the JFrame constructor requires a display.
  *
  * <p>The 10/11 boundary is asserted directly rather than by counting items: renderer density is
  * a public enum so the test can read it without knowing pixel budgets.</p>
@@ -57,24 +57,44 @@ class CustomerViewBasketDensityTest {
     }
 
     @Test
-    void badge_hiddenAtQuantityOne_shownAtQuantityTwo() {
+    void qtyColumn_showsNumber_includingOneForSingleQuantityLines() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         BasketCellRenderer renderer = new BasketCellRenderer();
 
-        // Renderer's badge is an inner component — we assert on the paint-time flag by
-        // reflecting through the public API. Rendering with qty=1 must leave the badge in a
-        // state where the badge paints nothing (its paintComponent early-returns when qty <= 1);
-        // rendering with qty=2 must not.
-        LineItem qtyOne = new LineItem(WIDGET, 1);
-        LineItem qtyTwo = new LineItem(WIDGET, 2);
+        // The quantity column is plain text now — the number is always shown, including 1, since
+        // an empty cell in a table column reads as missing data (a badge could sensibly stay blank
+        // at one, a column cannot).
+        renderer.getListCellRendererComponent(
+                new javax.swing.JList<>(), new LineItem(WIDGET, 1), 0, false, false);
+        assertThat(renderer.getQtyTextForTest()).isEqualTo("1");
 
-        renderer.getListCellRendererComponent(new javax.swing.JList<>(), qtyOne, 0, false, false);
-        BasketCellRenderer.BadgePanel badge = findBadge(renderer);
-        assertThat(badge.getPreferredSize().width).isEqualTo(BasketCellRenderer.BadgePanel.WIDTH);
-        assertThat(willBadgePaint(badge)).isFalse();
+        renderer.getListCellRendererComponent(
+                new javax.swing.JList<>(), new LineItem(WIDGET, 3), 0, false, false);
+        assertThat(renderer.getQtyTextForTest()).isEqualTo("3");
+    }
 
-        renderer.getListCellRendererComponent(new javax.swing.JList<>(), qtyTwo, 0, false, false);
-        assertThat(willBadgePaint(badge)).isTrue();
+    @Test
+    void densitySwitch_changesPadding_notFont() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        BasketCellRenderer renderer = new BasketCellRenderer();
+
+        renderer.setDensity(BasketCellRenderer.Density.COMFORTABLE);
+        int comfyPad = renderer.getVerticalPaddingForTest();
+        java.awt.Font comfyFont = renderer.getValueFontForTest();
+
+        renderer.setDensity(BasketCellRenderer.Density.COMPACT);
+        int compactPad = renderer.getVerticalPaddingForTest();
+        java.awt.Font compactFont = renderer.getValueFontForTest();
+
+        // Compact tightens the padding relative to comfortable — that is the density knob.
+        assertThat(comfyPad).isEqualTo(BasketCellRenderer.COMFORTABLE_ROW_PAD);
+        assertThat(compactPad).isEqualTo(BasketCellRenderer.COMPACT_ROW_PAD);
+        assertThat(compactPad).isLessThan(comfyPad);
+
+        // The font is untouched by the switch — same instance, still BODY size. Legibility is paid
+        // on every sale; density comes from padding, not shrinking the type.
+        assertThat(compactFont).isSameAs(comfyFont);
+        assertThat(compactFont.getSize2D()).isEqualTo(PosTheme.BODY);
     }
 
     @Test
@@ -134,45 +154,5 @@ class CustomerViewBasketDensityTest {
 
     private static IPosEventDispatcher noopDispatcher() {
         return event -> {};
-    }
-
-    private static BasketCellRenderer.BadgePanel findBadge(BasketCellRenderer renderer) {
-        return findBadge(renderer, 0);
-    }
-
-    private static BasketCellRenderer.BadgePanel findBadge(java.awt.Container c, int depth) {
-        if (depth > 6) return null;
-        for (java.awt.Component child : c.getComponents()) {
-            if (child instanceof BasketCellRenderer.BadgePanel b) return b;
-            if (child instanceof java.awt.Container cc) {
-                BasketCellRenderer.BadgePanel found = findBadge(cc, depth + 1);
-                if (found != null) return found;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Paint the badge into a throwaway image and check whether any pixel is non-transparent.
-     * The badge's paintComponent early-returns when quantity <= 1, so this is a robust proxy
-     * for "the badge would render".
-     */
-    private static boolean willBadgePaint(BasketCellRenderer.BadgePanel badge) {
-        badge.setSize(BasketCellRenderer.BadgePanel.WIDTH, BasketCellRenderer.BadgePanel.HEIGHT);
-        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
-                BasketCellRenderer.BadgePanel.WIDTH, BasketCellRenderer.BadgePanel.HEIGHT,
-                java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        java.awt.Graphics2D g = img.createGraphics();
-        try {
-            badge.paint(g);
-        } finally {
-            g.dispose();
-        }
-        for (int x = 0; x < img.getWidth(); x++) {
-            for (int y = 0; y < img.getHeight(); y++) {
-                if ((img.getRGB(x, y) >>> 24) != 0) return true;
-            }
-        }
-        return false;
     }
 }

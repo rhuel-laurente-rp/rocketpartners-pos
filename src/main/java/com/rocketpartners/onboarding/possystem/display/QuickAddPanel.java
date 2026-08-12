@@ -16,6 +16,7 @@ import javax.swing.SwingConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -109,8 +110,12 @@ class QuickAddPanel extends JPanel {
     private final PosButton prevButton = pageButton("‹");
     private final PosButton nextButton = pageButton("›");
     private final PosButton lastButton = pageButton("»");
-    private final JLabel pageBox = new JLabel("1", SwingConstants.CENTER);
+    private final PagePill pageBox = new PagePill();
     private final JLabel pagesIndicator = new JLabel("1 of 1 pages", SwingConstants.RIGHT);
+
+    /** Minimum touch target for a pager control, in pixels. A glyph is not a target — each arrow
+     *  needs a real hit area around it (the 44px accessibility touch minimum). */
+    private static final int PAGER_TOUCH = 44;
 
     private String query = "";
     private SortMode sort = SortMode.NAME_ASC;
@@ -265,12 +270,6 @@ class QuickAddPanel extends JPanel {
         nextButton.addActionListener(e -> goToPage(page + 1));
         lastButton.addActionListener(e -> goToPage(pageCount() - 1));
 
-        pageBox.setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
-        pageBox.setForeground(PosTheme.INK);
-        pageBox.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(PosTheme.RULE, 1),
-                BorderFactory.createEmptyBorder(4, 12, 4, 12)));
-
         pagesIndicator.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
         pagesIndicator.setForeground(PosTheme.MUTED);
 
@@ -299,6 +298,13 @@ class QuickAddPanel extends JPanel {
     private static PosButton pageButton(String glyph) {
         PosButton b = PosButtons.secondary(glyph);
         b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
+        // A drawn chevron is a few pixels wide; give it a real square hit area so the whole
+        // control — not just the glyph — is tappable. Fixed size keeps the BoxLayout row from
+        // collapsing the button to the glyph's intrinsic width.
+        Dimension target = new Dimension(PAGER_TOUCH, PAGER_TOUCH + PosButton.SHADOW_INSET);
+        b.setPreferredSize(target);
+        b.setMinimumSize(target);
+        b.setMaximumSize(target);
         return b;
     }
 
@@ -465,6 +471,48 @@ class QuickAddPanel extends JPanel {
     void prevForTest() { goToPage(page - 1); }
     void nextForTest() { goToPage(page + 1); }
     void lastForTest() { goToPage(pageCount() - 1); }
+
+    // Pager control state — for the "disable, never hide at the boundaries" regression. The
+    // buttons are never setVisible(false), so visibility must stay true even when disabled.
+    boolean firstEnabledForTest() { return firstButton.isEnabled(); }
+    boolean prevEnabledForTest() { return prevButton.isEnabled(); }
+    boolean nextEnabledForTest() { return nextButton.isEnabled(); }
+    boolean lastEnabledForTest() { return lastButton.isEnabled(); }
+
+    boolean pagerControlsAllVisibleForTest() {
+        return firstButton.isVisible() && prevButton.isVisible()
+                && nextButton.isVisible() && lastButton.isVisible();
+    }
+
+    // ---- Current-page pill -------------------------------------------------
+
+    /**
+     * The current-page indicator, drawn as a solid rounded pill in {@link PosTheme#INK} with white
+     * text rather than an outlined box. A filled pill reads as "you are here" at a glance, matching
+     * the header status pill's treatment; the arrows around it are the navigation, so the pill
+     * itself is a marker, not a button. Corner radius equals the height, so it renders as a true
+     * pill regardless of digit count.
+     */
+    private static final class PagePill extends JLabel {
+        PagePill() {
+            super("1", SwingConstants.CENTER);
+            setOpaque(false);
+            setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
+            setForeground(Color.WHITE);
+            setBorder(BorderFactory.createEmptyBorder(4, 14, 4, 14));
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(PosTheme.INK);
+            int h = getHeight();
+            g2.fillRoundRect(0, 0, getWidth(), h, h, h);
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
 
     // ---- Quick-add tile ----------------------------------------------------
 

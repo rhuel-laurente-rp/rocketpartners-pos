@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Asserts the proportional shell divides exactly as the design calls for: content width 30/70,
- * each column 80/20, the bottom-right row 70/30, and the card-tender row split evenly.
+ * each column 80/20, the bottom-right row 60/40, and the tender row split evenly.
  *
  * <p>These construct a real {@link CustomerView} (a {@link javax.swing.JFrame}), so they are
  * guarded with {@code assumeFalse(headless)} like the other real-Swing view tests. The split
@@ -66,15 +66,15 @@ class CustomerViewLayoutTest {
     }
 
     @Test
-    void bottomRowSplitsSeventyThirty() {
+    void bottomRowSplitsSixtyForty() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = laidOutView();
         try {
             Container bottom = view.getBottomRowForTest();
-            int inner = bottom.getWidth(); // no border on the bottom row
+            int inner = bottom.getWidth(); // only a bottom inset on the row; width is unaffected
             int actions = bottom.getComponent(0).getWidth();
             int payment = bottom.getComponent(1).getWidth();
-            assertThat(actions).isEqualTo(Math.round(0.70f * inner));
+            assertThat(actions).isEqualTo(Math.round(0.60f * inner));
             assertThat(actions + payment).isEqualTo(inner);
         } finally {
             view.dispose();

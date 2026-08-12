@@ -181,6 +181,29 @@ class ScannerViewControllerTest {
     }
 
     @Test
+    void hardwareBurstAndManualEntry_carryDistinctSourceTags() {
+        // The journal distinguishes hardware reads from manual entry via the ITEM_SCANNED "source"
+        // tag: a fast burst is "scan", a field submit is "manualScan". Removing the Scan button
+        // (Enter is now the only manual trigger) must not collapse that distinction.
+        ensureInProgress();
+
+        burst("049000053418", 5);
+        typed('\n');
+        String hardwareSource = notifications.lastOf(PosEventType.ITEM_SCANNED)
+                .getProperty("source", String.class);
+
+        Map<String, Object> props = new HashMap<>();
+        props.put("raw", "049000053418");
+        pos.dispatchPosEvent(new PosEvent(PosEventType.SCAN_SUBMIT_PRESSED, props));
+        String manualSource = notifications.lastOf(PosEventType.ITEM_SCANNED)
+                .getProperty("source", String.class);
+
+        assertThat(hardwareSource).isEqualTo("scan");
+        assertThat(manualSource).isEqualTo("manualScan");
+        assertThat(hardwareSource).isNotEqualTo(manualSource);
+    }
+
+    @Test
     void manualEnter_withEmptyField_paintsInlineErrorAndDispatchesNoErrorEvent() {
         ensureInProgress();
 
