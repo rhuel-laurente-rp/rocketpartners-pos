@@ -250,7 +250,7 @@ public class TransactionService {
             IllegalArgumentException ex = new IllegalArgumentException(
                     "quantity " + newQuantity + " exceeds max " + maxLineQuantity);
             dispatchError("ABOVE_MAX_QUANTITY", ex.getMessage(), ex,
-                    "operation", "updateLineItemQuantity");
+                    "operation", "updateLineItemQuantity", "max", maxLineQuantity);
             throw ex;
         }
         // Unchanged quantity on a non-voided line: no-op, no event, no recompute.
@@ -450,6 +450,17 @@ public class TransactionService {
         props.put("message", message);
         if (cause != null) props.put("cause", cause);
         if (extraKey != null) props.put(extraKey, extraValue);
+        eventDispatcher.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
+    }
+
+    private void dispatchError(String code, String message, Throwable cause,
+                               String key1, Object val1, String key2, Object val2) {
+        Map<String, Object> props = new HashMap<>();
+        props.put("code", code);
+        props.put("message", message);
+        if (cause != null) props.put("cause", cause);
+        if (key1 != null) props.put(key1, val1);
+        if (key2 != null) props.put(key2, val2);
         eventDispatcher.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
     }
 }

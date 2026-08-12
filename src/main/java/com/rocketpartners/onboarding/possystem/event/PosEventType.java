@@ -277,11 +277,19 @@ public enum PosEventType {
     /**
      * A POS-level error occurred (e.g. bad UPC lookup, illegal state, journal unreachable).
      *
-     * <p>Standard properties: {@code code} (short identifier such as {@code UPC_NOT_FOUND},
-     * {@code UPC_MISREAD}, {@code TOTALED_INVARIANT}, {@code INVALID_CASH_AMOUNT},
-     * {@code UNDERPAYMENT}, {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT}), {@code message}
-     * (human-readable detail), and {@code cause} (Throwable, when present). May also carry
-     * {@code operation}, {@code upc}, and other kind-specific keys.</p>
+     * <p>Standard properties: {@code code} (short identifier), {@code message} (human-readable
+     * detail), and {@code cause} (Throwable, when present). May also carry {@code operation},
+     * {@code upc}, {@code raw}, {@code max}, and other kind-specific keys.</p>
+     *
+     * <p>The full {@code code} vocabulary dispatched today, and where each originates:</p>
+     * <ul>
+     *   <li>{@code UPC_NOT_FOUND}, {@code UPC_MISREAD} — {@code TransactionService.addItemByUpc}</li>
+     *   <li>{@code INVALID_BARCODE}, {@code SCAN_LOCKED} — {@code ScannerViewController}</li>
+     *   <li>{@code INVALID_CASH_AMOUNT}, {@code UNDERPAYMENT} — {@code PayWithCashViewController}</li>
+     *   <li>{@code TOTALED_INVARIANT}, {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT},
+     *       {@code TRANSACTION_ALREADY_OPEN}, {@code ABOVE_MAX_QUANTITY}, {@code ILLEGAL_STATE}
+     *       — {@code TransactionService} (state-machine and argument guards)</li>
+     * </ul>
      */
     ERROR
 }
