@@ -249,14 +249,22 @@ public class Transaction {
      * @param cashTendered amount the customer presented; must not be {@code null}
      * @param amountDue    settled amount due; may be {@code null} to mean "same as grand total"
      * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
-     * @throws IllegalArgumentException if {@code type} is not {@link TenderType#CASH}, or
-     *                                  {@code cashTendered} is null
+     * @throws IllegalArgumentException if {@code type} is not {@link TenderType#CASH},
+     *                                  {@code cashTendered} is null, or a non-null
+     *                                  {@code amountDue} is below {@link #grandTotal()}
      */
     public void tender(TenderType type, BigDecimal cashTendered, BigDecimal amountDue) {
         requireState("tender", TransactionState.TOTALED);
         if (type == null) throw new IllegalArgumentException("tender type must not be null");
         if (cashTendered == null) throw new IllegalArgumentException("cashTendered must not be null");
         if (type != TenderType.CASH) throw new IllegalArgumentException("type must be CASH");
+        // A settled amount due below the grand total would let changeDue() frame an underpayment
+        // as change owed. The aggregate owns this invariant — callers must not settle for less
+        // than the sale is worth. A null amountDue means "same as grand total" and is always safe.
+        if (amountDue != null && amountDue.compareTo(grandTotal()) < 0) {
+            throw new IllegalArgumentException(
+                    "amountDue " + amountDue + " must be >= grand total " + grandTotal());
+        }
         this.tenderType = type;
         this.cashTendered = cashTendered;
         this.amountDue = amountDue == null ? null : amountDue.setScale(2, RoundingMode.HALF_UP);
