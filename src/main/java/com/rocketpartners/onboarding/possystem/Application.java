@@ -13,23 +13,7 @@ import com.rocketpartners.onboarding.possystem.component.JournalListener;
 import com.rocketpartners.onboarding.possystem.component.Journals;
 import com.rocketpartners.onboarding.possystem.component.LocalJournal;
 import com.rocketpartners.onboarding.possystem.component.RemoteJournal;
-import com.rocketpartners.onboarding.possystem.display.CashModeChoiceView;
-import com.rocketpartners.onboarding.possystem.display.ChangeQuantityView;
-import com.rocketpartners.onboarding.possystem.display.ChangeQuantityViewController;
-import com.rocketpartners.onboarding.possystem.display.CustomerView;
-import com.rocketpartners.onboarding.possystem.display.CustomerViewController;
-import com.rocketpartners.onboarding.possystem.display.ErrorPopupViewController;
-import com.rocketpartners.onboarding.possystem.display.PayWithCardView;
-import com.rocketpartners.onboarding.possystem.display.PayWithCardViewController;
-import com.rocketpartners.onboarding.possystem.display.PayWithCashView;
-import com.rocketpartners.onboarding.possystem.display.PayWithCashViewController;
-import com.rocketpartners.onboarding.possystem.display.ReceiptView;
-import com.rocketpartners.onboarding.possystem.display.ReceiptViewController;
-import com.rocketpartners.onboarding.possystem.display.ScannerView;
-import com.rocketpartners.onboarding.possystem.display.ScannerViewController;
-import com.rocketpartners.onboarding.possystem.display.TenderConfirmView;
-import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmView;
-import com.rocketpartners.onboarding.possystem.display.VoidBasketConfirmViewController;
+import com.rocketpartners.onboarding.possystem.display.*;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import com.rocketpartners.onboarding.possystem.repository.h2.H2ItemRepository;
 import com.rocketpartners.onboarding.possystem.service.TaxService;
@@ -175,6 +159,13 @@ public final class Application {
             ScannerViewController scannerController =
                     new ScannerViewController(scannerView, scanBuffer, args.debug);
 
+            // Manual barcode entry: the scan bar's keypad button opens this modal keypad dialog,
+            // which re-dispatches SCAN_SUBMIT_PRESSED so keyed input validates on the same path as
+            // a scan. Owner is the main frame so the dialog centres on it.
+            ManualBarcodeEntryView manualEntryView = new ManualBarcodeEntryView(view, pos);
+            ManualBarcodeEntryViewController manualEntryController =
+                    new ManualBarcodeEntryViewController(manualEntryView);
+
             ErrorPopupViewController errorController =
                     new ErrorPopupViewController(view, scannerView.getScanField());
 
@@ -203,6 +194,7 @@ public final class Application {
             pos.addController(voidBasketController);
             pos.addController(errorController);
             pos.addController(scannerController);
+            pos.addController(manualEntryController);
             pos.addController(receiptController);
             pos.start();
 

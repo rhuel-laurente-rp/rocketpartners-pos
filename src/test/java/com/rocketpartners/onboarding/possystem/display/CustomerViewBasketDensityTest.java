@@ -27,14 +27,18 @@ class CustomerViewBasketDensityTest {
     private static final Item WIDGET = new Item("UPC-W", "Widget", new BigDecimal("1.00"));
 
     @Test
-    void densityIsComfortable_atTenItems_andSwitchesToCompactAtEleven() {
+    void densityIsComfortable_atThreshold_andSwitchesToCompactAboveIt() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noopDispatcher());
 
-        view.updateBasket(build(9), new BigDecimal("9.00"));
+        // Drive the boundary off the renderer's own threshold constant rather than a hard-coded
+        // count, so a future change to DENSITY_THRESHOLD can't leave this test asserting a stale
+        // 10/11 boundary (which is exactly how it drifted before).
+        int threshold = BasketCellRenderer.DENSITY_THRESHOLD;
+        view.updateBasket(build(threshold), new BigDecimal(threshold + ".00"));
         assertThat(view.getBasketDensity()).isEqualTo(BasketCellRenderer.Density.COMFORTABLE);
 
-        view.updateBasket(build(10), new BigDecimal("10.00"));
+        view.updateBasket(build(threshold + 1), new BigDecimal((threshold + 1) + ".00"));
         // The renderer flips density synchronously; row height is animated, so allow a beat for
         // the timer to converge on the target height.
         assertThat(view.getBasketDensity()).isEqualTo(BasketCellRenderer.Density.COMPACT);

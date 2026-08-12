@@ -37,12 +37,40 @@ class ScannerViewTest {
     }
 
     @Test
-    void noScanButtonExists_amongTheBarsComponents() {
-        // The Scan button is gone; Enter is the only submit trigger. No JButton (PosButton) may
-        // survive anywhere in the bar's component tree.
-        assertThat(findButton(view))
-                .as("the scan bar must contain no button")
-                .isNull();
+    void barsOnlyButton_isTheKeypadOpener_notAScanSubmitButton() {
+        // Enter is still the only submit trigger — there is no "Scan" submit button. The one button
+        // the bar carries is the manual-entry keypad opener, which opens a dialog rather than
+        // submitting the field.
+        javax.swing.JButton found = findButton(view);
+        assertThat(found).as("the scan bar carries exactly the keypad opener button").isNotNull();
+        assertThat(found.getName()).isEqualTo("keypadButton");
+        assertThat(found.getText()).isNotEqualToIgnoringCase("scan");
+    }
+
+    @Test
+    void keypadButton_dispatchesManualEntryPressed_whenTapped() {
+        view.getKeypadButtonForTest().doClick();
+
+        assertThat(dispatcher.received)
+                .extracting(PosEvent::getType)
+                .containsExactly(PosEventType.MANUAL_ENTRY_PRESSED);
+    }
+
+    @Test
+    void keypadButton_isDisabledWhenLocked_reEnabledWhenUnlocked() {
+        // Manual entry is a scan; it's illegal once TOTALED, so the opener follows the lock.
+        assertThat(view.getKeypadButtonForTest().isEnabled()).isTrue();
+
+        view.setLocked(true);
+        assertThat(view.getKeypadButtonForTest().isEnabled()).isFalse();
+
+        view.setLocked(false);
+        assertThat(view.getKeypadButtonForTest().isEnabled()).isTrue();
+    }
+
+    @Test
+    void keypadButton_isNotFocusable_soItCannotStealScanFieldFocus() {
+        assertThat(view.getKeypadButtonForTest().isFocusable()).isFalse();
     }
 
     @Test

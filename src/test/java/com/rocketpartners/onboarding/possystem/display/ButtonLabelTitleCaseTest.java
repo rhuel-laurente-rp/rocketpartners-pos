@@ -50,6 +50,8 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("TenderConfirmView.cardCancel", "Cancel");
         LABELS.put("ErrorDialog.dismiss",        "Dismiss");
         LABELS.put("ReceiptView.startNext",      "Start Next Sale");
+        LABELS.put("ManualBarcodeEntryView.confirm", "Add Item");
+        LABELS.put("ManualBarcodeEntryView.cancel",  "Cancel");
 
         // ---- Dialog titles --------------------------------------------
         LABELS.put("title.errorDialog",        "Error");
