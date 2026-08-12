@@ -8,20 +8,13 @@ Severity is the impact if the code path fires, not how easy it is to reach. Seve
 
 ## Live bugs
 
-### `Transaction.java:239` — `tender(...)` accepts `amountDue < grandTotal()` with no check
-The three-argument tender overload writes whatever `amountDue` is passed in, no comparison against `grandTotal()`. If a caller ever passed a settled amount below the grand total, `changeDue()` would still compute positive change: an underpayment silently framed as change owed.
+### `Transaction.java:255` — `tender(...)` accepts `amountDue < grandTotal()` with no check
+The three-argument tender overload (method at `Transaction.java:255`, Javadoc block opening at 239) writes whatever `amountDue` is passed in — it only null-checks and rescales (`Transaction.java:262`), with no comparison against `grandTotal()`. If a caller ever passed a settled amount below the grand total, `changeDue()` would still compute positive change: an underpayment silently framed as change owed.
 
 - **Severity:** medium — this contradicts the aggregate's own claim in its Javadoc that state-machine and money invariants live here rather than in callers.
 - **Reachable today?** No. The three-argument overload's callers all pass an `amountDue` at or above the grand total: `Transaction.payNextDollar()` passes the ceiled figure (always ≥ grand total), and `TransactionService.tenderCash(BigDecimal, BigDecimal)` — reached from `PayWithCashViewController`'s Other Amount path, which validates that cash received ≥ grand total upstream. (`payNextDollar()` is no longer dead code: the restructured cash flow puts it on the live path — Next Dollar tenders through it directly.)
 - **Disposition:** add the guard; do not fix on a doc branch. Reject with `IllegalArgumentException` (or an ERROR event) rather than trying to salvage the tender — a caller that reaches this branch is asking the wrong question.
 - **Suggested branch:** `fix/transaction-guard-amount-due`.
-
-### `ChangeQuantityView.java:283-284` — `body.add(validationMessage)` called twice
-Two consecutive `body.add(validationMessage)` calls. Swing tolerates re-adding a component (it removes it from its previous slot on re-add), so the layout ends up with one instance of the label, but the intent was clearly a struct-and-label pair. The vertical strut is elsewhere in the method, so the visible layout is intact — this is a leftover, not a bug the cashier sees.
-
-- **Severity:** low.
-- **Disposition:** delete the duplicate line.
-- **Suggested branch:** rolled into `chore/change-quantity-view-cleanup`.
 
 ### `LineItemCellRenderer.java` — dead code
 Never referenced. `CustomerView` uses `BasketCellRenderer` throughout. The two renderers disagree on styling, void treatment (grey + strikethrough vs. the design-system rules `BasketCellRenderer` follows), and money rounding call site — keeping both is a trap.
@@ -42,11 +35,11 @@ Error: Could not find or load main class com.rocketpartners.onboarding.posdiscou
 - **Suggested branch:** `phase3/scaffold-discount-engine-application`.
 
 ### `ScannerViewController.onPosEvent` — modal-open events call `resumeCapture()`, not `suspendCapture()`
-The switch arm covering `TENDER_CASH_PRESSED`, `TENDER_DEBIT_PRESSED`, `TENDER_CREDIT_PRESSED`, `CHANGE_QTY_PRESSED`, `VOID_BASKET_PRESSED`, and `TRANSACTION_COMPLETED` calls `resumeCapture()`. It should call `suspendCapture()` — those events open modals, and the class Javadoc explicitly claims "Scan capture is also suspended while a modal dialog is open (cash tender, receipt) so keystrokes can't leak into it." `suspendCapture()` is defined but has zero call sites; `isSuspended()` is always `false`.
+The switch arm covering `TENDER_CASH_PRESSED`, `TENDER_DEBIT_PRESSED`, `TENDER_CREDIT_PRESSED`, `CHANGE_QTY_PRESSED`, `VOID_BASKET_PRESSED`, and `TRANSACTION_COMPLETED` (`ScannerViewController.java:462-467`) calls `resumeCapture()`. Those events open modals, and the class Javadoc still implies capture should suspend while a modal is open so keystrokes can't leak into it. There is **no `suspendCapture()` method** — it was never implemented; the `suspended` field is only ever assigned `false` (lines 571, 591) so `isSuspended()` (line 614) always returns `false`.
 
 - **Severity:** medium — a barcode scanner burst fired while a cash-entry or receipt modal is open will still dispatch `ITEM_SCANNED`, and the receiving path is not gated on modal state.
 - **Reachable today?** Yes, on live hardware. Not reachable in unit tests because the modal doesn't literally open.
-- **Disposition:** flip the arm to `suspendCapture()`. The corresponding tests (`ScannerViewControllerTest#tenderCashPressed_leavesCaptureRunning_burstStillDispatches`, `receiptDismissed_leavesCaptureRunning`, `ChangeQuantityViewControllerTest#changeQtyDialog_doesNotSuspendScannerCapture_onOpenOrClose`) currently pin the broken behaviour; they should be renamed and flipped on the fix branch.
+- **Disposition:** implement `suspendCapture()` and flip the arm to it. The corresponding tests (`ScannerViewControllerTest#tenderCashPressed_leavesCaptureRunning_burstStillDispatches`, `ScannerViewControllerTest#receiptDismissed_unlocksView`, `ChangeQuantityViewControllerTest#changeQtyDialog_doesNotSuspendScannerCapture_onOpenOrClose`) currently pin the broken behaviour; they should be renamed and flipped on the fix branch.
 - **Suggested branch:** `fix/scanner-suspend-on-modal-open`.
 
 ### `FileJournal.java` — synchronous disk write + flush on the caller's thread
@@ -63,7 +56,7 @@ The `Journal` contract says implementations "must not throw". The composite wrap
 ### `Journals.java:34` — `journal(...)` swallows `RuntimeException`
 Every delegate's `journal(record)` is called inside `try { ... } catch (RuntimeException e) { println }`. If the contract holds, this catch is unreachable. Either drop it and let a violation surface loudly, or update the contract to say "throwing is a bug the composite tolerates for you."
 
-### `Journals.java:47` — `close()` swallows delegate exceptions
+### `Journals.java:46` — `close()` swallows delegate exceptions
 Same shape: `try { j.close(); } catch (RuntimeException ignored) {}`. The comment attributes this to "shutdown may have already torn things down", but the effect is that a real close-time bug in `RemoteJournal` or `FileJournal` never reaches stderr.
 
 ### `RemoteJournal.java:209` — `close()` uses `offer()` for the poison pill
@@ -75,8 +68,8 @@ Same shape: `try { j.close(); } catch (RuntimeException ignored) {}`. The commen
 
 ## Documentation and cashier-copy gaps
 
-### `PosEventType` Javadoc — only 6 of 11 error codes documented
-The `ERROR` event's Javadoc lists `UPC_NOT_FOUND`, `TOTALED_INVARIANT`, `INVALID_CASH_AMOUNT`, `UNDERPAYMENT`, `NO_TRANSACTION`, `INVALID_ARGUMENT`. Also dispatched at runtime (grep the source): `SCAN_LOCKED`, `INVALID_BARCODE`, `TRANSACTION_ALREADY_OPEN`, `ABOVE_MAX_QUANTITY`, `ILLEGAL_STATE`. New codes were added when the flows they cover were added; the umbrella Javadoc was not.
+### `PosEventType` Javadoc — only 7 of 12 error codes documented
+The `ERROR` event's Javadoc lists `UPC_NOT_FOUND`, `UPC_MISREAD`, `TOTALED_INVARIANT`, `INVALID_CASH_AMOUNT`, `UNDERPAYMENT`, `NO_TRANSACTION`, `INVALID_ARGUMENT`. Also dispatched at runtime (grep the source): `SCAN_LOCKED`, `INVALID_BARCODE`, `TRANSACTION_ALREADY_OPEN`, `ABOVE_MAX_QUANTITY`, `ILLEGAL_STATE`. New codes were added when the flows they cover were added; the umbrella Javadoc was not.
 
 - **Severity:** low.
 - **Disposition:** update the Javadoc to list the full vocabulary, cross-linked to the site that dispatches each. Do it when someone next touches `PosEventType` for another reason.
@@ -114,10 +107,9 @@ Whoever fixes one should fix all three, and update `ButtonLabelTitleCaseTest` to
 Rough priority — highest impact and lowest coordination cost first. Nothing here is urgent; the app runs green.
 
 1. `chore/delete-line-item-cell-renderer` — remove the drift trap while it's small.
-2. `chore/change-quantity-view-cleanup` — the double-add is trivial and lets the same PR touch other stale bits nearby.
-3. `polish/apply-title-case-convention` — bundle the three casing sites and the test flip.
-4. `polish/error-dialog-cashier-copy` — pair with the `PosEventType` Javadoc update.
-5. `fix/transaction-guard-amount-due` — unreachable today, but a load-bearing aggregate contract shouldn't rely on that.
-6. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
-7. `fix/scanner-suspend-on-modal-open` — flip the resume-on-open arm to suspend, and flip the three tests that currently pin the broken behaviour.
-8. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.
+2. `polish/apply-title-case-convention` — bundle the three casing sites and the test flip.
+3. `polish/error-dialog-cashier-copy` — pair with the `PosEventType` Javadoc update.
+4. `fix/transaction-guard-amount-due` — unreachable today, but a load-bearing aggregate contract shouldn't rely on that.
+5. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
+6. `fix/scanner-suspend-on-modal-open` — implement `suspendCapture()`, flip the resume-on-open arm to it, and flip the three tests that currently pin the broken behaviour.
+7. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.

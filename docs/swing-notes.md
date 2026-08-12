@@ -32,7 +32,7 @@ CLAUDE.md's "Swing traps" bullet points reference this file by name. If you add 
 
 **Fix.** Set `setMaximumSize(new Dimension(width, height))` on every child that should keep its preferred height. `Integer.MAX_VALUE` is fine for the axis you *do* want to fill; use a concrete height for the axis you don't.
 
-**Where it bit us.** `CustomerView.buildTape*` — the inline row, hairline separator, and total row each cap their height (`22`, `1`, `44`) so the tape column doesn't rearrange when the basket contents change. Grep for `setMaximumSize(new Dimension(Integer.MAX_VALUE, ...))`.
+**Where it bit us.** `CustomerView` — the hairline separator, inline summary row, and total row each cap their height (`setMaximumSize(new Dimension(Integer.MAX_VALUE, ...))` at `CustomerView.java:937`, `949`, `962`, driven by the named constants `SUMMARY_COMPONENT_ROW_HEIGHT` / `SUMMARY_TOTAL_ROW_HEIGHT` and a literal `1` for the hairline) so the summary column doesn't rearrange when the basket contents change. Grep for `setMaximumSize(new Dimension(Integer.MAX_VALUE, ...))`.
 
 ---
 
@@ -50,9 +50,9 @@ CLAUDE.md's "Swing traps" bullet points reference this file by name. If you add 
 
 **Cause.** A `JButton` that overrides `paintComponent` and adds nested child components (e.g. an inner `JLabel` for a two-line description) can end up with the child intercepting mouse events. Swing dispatches mouse events to the topmost component under the cursor; a nested `JLabel` with default behaviour is opaque enough to receive them before the outer button.
 
-**Fix.** Don't nest child components inside custom-painted buttons — paint the content directly on the button's `Graphics`. `QuickAddTile` in `CustomerView` paints its description and price via `Graphics#drawString` rather than adding child components; the whole face is the button's paint surface, so the mouse event lands on the button.
+**Fix.** Don't nest child components inside custom-painted buttons — paint the content directly on the button's `Graphics`. `QuickAddTile` paints its description and price via `Graphics#drawString` rather than adding child components; the whole face is the button's paint surface, so the mouse event lands on the button.
 
-**Where it bit us.** `CustomerView.QuickAddTile` (line ~940). The comment on the class explains: "Drawn rather than composed from HTML so the price keeps its accent colour and the whole tile dims correctly."
+**Where it bit us.** `QuickAddPanel.QuickAddTile` (`QuickAddPanel.java:525`, `drawString` at 560/567). The comment on the class explains: "Drawn rather than composed from HTML so the price keeps its accent colour and the whole tile dims correctly." (The tile lived on `CustomerView` before the Quick Add grid was extracted into its own `QuickAddPanel`.)
 
 ---
 
@@ -104,8 +104,18 @@ if (SwingUtilities.isEventDispatchThread()) {
 
 **Where it bit us.**
 
-- `CustomerView.setJournalConnected(...)` is called from `RemoteJournal`'s sender thread when the socket transitions. It marshals through the check-and-`invokeLater` idiom above (lines ~510–516).
+- `CustomerView.setJournalConnected(...)` is called from `RemoteJournal`'s sender thread when the socket transitions. It marshals through the check-and-`invokeLater` idiom above (`CustomerView.java:626-630`), delegating to `journalIndicator.setConnected(...)` on the EDT.
 - `PayWithCardViewController` schedules its simulated card approval via `javax.swing.Timer`, which delivers the callback on the EDT — the alternative would be `Thread.sleep(800)` on the EDT itself, freezing the whole UI mid-"approval". The class Javadoc names this explicitly.
 - `ErrorPopupViewController.onPosEvent(...)` calls through an injectable `EdtInvoker` (default: `SwingUtilities::invokeLater`) because Phase 2's journal client and Phase 3's discount-engine call will dispatch `ERROR` events from background threads.
 
 The pattern is the same in all three places. Any new component that reacts to journal state, network callbacks, or `javax.swing.Timer` — or is likely to in a later phase — should use the same idiom.
+
+---
+
+## An on-screen key tap steals the field's focus, or gets captured as a scanner burst
+
+**Cause.** The touch input widgets (`OnScreenKeyboard` for the Quick Add search field, `OnScreenKeypad` for the money and quantity dialogs and the manual-entry dialog) are on-screen buttons that "type" into a target text field. Two traps lurk here. First, a normal `JButton` takes focus when tapped — which pulls focus *off* the target field, so the caret vanishes, `selectAll()` priming breaks, and the focus-driven `PERSIST` validation in `ChangeQuantityView` / `PayWithCashView` stops behaving as tested. Second, if a key "types" by synthesising a `KeyEvent`, that event flows through the application-wide `KeyEventDispatcher` that `ScannerViewController` uses for scanner-burst capture — a fast run of taps could be misread as a scanned barcode.
+
+**Fix.** Both are avoided at once. Every key is **non-focusable** (`setFocusable(false)`), so the target field keeps focus through every press. And every keystroke mutates the target field's `Document` directly (`OnScreenKeys.insert` / `backspace` / `clear`) rather than posting a `KeyEvent` — a document mutation is invisible to the `KeyEventDispatcher`, and it still routes through whatever `DocumentFilter` the field installed, so digit-only, single-decimal-point, and length-cap rules apply to a tapped key exactly as to a physical keystroke.
+
+**Where it bit us.** `OnScreenKeypad`, `OnScreenKeyboard`, and the shared `OnScreenKeys` helper — see their class Javadocs, which name both contracts as load-bearing.

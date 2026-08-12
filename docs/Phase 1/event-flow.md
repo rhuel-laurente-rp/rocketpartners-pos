@@ -11,6 +11,7 @@ Phase 1's core lesson is event-driven separation of concerns. A `*View` is a dum
 There is no `QuickAddView` / `TransactionView` / `ToolbarView` split. Everything the cashier sees lives on one `CustomerView` frame with one `CustomerViewController` driving it:
 
 - **Scan bar** — `ScannerView` + `ScannerViewController`
+- **Manual barcode entry dialog** — `ManualBarcodeEntryView` + `ManualBarcodeEntryViewController` (a touch-keypad fallback opened from the scan bar's keypad button; its confirm re-uses the scan path)
 - **Change-quantity dialog** — `ChangeQuantityView` + `ChangeQuantityViewController`
 - **Void-basket confirm dialog** — `VoidBasketConfirmView` + `VoidBasketConfirmViewController`
 - **Cash-mode-choice dialog**, **cash-entry dialog**, and **cash tender-confirm dialog** — `CashModeChoiceView`, `PayWithCashView`, `TenderConfirmView`, all driven by `PayWithCashViewController`
@@ -18,6 +19,8 @@ There is no `QuickAddView` / `TransactionView` / `ToolbarView` split. Everything
 - **Receipt dialog** — `ReceiptView` + `ReceiptViewController`
 - **Error popup** — `ErrorDialog` + `ErrorPopupViewController`
 - **Journal writer** — `JournalListener` subscribes to every event and writes a record for it
+
+**On-screen input widgets dispatch no events.** `OnScreenKeyboard` (touch QWERTY, in the Quick Add search field), `OnScreenKeypad` (touch numeric, in the money and quantity dialogs and the manual-entry dialog), and their shared `OnScreenKeys` helper are deliberately dumb: every tap mutates the target field's `Document` directly rather than dispatching a `PosEvent` or synthesising a `KeyEvent`. They are the *content* of dialogs opened by existing events, and add nothing to the event vocabulary. Document-mutation (not synthesised key events) is what keeps their taps invisible to the scanner's application-wide `KeyEventDispatcher`. See [swing-notes.md](../swing-notes.md).
 
 ## The event vocabulary
 
@@ -27,7 +30,8 @@ Every constant on `PosEventType` appears below, grouped by phase of the sale.
 
 | Event | Dispatcher → Consumer | Notes |
 | --- | --- | --- |
-| `SCAN_SUBMIT_PRESSED` | `ScannerView` → `ScannerViewController` | Manual field submit (typed digits + Enter). Carries `raw`. Controller validates via `Barcodes.isValidUpc` and either forwards as `ITEM_SCANNED` or dispatches `ERROR`. |
+| `MANUAL_ENTRY_PRESSED` | `ScannerView` (keypad button) → `ManualBarcodeEntryViewController` | Opens the `ManualBarcodeEntryView` touch-keypad dialog — the fallback when a barcode won't scan. The controller owns only open/close; the dialog's confirm re-uses the scan path by dispatching `SCAN_SUBMIT_PRESSED`. |
+| `SCAN_SUBMIT_PRESSED` | `ScannerView` (or `ManualBarcodeEntryView`) → `ScannerViewController` | Manual field submit (typed digits + Enter) or the manual-entry dialog's confirm. Carries `raw`. Controller validates via `Barcodes.isValidUpc` and either forwards as `ITEM_SCANNED` or dispatches `ERROR`. |
 | `ITEM_SCANNED` | `ScannerViewController` → `CustomerViewController` | A completed scanner burst *or* a validated manual submit. Carries `upc` and `source`. |
 | `QUICK_ADD_PRESSED` | `CustomerView` (a Quick Add tile) → `CustomerViewController` | Carries `upc`. |
 | `ITEM_ADDED` | `CustomerViewController` (after `TransactionService.addItemByUpc`) → all listeners | The basket has changed. |
@@ -58,6 +62,7 @@ Every constant on `PosEventType` appears below, grouped by phase of the sale.
 | --- | --- | --- |
 | `TOTAL_PRESSED` | `CustomerView` → `CustomerViewController` | Freezes the basket. |
 | `TRANSACTION_TOTALED` | `CustomerViewController` → all listeners | Basket is finalised; tender is next. |
+| `DISCOUNT_PRESSED` | `CustomerView` (Discount button) → *(no consumer)* | **Disabled stub.** The Discount button is wired to dispatch this but is disabled in the UI; no controller listens for it. Enabling it needs the `IN_PROGRESS`-discount domain change tracked on `feature/in-progress-discounts`. Documented here for completeness — it is the one `PosEventType` constant with a dispatcher but no live consumer. |
 | `TENDER_CASH_PRESSED` | `CustomerView` → `PayWithCashViewController` | Opens `CashModeChoiceView`. Rejected with `INVALID_ARGUMENT` if the grand total is $0.00. |
 | `CASH_EXACT_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens the `TenderConfirmView` seeded with the grand total; tender deferred to `CASH_TENDER_CONFIRM_PRESSED`. `prefillAmount` carried only for journalling which mode produced the tender. |
 | `CASH_NEXT_DOLLAR_PRESSED` | `CashModeChoiceView` → `PayWithCashViewController` | Opens the `TenderConfirmView` seeded with the ceiled amount; tender deferred to `CASH_TENDER_CONFIRM_PRESSED`. Disabled on whole-dollar totals. |

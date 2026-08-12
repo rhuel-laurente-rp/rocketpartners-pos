@@ -43,6 +43,7 @@ classDiagram
         +voidBasket()
         +total()
         +applyDiscount(Discount)
+        +payNextDollar() «ceils grandTotal, tenders as cash»
         +tender(TenderType, BigDecimal) «cards only»
         +tender(TenderType, BigDecimal, BigDecimal) «cash only»
     }
