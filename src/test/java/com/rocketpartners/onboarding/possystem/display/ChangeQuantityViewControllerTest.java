@@ -231,11 +231,10 @@ class ChangeQuantityViewControllerTest {
     }
 
     @Test
-    void changeQtyDialog_doesNotSuspendScannerCapture_onOpenOrClose() {
-        // Aligned with today's behaviour: ScannerViewController reacts to CHANGE_QTY_PRESSED
-        // by calling resumeCapture(), not suspendCapture(), so isSuspended() stays false the
-        // whole way through. The class Javadoc claims a suspend/resume dance; that mismatch
-        // is tracked in docs/known-issues.md as a follow-up.
+    void changeQtyDialog_suspendsScannerCapture_onOpen_andResumesOnClose() {
+        // ScannerViewController reacts to CHANGE_QTY_PRESSED by suspending capture — the dialog
+        // is a modal, and a scanner burst must not leak into it — then resumes on the
+        // confirm/cancel events, matching the suspend/resume contract in its class Javadoc.
         com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer buffer =
                 new com.rocketpartners.onboarding.possystem.component.BarcodeInputBuffer();
         ScannerView scannerView = mock(ScannerView.class);
@@ -248,7 +247,7 @@ class ChangeQuantityViewControllerTest {
 
         LineItem line = addWidget(2);
         pos.dispatchPosEvent(pressedFor(line));
-        assertThat(scannerController.isSuspended()).isFalse();
+        assertThat(scannerController.isSuspended()).isTrue();
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CHANGE_QTY_CANCEL_PRESSED));
         assertThat(scannerController.isSuspended()).isFalse();
