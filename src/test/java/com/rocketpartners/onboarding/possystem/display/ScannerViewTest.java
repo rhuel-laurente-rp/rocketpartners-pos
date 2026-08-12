@@ -14,9 +14,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Pure view tests for the scan bar's modes: idle, focused (implicit via the border swap),
  * locked, and error, plus the Enter-only submit contract. Runs headless — no real display
- * required. Placeholder plumbing means the field's document is "empty" (getScanText) whenever the
- * placeholder is showing, so any assertion about submit content must first put the field into a
- * non-placeholder state via {@link ScannerView#setScanText(String)}.
+ * required. The placeholder is FlatLaf's {@code JTextField.placeholderText} client property, not
+ * text written into the document, so an untouched field's document is genuinely empty — no guard
+ * flag, and Enter on it is a no-op.
  */
 class ScannerViewTest {
 
@@ -74,12 +74,40 @@ class ScannerViewTest {
     @Test
     void enter_onEmptyField_dispatchesNothing() {
         // Field is empty (placeholder showing). Enter must be a no-op — no SCAN_SUBMIT_PRESSED, so
-        // nothing reaches the controller to journal or to turn into an error.
+        // nothing reaches the controller to journal or to turn into an error. The placeholder lives
+        // in a client property, so the document is genuinely empty and there is nothing to submit.
         assertThat(view.getScanText()).isEmpty();
+        assertThat(view.getScanField().getText()).isEmpty();
 
         view.getScanField().postActionEvent();
 
         assertThat(dispatcher.received).isEmpty();
+    }
+
+    @Test
+    void placeholder_isFlatLafClientProperty_notDocumentText() {
+        // Regression for the old focus-listener hack, which set the placeholder string as the
+        // field's text and cleared it on focus. That left a "blank" field non-blank: the string
+        // sat in the document, and Enter on it submitted the placeholder. FlatLaf's client
+        // property renders the greyed hint without touching the document.
+        assertThat(view.getScanField().getClientProperty("JTextField.placeholderText"))
+                .isEqualTo(ScannerView.PLACEHOLDER);
+        // The document must be empty on a fresh, untouched view — the placeholder is painted, not
+        // stored.
+        assertThat(view.getScanField().getText()).isEmpty();
+        assertThat(view.getScanText()).isEmpty();
+    }
+
+    @Test
+    void placeholder_survivesFocus_documentStaysEmpty() {
+        // FlatLaf shows the placeholder greyed even while the field is focused and empty — unlike
+        // the old hack, which cleared it on focusGained. Focus the field and confirm the document
+        // is still empty (the placeholder is not text) and the client property is intact.
+        view.getScanField().requestFocusInWindow();
+
+        assertThat(view.getScanField().getText()).isEmpty();
+        assertThat(view.getScanField().getClientProperty("JTextField.placeholderText"))
+                .isEqualTo(ScannerView.PLACEHOLDER);
     }
 
     @Test
@@ -212,35 +240,23 @@ class ScannerViewTest {
     }
 
     @Test
-    void clearScanField_whileFocused_doesNotPaintPlaceholderBackIntoField() {
-        // Regression: after an accepted or rejected scan the controller calls clearScanField()
-        // then requestScanFieldFocus(). Re-focus on an already-focused field does NOT fire
-        // focusGained, so an unconditional showPlaceholderIfEmpty() would leave the
-        // placeholder text sitting inside the still-focused field. The next keystroke would
-        // then concatenate onto the placeholder ("Scan or type a UPC and press Enter1") and
-        // the Scan button would stay disabled because the placeholder flag reads as empty.
-        //
-        // Simulate focus via requestFocusInWindow — headless can't grant real focus, so we
-        // check the invariant against the (in-test) always-unfocused field: the helper must
-        // not repaint the placeholder text when the field has focus. Verified below by
-        // asserting the document is empty after clearScanField when we simulate focus by
-        // clearing PLACEHOLDER_ACTIVE first (which is what focusGained does in production).
+    void clearScanField_leavesDocumentEmpty_neverPlaceholderText() {
+        // After an accepted or rejected scan the controller calls clearScanField() then
+        // requestScanFieldFocus(). With the FlatLaf client-property placeholder, clearing simply
+        // empties the document — the placeholder is repainted by the L&F, never written back as
+        // text. So the document must be exactly empty afterward: the old failure mode where a
+        // keystroke concatenated onto a stale placeholder string can no longer occur.
         view.setScanText("some-typed-input");
-        // clearPlaceholderState was called by setScanText, so PLACEHOLDER_ACTIVE is false —
-        // this mirrors the state after focusGained in production.
         view.getScanField().requestFocusInWindow();
 
         view.clearScanField();
 
-        // Regardless of whether the platform granted focus, the field's document should be
-        // empty — either "" (focused path) or the placeholder (unfocused path). It must not
-        // start with the placeholder followed by anything else.
-        String text = view.getScanField().getText();
-        boolean okEmpty = text.isEmpty();
-        boolean okPlaceholder = ScannerView.PLACEHOLDER.equals(text);
-        assertThat(okEmpty || okPlaceholder)
-                .as("field text after clearScanField must be empty or exactly the placeholder, was: '%s'", text)
-                .isTrue();
+        assertThat(view.getScanField().getText())
+                .as("clearScanField must leave the document empty, not repaint placeholder text")
+                .isEmpty();
+        // The placeholder affordance is still present — as a client property, not document text.
+        assertThat(view.getScanField().getClientProperty("JTextField.placeholderText"))
+                .isEqualTo(ScannerView.PLACEHOLDER);
     }
 
     @Test

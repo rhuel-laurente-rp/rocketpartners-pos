@@ -65,7 +65,7 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     /** Row height when the basket is dense and every pixel counts. */
     public static final int COMPACT_ROW_HEIGHT = 22;
     /** The threshold at which the list switches from Comfortable to Compact. */
-    public static final int DENSITY_THRESHOLD = 9;
+    public static final int DENSITY_THRESHOLD = 18;
 
     // ---- Column geometry (shared with the header row in CustomerView) ------
     /** Left inset of the Item column — the header's "Item" label uses the same inset. */

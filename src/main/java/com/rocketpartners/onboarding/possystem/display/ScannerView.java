@@ -11,7 +11,6 @@ import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
 import javax.swing.border.Border;
-import javax.swing.text.JTextComponent;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
@@ -79,6 +78,10 @@ public class ScannerView extends JPanel {
     /** Touch-target minimum for the field. Matches {@link PosTheme#BUTTON_HEIGHT_SECONDARY}. */
     private static final int FIELD_MIN_HEIGHT = 44;
 
+    /** Width of the manual-entry keypad opener button to the right of the field. Compact so it
+     *  barely dents the field's width — the field stays the dominant element. */
+    private static final int KEYPAD_BUTTON_WIDTH = 52;
+
     /** Reserved height of the message row beneath the field. Fixed so the bar's overall height is
      *  identical whether or not a message is showing — the basket beneath never shifts. */
     private static final int MESSAGE_ROW_HEIGHT = 22;
@@ -97,6 +100,16 @@ public class ScannerView extends JPanel {
 
     private final JTextField scanField = new JTextField();
     private final JLabel statusHint = new JLabel(" ");
+
+    /**
+     * Opens the on-screen numeric keypad for manual barcode entry. A touch fallback for when a
+     * barcode won't read and there is no physical keyboard — the hardware scanner stays the
+     * primary path, so this is a small, non-focusable affordance beside the field rather than a
+     * permanent keypad eating basket space. Non-focusable on purpose: tapping it must not pull
+     * focus off the scan field (which the controller keeps focused for hardware capture) until the
+     * modal it opens takes over.
+     */
+    private final PosButton keypadButton = PosButtons.secondary("123");
 
     private final Border idleBorder;
     private final Border focusBorder;
@@ -143,7 +156,12 @@ public class ScannerView extends JPanel {
         scanField.setPreferredSize(new Dimension(0, FIELD_MIN_HEIGHT));
         scanField.setMinimumSize(new Dimension(0, FIELD_MIN_HEIGHT));
         scanField.setBorder(idleBorder);
-        installPlaceholder(scanField, PLACEHOLDER);
+        // FlatLaf renders this greyed while the document is empty — including when the field is
+        // focused — and never writes it into the document. So a "blank" field is genuinely blank:
+        // getScanText() reads empty, selectAll() has nothing to select, and Enter on an untouched
+        // field stays a no-op. No focus-listener swap, no guard flag, no placeholder string that
+        // the next keystroke could concatenate onto.
+        scanField.putClientProperty("JTextField.placeholderText", PLACEHOLDER);
         scanField.addActionListener(e -> submitCurrentField());
         scanField.addFocusListener(new FocusAdapter() {
             @Override public void focusGained(FocusEvent e) {
@@ -166,8 +184,20 @@ public class ScannerView extends JPanel {
         statusHint.setPreferredSize(new Dimension(0, MESSAGE_ROW_HEIGHT));
         statusHint.setMinimumSize(new Dimension(0, MESSAGE_ROW_HEIGHT));
 
-        // Two stacked rows. The field claims all surplus width (weightx = 1, horizontal fill); the
-        // message row sits directly beneath it, also full width, at its reserved fixed height.
+        // Manual-entry keypad opener: fixed-size square to the right of the field, non-focusable so
+        // it can't steal focus from the scan field. Dispatches MANUAL_ENTRY_PRESSED; the dedicated
+        // controller opens the modal keypad dialog.
+        keypadButton.setName("keypadButton");
+        keypadButton.setFocusable(false);
+        keypadButton.setToolTipText("Enter a barcode with the on-screen keypad");
+        keypadButton.setPreferredSize(new Dimension(KEYPAD_BUTTON_WIDTH, FIELD_MIN_HEIGHT));
+        keypadButton.setMinimumSize(new Dimension(KEYPAD_BUTTON_WIDTH, FIELD_MIN_HEIGHT));
+        keypadButton.addActionListener(e ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.MANUAL_ENTRY_PRESSED)));
+
+        // Top row: the field claims all surplus width (weightx = 1, horizontal fill); the keypad
+        // opener sits at its fixed size on the right. The message row spans both columns beneath
+        // them at its reserved fixed height, so the bar's height never changes.
         GridBagConstraints fieldC = new GridBagConstraints();
         fieldC.gridx = 0;
         fieldC.gridy = 0;
@@ -175,9 +205,18 @@ public class ScannerView extends JPanel {
         fieldC.fill = GridBagConstraints.HORIZONTAL;
         add(scanField, fieldC);
 
+        GridBagConstraints keypadC = new GridBagConstraints();
+        keypadC.gridx = 1;
+        keypadC.gridy = 0;
+        keypadC.weightx = 0.0;
+        keypadC.fill = GridBagConstraints.NONE;
+        keypadC.insets = new Insets(0, MESSAGE_GAP, 0, 0);
+        add(keypadButton, keypadC);
+
         GridBagConstraints msgC = new GridBagConstraints();
         msgC.gridx = 0;
         msgC.gridy = 1;
+        msgC.gridwidth = 2;
         msgC.weightx = 1.0;
         msgC.fill = GridBagConstraints.HORIZONTAL;
         msgC.insets = new Insets(MESSAGE_GAP, 2, 0, 2);
@@ -191,27 +230,21 @@ public class ScannerView extends JPanel {
     }
 
     public String getScanText() {
+        // The placeholder lives in a client property, not the document, so an empty field reads
+        // as truly empty — no need to distinguish "blank" from "user typed the placeholder".
         String text = scanField.getText();
-        return isPlaceholderShowing(scanField) || text == null ? "" : text;
+        return text == null ? "" : text;
     }
 
     public void setScanText(String text) {
-        clearPlaceholderState(scanField);
         scanField.setText(text == null ? "" : text);
     }
 
     public void clearScanField() {
-        clearPlaceholderState(scanField);
+        // Emptying the document is all that's needed: FlatLaf repaints the placeholder itself
+        // whenever the document is empty, focused or not, and never puts its text back into the
+        // document — so there is no placeholder string for a subsequent keystroke to land after.
         scanField.setText("");
-        // Only paint the placeholder back if the field isn't currently focused. After an
-        // accepted or rejected scan the controller re-focuses the field via
-        // requestScanFieldFocus() — a re-focus on an already-focused component does NOT fire
-        // focusGained, so an unconditional showPlaceholderIfEmpty here would leave the
-        // placeholder text sitting inside the field. The next character the cashier typed would
-        // then concatenate onto the placeholder string and the submit would misread it.
-        if (!scanField.hasFocus()) {
-            showPlaceholderIfEmpty(scanField);
-        }
     }
 
     public void requestScanFieldFocus() {
@@ -237,19 +270,18 @@ public class ScannerView extends JPanel {
         this.errorShown = false;
         scanField.setEditable(!locked);
         scanField.setBackground(locked ? PosTheme.DISABLED_BG : PosTheme.SURFACE);
+        // Manual entry is a scan; it's illegal once TOTALED, so the opener follows the lock.
+        keypadButton.setEnabled(!locked);
         if (locked) {
             applyLockedHint();
             scanField.setBorder(lockedBorder);
-            if (!isPlaceholderShowing(scanField)) {
-                scanField.setForeground(PosTheme.DISABLED_FG);
-            }
+            // Colours the typed text; the placeholder keeps FlatLaf's own greyed rendering.
+            scanField.setForeground(PosTheme.DISABLED_FG);
         } else {
             statusHint.setText(" ");
             statusHint.setForeground(PosTheme.MUTED);
             scanField.setBorder(scanField.hasFocus() ? focusBorder : idleBorder);
-            if (!isPlaceholderShowing(scanField)) {
-                scanField.setForeground(PosTheme.INK);
-            }
+            scanField.setForeground(PosTheme.INK);
         }
     }
 
@@ -268,9 +300,9 @@ public class ScannerView extends JPanel {
         scanField.setBorder(errorBorder);
         statusHint.setText(message == null ? " " : message);
         statusHint.setForeground(PosTheme.STOP);
-        if (!isPlaceholderShowing(scanField)) {
-            scanField.selectAll();
-        }
+        // Select whatever the cashier typed so the next scan/keystroke overwrites it wholesale.
+        // On an empty field (placeholder showing) this is a harmless no-op — the document is empty.
+        scanField.selectAll();
     }
 
     /**
@@ -307,6 +339,9 @@ public class ScannerView extends JPanel {
     }
 
     // ---- Test hooks --------------------------------------------------------
+
+    /** For tests: the manual-entry keypad opener button. */
+    PosButton getKeypadButtonForTest() { return keypadButton; }
 
     /** For tests: whether the view is currently locked. */
     boolean isLockedForTest() { return locked; }
@@ -348,56 +383,5 @@ public class ScannerView extends JPanel {
     private void applyLockedHint() {
         statusHint.setText(STATUS_LOCKED);
         statusHint.setForeground(PosTheme.LIVE);
-    }
-
-    // ---- Placeholder plumbing ---------------------------------------------
-    // Swing has no native placeholder for JTextField; wire it via focus listeners plus a
-    // client property so getScanText() can distinguish "empty" from "user typed the placeholder
-    // string literally".
-
-    private static final String PLACEHOLDER_ACTIVE = "scanner.placeholder.active";
-
-    private void installPlaceholder(JTextField field, String text) {
-        field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.TRUE);
-        field.setText(text);
-        field.setForeground(PosTheme.MUTED);
-        field.addFocusListener(new FocusAdapter() {
-            @Override public void focusGained(FocusEvent e) {
-                if (Boolean.TRUE.equals(field.getClientProperty(PLACEHOLDER_ACTIVE))) {
-                    field.setText("");
-                    field.setForeground(locked ? PosTheme.DISABLED_FG : PosTheme.INK);
-                    field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.FALSE);
-                }
-            }
-            @Override public void focusLost(FocusEvent e) {
-                showPlaceholderIfEmpty(field);
-            }
-        });
-    }
-
-    private static boolean isPlaceholderShowing(JTextComponent field) {
-        return Boolean.TRUE.equals(field.getClientProperty(PLACEHOLDER_ACTIVE));
-    }
-
-    private void clearPlaceholderState(JTextComponent field) {
-        if (isPlaceholderShowing(field)) {
-            field.setText("");
-        }
-        field.setForeground(locked ? PosTheme.DISABLED_FG : PosTheme.INK);
-        field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.FALSE);
-    }
-
-    private void showPlaceholderIfEmpty(JTextComponent field) {
-        // Invariant: placeholder is visible only when the field is empty AND unfocused. Painting
-        // the placeholder into a focused field lets the next keystroke land after it — the buffer
-        // still captures the burst correctly via the KeyEventDispatcher, but the JTextField's
-        // document ends up with placeholder-plus-user-text.
-        if (field.hasFocus()) return;
-        String txt = field.getText();
-        if (txt == null || txt.isEmpty()) {
-            field.putClientProperty(PLACEHOLDER_ACTIVE, Boolean.TRUE);
-            field.setText(PLACEHOLDER);
-            field.setForeground(PosTheme.MUTED);
-        }
     }
 }

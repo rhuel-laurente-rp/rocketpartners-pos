@@ -290,17 +290,42 @@ public class ScannerViewController implements IController, IPosEventListener {
             buffer.reset();
             return false;
         }
-        // Any keystroke that reaches an inline-error state clears the error — the cashier is
-        // rescanning or retyping, and the error hint is now stale.
-        view.clearInlineError();
-
         // Filter on KEY_TYPED's keyChar rather than keyCode: KEY_TYPED synthesises the character
         // regardless of whether the physical key was top-row or numeric-keypad, so a scanner
         // emitting VK_NUMPAD0..VK_NUMPAD9 still surfaces the '0'..'9' char here.
         char c = e.getKeyChar();
+        boolean terminator = buffer.getTerminators().contains(c);
+
+        // A fresh non-terminator keystroke clears a stale inline error — the cashier is rescanning
+        // or retyping. The terminator is deliberately excluded: Enter is a submit, not new input.
+        // For manual entry the focused field's Enter action fires on the preceding KEY_PRESSED and
+        // has already produced this submit's result — which may itself be a fresh inline error such
+        // as "Item Not Found — 012345678905" — so clearing on the trailing KEY_TYPED('\n') would
+        // immediately wipe it. On the hardware path any error is set later in this same call (see
+        // handleCompleted below), after this point, so skipping the clear here changes nothing there.
+        if (!terminator) {
+            view.clearInlineError();
+        }
+
+        // Manual entry: when the scan field itself holds focus, the cashier is deliberately typing
+        // a UPC (or a scanner is firing straight into the field, which submits on its own Enter).
+        // Let every keystroke reach the field untouched. Routing scan-field input through the burst
+        // detector holds digits back optimistically and, on a human-speed entry, submits only a
+        // fragment — e.g. the trailing digit as its own scan ("Item Not Found — 2") — or garbles the
+        // text so validation never sees it and no inline error fires. The field's own Enter action
+        // dispatches SCAN_SUBMIT_PRESSED for both input styles, so nothing is lost by staying out.
+        if (isScanFieldFocused()) {
+            // Any digits still held belong to a burst that targeted some other component; drop them
+            // so they can't later replay into this field out of order.
+            cancelStaleFlush();
+            heldDigits.setLength(0);
+            buffer.reset();
+            return false;
+        }
+
         long now = clock.millis();
 
-        if (buffer.getTerminators().contains(c)) {
+        if (terminator) {
             Optional<String> completed = buffer.accept(c, now);
             if (completed.isPresent()) {
                 if (debug) {
@@ -350,6 +375,16 @@ public class ScannerViewController implements IController, IPosEventListener {
 
     private static boolean isDigit(char c) {
         return c >= '0' && c <= '9';
+    }
+
+    /**
+     * @return {@code true} when the platform focus owner is this bar's own scan field — the one
+     *         component where keystrokes are intended as manual UPC entry and must pass through
+     *         to the field rather than being captured as a scanner burst.
+     */
+    private boolean isScanFieldFocused() {
+        Component focusOwner = focusOwnerSupplier.get();
+        return focusOwner != null && focusOwner == view.getScanField();
     }
 
     /**
