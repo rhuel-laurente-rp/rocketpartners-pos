@@ -270,9 +270,10 @@ class QuickAddPanel extends JPanel {
         nextButton.addActionListener(e -> goToPage(page + 1));
         lastButton.addActionListener(e -> goToPage(pageCount() - 1));
 
-        pagesIndicator.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
+        pagesIndicator.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
         pagesIndicator.setForeground(PosTheme.MUTED);
 
+        // Navigation cluster: the four chevrons around the current-page pill, kept tight together.
         JPanel controls = new JPanel();
         controls.setOpaque(false);
         controls.setLayout(new BoxLayout(controls, BoxLayout.X_AXIS));
@@ -285,19 +286,23 @@ class QuickAddPanel extends JPanel {
         controls.add(nextButton);
         controls.add(Box.createHorizontalStrut(6));
         controls.add(lastButton);
-        controls.add(Box.createHorizontalStrut(16));
-        controls.add(pagesIndicator);
 
-        // Right-align the whole cluster; the "N of M pages" indicator sits furthest right.
+        // Justify the row across the full footer width: the chevron cluster is pinned to the far
+        // left, the "N of M pages" indicator to the far right.
         JPanel footer = new JPanel(new BorderLayout());
         footer.setOpaque(false);
-        footer.add(controls, BorderLayout.EAST);
+        footer.add(controls, BorderLayout.WEST);
+        footer.add(pagesIndicator, BorderLayout.EAST);
         return footer;
     }
 
     private static PosButton pageButton(String glyph) {
         PosButton b = PosButtons.secondary(glyph);
         b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
+        // Secondary buttons default to a BODY-sized glyph, which reads as a hairline chevron on a
+        // 44px control. Bump to a bold AMOUNT-sized glyph so the arrow fills the touch target and
+        // is legible at a glance.
+        b.setFont(PosTheme.base(Font.BOLD, PosTheme.AMOUNT));
         // A drawn chevron is a few pixels wide; give it a real square hit area so the whole
         // control — not just the glyph — is tappable. Fixed size keeps the BoxLayout row from
         // collapsing the button to the glyph's intrinsic width.
