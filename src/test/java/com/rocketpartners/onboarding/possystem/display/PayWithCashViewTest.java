@@ -244,7 +244,101 @@ class PayWithCashViewTest {
         assertThat(dispatcher.eventsOf(PosEventType.CASH_ENTRY_BACK_PRESSED)).isEmpty();
     }
 
+    // ---- On-screen keypad -------------------------------------------------
+
+    @Test
+    void keypad_isPresent_withADecimalKey() throws Exception {
+        openWith("7.30", "7.30");
+        assertThat(view.getKeypadForTest()).isNotNull();
+        assertThat(view.getKeypadForTest().hasDecimalKeyForTest())
+                .as("the money keypad carries a decimal-point key").isTrue();
+    }
+
+    @Test
+    void keypad_typesDigitsAndDecimal_throughTheField() throws Exception {
+        openWith("7.30", "7.30");
+        JFormattedTextField field = view.getCashFieldForTest();
+        SwingUtilities.invokeAndWait(() -> field.setText(""));
+
+        tapKeypad("1");
+        tapKeypad("0");
+        tapKeypad(OnScreenKeypad.DECIMAL_LABEL);
+        tapKeypad("5");
+
+        assertThat(field.getText()).isEqualTo("10.5");
+    }
+
+    @Test
+    void keypad_decimalKey_insertsOne_andSecondIsRejectedByTheExistingFilter() throws Exception {
+        openWith("7.30", "7.30");
+        JFormattedTextField field = view.getCashFieldForTest();
+        SwingUtilities.invokeAndWait(() -> field.setText(""));
+
+        tapKeypad("7");
+        tapKeypad(OnScreenKeypad.DECIMAL_LABEL);
+        tapKeypad(OnScreenKeypad.DECIMAL_LABEL);   // rejected by MoneyFilter — no second point
+        tapKeypad("5");
+
+        assertThat(field.getText()).isEqualTo("7.5");
+    }
+
+    @Test
+    void keypad_backspaceDeletesAtCaret_clearEmptiesField() throws Exception {
+        openWith("7.30", "7.30");
+        JFormattedTextField field = view.getCashFieldForTest();
+        SwingUtilities.invokeAndWait(() -> field.setText("12"));
+
+        tapKeypad(OnScreenKeypad.BACKSPACE_LABEL);
+        assertThat(field.getText()).isEqualTo("1");
+
+        SwingUtilities.invokeAndWait(() -> field.setText("999"));
+        tapKeypad(OnScreenKeypad.CLEAR_LABEL);
+        assertThat(field.getText()).isEmpty();
+    }
+
+    @Test
+    void physicalKeyboardStillWorks_withTheKeypadPresent() throws Exception {
+        // The on-screen keypad does not disable or intercept physical input.
+        openWith("7.30", "7.30");
+        JFormattedTextField field = view.getCashFieldForTest();
+        SwingUtilities.invokeAndWait(() -> field.setText(""));
+
+        typeInto(field, "4");
+        tapKeypad("2");
+        typeInto(field, "0");
+
+        assertThat(field.getText()).isEqualTo("420");
+    }
+
+    @Test
+    void everyKeypadKey_isNonFocusable() throws Exception {
+        openWith("7.30", "7.30");
+        for (PosButton key : view.getKeypadForTest().getKeysForTest()) {
+            assertThat(key.isFocusable())
+                    .as("keypad key \"%s\" must not steal focus from the cash field", key.getText())
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void dialog_fitsWithinTerminalHeight_withKeypadInPlace() throws Exception {
+        openWith("7.30", "7.30");
+        int height = view.getHeight();
+        System.out.println("[measurement] PayWithCashView packed height with keypad = " + height + "px");
+        assertThat(height)
+                .as("cash dialog with keypad must fit within the 982px terminal")
+                .isLessThanOrEqualTo(982);
+    }
+
     // ---- helpers --------------------------------------------------------
+
+    private void tapKeypad(String label) throws Exception {
+        SwingUtilities.invokeAndWait(() -> view.getKeypadForTest().getKeyForTest(label).doClick());
+        // Drain any event JFormattedTextField deferred (e.g. its focus-driven select-all) before
+        // the next tap, the way a real cashier's inter-tap delay does. Without this, back-to-back
+        // programmatic taps can race that deferred select-all and clobber prior input.
+        SwingUtilities.invokeAndWait(() -> { });
+    }
 
     private void openWith(String amountDue, String prefill) throws Exception {
         // amountDue IS the prefill under the new semantics; the two-arg helper is

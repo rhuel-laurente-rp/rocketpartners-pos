@@ -39,8 +39,63 @@ public final class CustomerViewSnapshotTool {
         snapshot(0, new File(out, "customerview-empty.png"));
         snapshot(3, new File(out, "customerview-3.png"));
         snapshot(40, new File(out, "customerview-40.png"));
+        snapshotWithKeyboard(new File(out, "quickadd-qwerty-open.png"));
         System.out.println("Wrote full-window snapshots to " + out.getAbsolutePath());
         System.exit(0);
+    }
+
+    /**
+     * Renders the full window with the Quick Add QWERTY open, and prints how many tile rows remain
+     * visible above it versus with it closed — the grid shrinks into the space above rather than
+     * being covered.
+     */
+    static void snapshotWithKeyboard(File target) throws Exception {
+        // Measure against the true fixed 1512×982 register surface by forcing a full layout pass
+        // rather than showing a real window — a laptop screen clamps a 982px window shorter, which
+        // would understate the grid height. This mirrors DialogSnapshotTool's forced-layout idiom.
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        QuickAddPanel qp = view.getQuickAddPanelForTest();
+        try {
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            layoutAll(content);
+            qp.recomputeCapacityForTest();
+            int colsClosed = Math.max(1, qp.getColumnsForTest());
+            int rowsClosed = qp.getCapacityForTest() / colsClosed;
+
+            qp.fireSearchFocusGainedForTest();
+            layoutAll(content);
+            qp.recomputeCapacityForTest();
+            int colsOpen = Math.max(1, qp.getColumnsForTest());
+            int rowsOpen = qp.getCapacityForTest() / colsOpen;
+
+            System.out.println("[measurement] Quick Add tile rows — keyboard CLOSED: " + rowsClosed
+                    + " rows (" + colsClosed + " cols); keyboard OPEN: " + rowsOpen
+                    + " rows (" + colsOpen + " cols); keyboard height=" + qp.keyboardHeightForTest() + "px");
+
+            // recomputeCapacity rebuilt the tile grid; lay out once more so the shrunk grid paints
+            // its tiles above the keyboard rather than leaving the area blank.
+            layoutAll(content);
+            BufferedImage img = new BufferedImage(1512, 982, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                content.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /** Recursively lays out a container top-to-bottom so nested cards report their real bounds. */
+    private static void layoutAll(java.awt.Container c) {
+        c.doLayout();
+        for (java.awt.Component child : c.getComponents()) {
+            if (child instanceof java.awt.Container ct) layoutAll(ct);
+        }
     }
 
     /** Renders the full window with {@code count} basket lines and writes it to {@code target}. */

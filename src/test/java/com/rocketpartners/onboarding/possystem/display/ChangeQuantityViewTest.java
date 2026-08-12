@@ -263,7 +263,91 @@ class ChangeQuantityViewTest {
         assertThat(editor.getText()).isEmpty();
     }
 
+    // ---- On-screen keypad -------------------------------------------------
+
+    @Test
+    void keypad_isPresent_withNoDecimalKeyAtAll() throws Exception {
+        openFor(2);
+        assertThat(view.getKeypadForTest()).isNotNull();
+        assertThat(view.getKeypadForTest().hasDecimalKeyForTest())
+                .as("a quantity keypad must not carry a decimal-point key at all").isFalse();
+    }
+
+    @Test
+    void keypad_typesAQuantity_throughTheSpinnerEditorDocument() throws Exception {
+        LineItem line = openFor(2);
+        // openFor selectAll()'d the field, so the first key replaces the prefill.
+        tapKeypad("5");
+        assertThat(view.getSpinnerEditorForTest().getText()).isEqualTo("5");
+
+        clickConfirm();
+        PosEvent event = dispatcher.only(PosEventType.CHANGE_QTY_CONFIRM_PRESSED);
+        assertThat(event.getProperty("lineItem", LineItem.class)).isSameAs(line);
+        assertThat(event.getProperty("newQuantity", Integer.class)).isEqualTo(5);
+    }
+
+    @Test
+    void keypad_digitFilterStillRejectsOverflowLengthLikeTyping() throws Exception {
+        // The digit-only, length-capped filter governs a tapped key exactly as a keystroke: the
+        // editor tops out at the digit count of the maximum (999 → 3 digits).
+        openFor(2);
+        SwingUtilities.invokeAndWait(() -> view.getSpinnerEditorForTest().setText(""));
+        tapKeypad("9");
+        tapKeypad("9");
+        tapKeypad("9");
+        tapKeypad("9"); // fourth digit rejected by the length cap
+        assertThat(view.getSpinnerEditorForTest().getText()).isEqualTo("999");
+    }
+
+    @Test
+    void keypad_backspaceAndClear_editThroughTheDocument() throws Exception {
+        openFor(2);
+        SwingUtilities.invokeAndWait(() -> view.getSpinnerEditorForTest().setText("12"));
+
+        tapKeypad(OnScreenKeypad.BACKSPACE_LABEL);
+        assertThat(view.getSpinnerEditorForTest().getText()).isEqualTo("1");
+
+        tapKeypad(OnScreenKeypad.CLEAR_LABEL);
+        assertThat(view.getSpinnerEditorForTest().getText()).isEmpty();
+    }
+
+    @Test
+    void physicalKeyboardStillWorks_withTheKeypadPresent() throws Exception {
+        openFor(2);
+        SwingUtilities.invokeAndWait(() -> view.getSpinnerEditorForTest().setText(""));
+        typeInto(view.getSpinnerEditorForTest(), "3");
+        tapKeypad("4");
+        assertThat(view.getSpinnerEditorForTest().getText()).isEqualTo("34");
+    }
+
+    @Test
+    void everyKeypadKey_isNonFocusable() throws Exception {
+        openFor(2);
+        for (PosButton key : view.getKeypadForTest().getKeysForTest()) {
+            assertThat(key.isFocusable())
+                    .as("keypad key \"%s\" must not steal focus from the spinner editor", key.getText())
+                    .isFalse();
+        }
+    }
+
+    @Test
+    void dialog_fitsWithinTerminalHeight_withSpinnerAndKeypad() throws Exception {
+        openFor(2);
+        int height = view.getHeight();
+        System.out.println("[measurement] ChangeQuantityView packed height with keypad = " + height + "px");
+        assertThat(height)
+                .as("quantity dialog with spinner + keypad must fit within the 982px terminal")
+                .isLessThanOrEqualTo(982);
+    }
+
     // ---- helpers ---------------------------------------------------------
+
+    private void tapKeypad(String label) throws Exception {
+        SwingUtilities.invokeAndWait(() -> view.getKeypadForTest().getKeyForTest(label).doClick());
+        // Drain any deferred formatter event (e.g. focus-driven select-all) before the next tap,
+        // the way a real cashier's inter-tap delay does.
+        SwingUtilities.invokeAndWait(() -> { });
+    }
 
     private LineItem openFor(int quantity) throws Exception {
         LineItem line = new LineItem(WIDGET, quantity);

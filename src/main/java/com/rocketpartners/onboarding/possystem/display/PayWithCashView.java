@@ -119,6 +119,9 @@ public class PayWithCashView extends PosDialog {
     private final PosButton confirmButton;
     private final PosButton backButton;
 
+    /** Always-visible numeric keypad for the cash field — the terminal is touch-only. */
+    private OnScreenKeypad keypad;
+
     /** Single shared filter instance; reused across document swaps. */
     private final MoneyFilter moneyFilter = new MoneyFilter(MAX_INPUT_LENGTH);
 
@@ -315,6 +318,10 @@ public class PayWithCashView extends PosDialog {
         return cashReceivedField;
     }
 
+    OnScreenKeypad getKeypadForTest() {
+        return keypad;
+    }
+
     JLabel getStatusLineForTest() {
         return statusLine;
     }
@@ -399,6 +406,15 @@ public class PayWithCashView extends PosDialog {
         statusLine.setForeground(PosTheme.MUTED);
         statusLine.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(statusLine);
+
+        // Always-visible numeric keypad (with a decimal point — this is money). It types into the
+        // same field through its Document, so the MoneyFilter above governs a tapped key exactly
+        // as it does a physical keystroke. Part of the body rather than a reveal step: the dialog
+        // exists solely to enter a number, so a reveal tap would burden every cash sale.
+        body.add(Box.createVerticalStrut(14));
+        keypad = new OnScreenKeypad(cashReceivedField, true);
+        keypad.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(keypad);
 
         return body;
     }
