@@ -45,7 +45,6 @@ public class PayWithCardView extends PosDialog {
     private final JLabel statusLabel = new JLabel("Contacting processor…", SwingConstants.CENTER);
     private final JProgressBar progress = new JProgressBar();
     private final CheckMark checkMark = new CheckMark();
-    private final PosButton confirm = PosButtons.primary("Confirm Payment");
 
     /**
      * @param owner the parent frame; may be {@code null}
@@ -53,8 +52,6 @@ public class PayWithCardView extends PosDialog {
     public PayWithCardView(JFrame owner) {
         super(owner, "Pay Debit");
         setBody(buildBody());
-        confirm.setEnabled(false);
-        setPrimary(confirm);
         setMinimumSize(new Dimension(420, 320));
     }
 
@@ -74,7 +71,6 @@ public class PayWithCardView extends PosDialog {
         progress.setIndeterminate(true);
         progress.setVisible(true);
         checkMark.setVisible(false);
-        confirm.setEnabled(false);
     }
 
     public void showApproved() {

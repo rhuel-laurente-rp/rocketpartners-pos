@@ -469,6 +469,16 @@ public class CustomerView extends JFrame {
     }
 
     /**
+     * Dismisses the Quick Add search keyboard, if it's open. Called by the controller when an
+     * item is added — a successful scan or a tapped tile means the cashier no longer needs the
+     * search fallback, and leaving the keyboard up would be stale UI. Leaves the search text and
+     * grid filter untouched. No-op if the keyboard is already hidden.
+     */
+    public void dismissSearchKeyboard() {
+        if (quickAddPanel != null) quickAddPanel.hideKeyboard();
+    }
+
+    /**
      * Installs the given component as the scan bar at the top of the Basket column. Idempotent
      * — a subsequent call replaces the previous scan bar.
      */

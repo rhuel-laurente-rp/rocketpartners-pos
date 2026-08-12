@@ -21,10 +21,11 @@ import java.util.Map;
  * Modal cash-mode-choice dialog: {@link PosDialog}-shelled. Two square amount tiles side by
  * side, and a full-width Other Amount button beneath them.
  *
- * <p><strong>Two ways to finish, or take a detour.</strong> Exact Amount and Next Dollar are
- * <em>terminal</em> — one tap and the sale is done. The controller tenders immediately and the
- * receipt follows; there is no entry dialog and no confirmation step. Other Amount is
- * <em>navigation</em> — it opens {@link PayWithCashView} so the cashier can key what the
+ * <p><strong>Two ways to finish, or take a detour.</strong> Exact Amount and Next Dollar are the
+ * <em>terminal</em> modes — picking one leads to a confirmation and then the receipt, with no
+ * amount to key. The tile press opens a {@link TenderConfirmView} showing the figure; the cashier
+ * confirms and the controller tenders (a mis-tap is recoverable via that dialog's Back). Other
+ * Amount is <em>navigation</em> — it opens {@link PayWithCashView} so the cashier can key what the
  * customer actually handed over. The layout says as much: the two terminal tiles share the tile
  * row; Other Amount sits below a hairline as a full-width secondary, so its different
  * consequence is legible before a finger lands on it.</p>
@@ -36,12 +37,12 @@ import java.util.Map;
  * unknown until typed.</p>
  *
  * <p><strong>Next Dollar rounds the amount due up so the cashier hands back no coins.</strong>
- * On a $17.70 basket the amount due becomes $18.00 and change is $0.00. Because it now tenders
- * immediately, choosing it asserts the customer handed over exactly the ceiled amount. A
- * customer offering $20.00 instead must be handled through <em>Other Amount</em>, where change
- * is computed against the true grand total and may include coins. That is an accepted
- * consequence of the one-tap design — do <strong>not</strong> "fix" Next Dollar back into an
- * entry dialog; doing so would undo the whole point of the redesign.</p>
+ * On a $17.70 basket the amount due becomes $18.00 and change is $0.00. Choosing it asserts the
+ * customer handed over exactly the ceiled amount. A customer offering $20.00 instead must be
+ * handled through <em>Other Amount</em>, where change is computed against the true grand total and
+ * may include coins. The confirmation dialog only asks the cashier to confirm that ceiled figure —
+ * do <strong>not</strong> "fix" Next Dollar back into an <em>entry</em> dialog that lets a cash
+ * amount be keyed; that would undo the whole point of the one-tap design.</p>
  *
  * <p><strong>A whole-dollar total disables Next Dollar rather than hiding it.</strong> When the
  * ceiling of the total equals the total, Next Dollar and Exact Amount would produce identical

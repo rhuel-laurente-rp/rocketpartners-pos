@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -520,6 +521,63 @@ class ScannerViewControllerTest {
         assertThat(notifications.countOf(PosEventType.VOID_BASKET_PRESSED)).isZero();
         assertThat(notifications.countOf(PosEventType.BASKET_VOIDED)).isZero();
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+    }
+
+    @Test
+    void fastBurst_whileQwertyOpen_addsToBasket_leavesSearchUntouched_andDismissesKeyboard() {
+        // A scan while the on-screen QWERTY is up: the item must reach the basket, the search text
+        // and grid filter must be untouched, and the keyboard must dismiss (a successful scan means
+        // the cashier found the item another way). The dismissal is driven by CustomerViewController
+        // -> CustomerView.dismissSearchKeyboard(); we bridge the mock view to the real panel so the
+        // whole path is exercised without a live JFrame.
+        QuickAddPanel quickAdd = new QuickAddPanel(
+                List.of(new Item("111", "Cola", new BigDecimal("1.00")),
+                        new Item("222", "Water", new BigDecimal("2.00"))),
+                item -> { });
+        quickAdd.setCapacityForTest(2, 4);
+        JTextField search = quickAdd.getSearchFieldForTest();
+
+        CustomerView customerView = mock(CustomerView.class);
+        doAnswer(inv -> { quickAdd.hideKeyboard(); return null; })
+                .when(customerView).dismissSearchKeyboard();
+        pos.addController(new CustomerViewController(customerView));   // opens an IN_PROGRESS tx
+        installCaptureController(() -> search, new ManualScheduler());
+
+        // Cashier is searching: keyboard open, a query typed.
+        quickAdd.fireSearchFocusGainedForTest();
+        search.setText("co");
+        assertThat(quickAdd.isKeyboardVisibleForTest()).isTrue();
+        int filteredBefore = quickAdd.filteredSortedForTest().size();
+
+        burst("049000053418", 5);
+        typed('\n');
+
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
+        assertThat(search.getText()).as("scan must not touch the search text").isEqualTo("co");
+        assertThat(quickAdd.filteredSortedForTest())
+                .as("scan must not touch the grid filter").hasSize(filteredBefore);
+        assertThat(quickAdd.isKeyboardVisibleForTest())
+                .as("a successful scan dismisses the keyboard").isFalse();
+    }
+
+    @Test
+    void onScreenKeypadTaps_areNeverMistakenForScannerInput() {
+        // The keypad mutates the target field's Document directly; it fires no KeyEvents, so the
+        // application-wide KeyEventDispatcher that captures scanner bursts never sees them. Tapping
+        // a full UPC's worth of digit keys must therefore dispatch no ITEM_SCANNED — the digits
+        // simply land in the field, exactly as intended.
+        JTextField field = new JTextField();
+        OnScreenKeypad keypad = new OnScreenKeypad(field, false);
+        installCaptureController(() -> field, new ManualScheduler());
+        ensureInProgress();
+
+        for (char c : "049000053418".toCharArray()) {
+            keypad.getKeyForTest(String.valueOf(c)).doClick();
+        }
+
+        assertThat(field.getText()).isEqualTo("049000053418");
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED))
+                .as("keypad taps must not be captured as a scanner burst").isZero();
     }
 
     // ---- Helpers -----------------------------------------------------------

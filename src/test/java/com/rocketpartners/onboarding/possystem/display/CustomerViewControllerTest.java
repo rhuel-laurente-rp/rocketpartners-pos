@@ -106,6 +106,19 @@ class CustomerViewControllerTest {
     }
 
     @Test
+    void scannedKnownUpc_addsItem_andDismissesSearchKeyboard() {
+        pos.addController(controller);
+        pos.start();
+        reset(view);
+
+        pos.dispatchPosEvent(scanned(WIDGET.getUpc()));
+
+        assertThat(notifications.countOf(PosEventType.ITEM_ADDED)).isEqualTo(1);
+        // A successful add dismisses the Quick Add search keyboard — stale once the item is in.
+        verify(view).dismissSearchKeyboard();
+    }
+
+    @Test
     void quickAddPressed_unknownUpc_dispatchesError_leavesBasketUnchanged() {
         pos.addController(controller);
         pos.start();
@@ -383,6 +396,13 @@ class CustomerViewControllerTest {
         Map<String, Object> props = new HashMap<>();
         props.put("upc", upc);
         return new PosEvent(PosEventType.QUICK_ADD_PRESSED, props);
+    }
+
+    private static PosEvent scanned(String upc) {
+        Map<String, Object> props = new HashMap<>();
+        props.put("upc", upc);
+        props.put("source", "scan");
+        return new PosEvent(PosEventType.ITEM_SCANNED, props);
     }
 
     private static PosEvent voidLine(LineItem line) {

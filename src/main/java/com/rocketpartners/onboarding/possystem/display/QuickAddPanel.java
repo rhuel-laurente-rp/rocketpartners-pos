@@ -2,13 +2,16 @@ package com.rocketpartners.onboarding.possystem.display;
 
 import com.rocketpartners.onboarding.commons.model.Item;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -21,8 +24,13 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -88,6 +96,15 @@ class QuickAddPanel extends JPanel {
     private final JPanel grid = new JPanel();
     private final JPanel gridHolder = new JPanel(new BorderLayout());
 
+    /**
+     * The on-screen QWERTY and its slot in the lower portion of the panel. Hidden by default; the
+     * tile grid above ({@link #gridHolder}) reclaims the space when it's hidden. Shown on demand —
+     * search is the fallback when a barcode won't scan, so the keyboard doesn't get to hold that
+     * space permanently.
+     */
+    private final JPanel keyboardSlot = new JPanel(new BorderLayout());
+    private OnScreenKeyboard keyboard;
+
     private final PosButton firstButton = pageButton("«");
     private final PosButton prevButton = pageButton("‹");
     private final PosButton nextButton = pageButton("›");
@@ -115,9 +132,25 @@ class QuickAddPanel extends JPanel {
         grid.setOpaque(false);
         gridHolder.setOpaque(false);
         gridHolder.add(grid, BorderLayout.NORTH);
-        add(gridHolder, BorderLayout.CENTER);
+
+        // Centre stack: the tile grid fills the space, the keyboard slot sits at the bottom. When
+        // the keyboard is shown the grid shrinks into the space above rather than being covered —
+        // the cashier has to see filtered results while typing.
+        keyboardSlot.setOpaque(false);
+        keyboardSlot.setVisible(false);
+        keyboard = new OnScreenKeyboard(searchField, this::hideKeyboard);
+        keyboardSlot.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+        keyboardSlot.add(keyboard, BorderLayout.CENTER);
+
+        JPanel center = new JPanel(new BorderLayout());
+        center.setOpaque(false);
+        center.add(gridHolder, BorderLayout.CENTER);
+        center.add(keyboardSlot, BorderLayout.SOUTH);
+        add(center, BorderLayout.CENTER);
 
         add(buildFooter(), BorderLayout.SOUTH);
+
+        wireKeyboardTriggers();
 
         // Recompute capacity whenever the grid area resizes — the window is fixed, so this fires
         // once on show and then stays put.
@@ -173,6 +206,55 @@ class QuickAddPanel extends JPanel {
         query = searchField.getText() == null ? "" : searchField.getText().trim();
         page = 0;
         rebuild();
+        // Clearing the field dismisses the keyboard — one of the documented hide triggers. Guarded
+        // on isVisible so a programmatic empty (e.g. on construction) is a cheap no-op.
+        if (query.isEmpty() && keyboardSlot.isVisible()) {
+            hideKeyboard();
+        }
+    }
+
+    // ---- On-screen keyboard show/hide -------------------------------------
+
+    private void wireKeyboardTriggers() {
+        // Show when the search field takes focus (a tap focuses it); hide when focus truly leaves.
+        // Keyboard keys are non-focusable, so tapping one does NOT fire focusLost and the keyboard
+        // stays up; tapping a tile, the sort control, or a pager button moves focus and hides it.
+        searchField.addFocusListener(new FocusAdapter() {
+            @Override public void focusGained(FocusEvent e) { showKeyboard(); }
+            @Override public void focusLost(FocusEvent e) { hideKeyboard(); }
+        });
+        // A tap re-shows the keyboard even when the field already holds focus — after Done (or
+        // ESC) dismisses it, focus stays put, so focusGained won't fire again and a tap is the
+        // only signal that the cashier wants to keep typing.
+        searchField.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) { showKeyboard(); }
+        });
+        // ESC dismisses while the field is focused.
+        searchField.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke("ESCAPE"), "hideKeyboard");
+        searchField.getActionMap().put("hideKeyboard", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { hideKeyboard(); }
+        });
+    }
+
+    private void showKeyboard() {
+        if (keyboardSlot.isVisible()) return;
+        keyboardSlot.setVisible(true);
+        revalidate();
+        repaint();
+    }
+
+    /**
+     * Hides the on-screen keyboard and lets the tile grid reclaim the space. Public so the view
+     * layer can dismiss it when a scan succeeds — a barcode read means the cashier found the item
+     * another way, and leaving the keyboard up would be stale UI. Leaves the search text and the
+     * grid filter untouched. Idempotent.
+     */
+    void hideKeyboard() {
+        if (!keyboardSlot.isVisible()) return;
+        keyboardSlot.setVisible(false);
+        revalidate();
+        repaint();
     }
 
     // ---- Footer: pagination -----------------------------------------------
@@ -299,7 +381,11 @@ class QuickAddPanel extends JPanel {
             QuickAddTile tile = new QuickAddTile(item.getDisplayLabel().trim(),
                     PosTheme.money(item.getUnitPrice()));
             tile.setEnabled(tilesEnabled);
-            tile.addActionListener(e -> tileHandler.accept(item));
+            tile.addActionListener(e -> {
+                // Selecting a tile dismisses the keyboard — the cashier found the item.
+                hideKeyboard();
+                tileHandler.accept(item);
+            });
             grid.add(tile);
         }
 
@@ -318,6 +404,38 @@ class QuickAddPanel extends JPanel {
 
     JTextField getSearchFieldForTest() { return searchField; }
     JComboBox<SortMode> getSortComboForTest() { return sortCombo; }
+    OnScreenKeyboard getKeyboardForTest() { return keyboard; }
+    boolean isKeyboardVisibleForTest() { return keyboardSlot.isVisible(); }
+
+    /** For the snapshot harness: recompute tiles-per-page from the grid's current laid-out size,
+     *  synchronously, without waiting on a queued resize event. */
+    void recomputeCapacityForTest() { recomputeCapacity(); }
+
+    /** For the snapshot harness: laid-out height of the keyboard slot (0 when hidden). */
+    int keyboardHeightForTest() { return keyboardSlot.isVisible() ? keyboardSlot.getHeight() : 0; }
+
+    /** For tests: drive the search field's focus-gained path without a real native focus. */
+    void fireSearchFocusGainedForTest() {
+        for (java.awt.event.FocusListener l : searchField.getFocusListeners()) {
+            l.focusGained(new FocusEvent(searchField, FocusEvent.FOCUS_GAINED));
+        }
+    }
+
+    /** For tests: drive the search field's focus-lost path. */
+    void fireSearchFocusLostForTest() {
+        for (java.awt.event.FocusListener l : searchField.getFocusListeners()) {
+            l.focusLost(new FocusEvent(searchField, FocusEvent.FOCUS_LOST));
+        }
+    }
+
+    /** For tests: simulate a tap (mouse press) on the search field. */
+    void fireSearchTapForTest() {
+        MouseEvent press = new MouseEvent(searchField, MouseEvent.MOUSE_PRESSED, 0L, 0,
+                1, 1, 1, false);
+        for (java.awt.event.MouseListener l : searchField.getMouseListeners()) {
+            l.mousePressed(press);
+        }
+    }
     JPanel getGridForTest() { return grid; }
     int getPageForTest() { return page; }
     int getPageCountForTest() { return pageCount(); }

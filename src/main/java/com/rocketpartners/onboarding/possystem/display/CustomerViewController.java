@@ -139,6 +139,10 @@ public class CustomerViewController implements IController, IPosEventListener {
         props.put("matchedKey", outcome.getMatchedKey());
         props.put("scannedUpc", upc);
         parent.dispatchPosEvent(new PosEvent(PosEventType.ITEM_ADDED, props));
+        // An item reached the basket — via a tapped tile or a barcode read. Either way the Quick
+        // Add search keyboard, if it's up, is now stale: dismiss it without touching the search
+        // text or grid filter.
+        view.dismissSearchKeyboard();
         render();
     }
 

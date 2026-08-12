@@ -24,6 +24,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -33,10 +34,12 @@ import static org.mockito.Mockito.when;
 /**
  * Controller-level tests for the restructured cash flow.
  *
- * <p><strong>Two one-tap terminal modes.</strong> {@link PosEventType#CASH_EXACT_PRESSED} tenders
- * the grand total immediately; {@link PosEventType#CASH_NEXT_DOLLAR_PRESSED} tenders the ceiled
- * amount immediately (change $0.00). Neither opens the entry dialog — the mode choice is the
- * whole interaction and the receipt follows.</p>
+ * <p><strong>Two one-tap modes now confirm first.</strong> {@link PosEventType#CASH_EXACT_PRESSED}
+ * and {@link PosEventType#CASH_NEXT_DOLLAR_PRESSED} open a {@link TenderConfirmView} seeded with the
+ * figure about to be settled; the tender is deferred to
+ * {@link PosEventType#CASH_TENDER_CONFIRM_PRESSED} (change $0.00), and
+ * {@link PosEventType#CASH_TENDER_BACK_PRESSED} returns to the mode choice. Neither opens the entry
+ * dialog.</p>
  *
  * <p><strong>One navigation mode.</strong> {@link PosEventType#OTHER_CASH_AMOUNT_PRESSED} opens
  * {@link PayWithCashView} and defers tender to {@link PosEventType#CASH_CONFIRM_PRESSED}; change
@@ -50,6 +53,7 @@ class PayWithCashViewControllerTest {
     private PosComponent pos;
     private CashModeChoiceView choiceView;
     private PayWithCashView entryView;
+    private TenderConfirmView confirmView;
     private PayWithCashViewController controller;
     private RecordingListener notifications;
 
@@ -66,8 +70,9 @@ class PayWithCashViewControllerTest {
                 false);
         choiceView = mock(CashModeChoiceView.class);
         entryView = mock(PayWithCashView.class);
+        confirmView = mock(TenderConfirmView.class);
         when(entryView.getCashReceivedText()).thenReturn("");
-        controller = new PayWithCashViewController(choiceView, entryView);
+        controller = new PayWithCashViewController(choiceView, entryView, confirmView);
         notifications = new RecordingListener(EnumSet.allOf(PosEventType.class));
         pos.register(notifications);
         pos.addController(controller);
@@ -117,13 +122,28 @@ class PayWithCashViewControllerTest {
         verify(choiceView).openFor(new BigDecimal("7.00"), new BigDecimal("7.00"));
     }
 
-    // ---- Exact Amount: one tap, tenders grand total ---------------------
+    // ---- Exact Amount: confirm, then tender grand total -----------------
 
     @Test
-    void exactModeSelected_tendersGrandTotalImmediately_zeroChange_noEntryDialog() {
+    void exactMode_opensConfirmationSeededWithGrandTotal_doesNotTenderUntilConfirmed() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+
+        // The tile press stages the confirmation; it must not tender by itself.
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
+        verify(confirmView).openFor(any(), any(), any(), eq(new BigDecimal("7.30")));
+        verify(choiceView).closeDialog();
+        verify(entryView, never()).openFor(any(), any());
+    }
+
+    @Test
+    void exactMode_confirmed_tendersGrandTotal_zeroChange_noEntryDialog() {
+        Transaction tx = totaledAndOpened(WIDGET); // 7.30
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_CONFIRM_PRESSED));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         assertThat(tx.getTenderType()).isEqualTo(TenderType.CASH);
@@ -140,13 +160,25 @@ class PayWithCashViewControllerTest {
                 .isEqualByComparingTo("0.00");
     }
 
-    // ---- Next Dollar: one tap, tenders the ceiled amount ----------------
+    // ---- Next Dollar: confirm, then tender the ceiled amount ------------
 
     @Test
-    void nextDollarModeSelected_tendersCeiledAmountImmediately_zeroChange_noEntryDialog() {
+    void nextDollarMode_opensConfirmationSeededWithCeiledAmount_doesNotTenderUntilConfirmed() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30 → ceil 8.00
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
+
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
+        verify(confirmView).openFor(any(), any(), any(), eq(new BigDecimal("8.00")));
+    }
+
+    @Test
+    void nextDollarMode_confirmed_tendersCeiledAmount_zeroChange_noEntryDialog() {
+        Transaction tx = totaledAndOpened(WIDGET); // 7.30 → ceil 8.00
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_CONFIRM_PRESSED));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         verify(entryView, never()).openFor(any(), any());
@@ -160,6 +192,22 @@ class PayWithCashViewControllerTest {
                 .isEqualByComparingTo("8.00");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
                 .isEqualByComparingTo("0.00");
+    }
+
+    // ---- Back from the confirmation returns to the mode choice ----------
+
+    @Test
+    void backFromConfirmation_reopensChoice_withoutTendering() {
+        Transaction tx = totaledAndOpened(WIDGET); // choiceView.openFor called once so far
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_BACK_PRESSED));
+
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isZero();
+        verify(confirmView).closeDialog();
+        // Reopens the mode choice with the same figures (once on TENDER_CASH_PRESSED, once on Back).
+        verify(choiceView, times(2)).openFor(new BigDecimal("7.30"), new BigDecimal("8.00"));
     }
 
     // ---- Other Amount: opens the entry dialog, does not tender by itself -
@@ -334,6 +382,7 @@ class PayWithCashViewControllerTest {
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_ENTRY_BACK_PRESSED));
 
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_EXACT_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_CONFIRM_PRESSED));
 
         assertThat(notifications.countOf(PosEventType.CASH_TENDERED)).isEqualTo(1);
         assertThat(notifications.lastOf(PosEventType.CASH_TENDERED)
@@ -348,6 +397,7 @@ class PayWithCashViewControllerTest {
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_CANCEL_PRESSED));
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_CONFIRM_PRESSED));
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         assertThat(notifications.lastOf(PosEventType.CASH_TENDERED)
@@ -361,6 +411,7 @@ class PayWithCashViewControllerTest {
         totaledAndOpened(WIDGET); // 7.30
 
         pos.dispatchPosEvent(exactMode("7.30"));
+        pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_TENDER_CONFIRM_PRESSED));
 
         // The mode-selection event is on the wire (JournalListener records it), and so is the
         // tender, carrying tender type, amount, amountDue, and change.
