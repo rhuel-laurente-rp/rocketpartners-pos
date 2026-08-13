@@ -130,7 +130,10 @@ public class DiscountViewController implements IController, IPosEventListener {
 
     private void fetchRules() {
         fetchExecutor.execute(() -> {
+            // Eligibility rules drive the cashier dialog; promotional rules populate CloudApiComponent's
+            // cache so an applied promo at Total can be mapped back to its basket line for the FREE tag.
             CloudApiComponent.RulesResult result = cloudApi.fetchEligibilityRules();
+            cloudApi.fetchPromotionalRules();
             edtRunner.run(() -> onRulesFetched(result));
         });
     }

@@ -129,6 +129,36 @@ class CloudApiComponentTest {
     }
 
     @Test
+    void fetchPromotionalRules_parsesTargetAndBuyGet_andCachesByCode() throws IOException {
+        serve(200, "[{\"id\":9,\"code\":\"BOGO_MONSTER\",\"description\":\"Buy 2 Get 1 Free\","
+                + "\"category\":\"PROMOTIONAL\",\"targetType\":\"UPC\",\"targetValue\":\"070847811169\","
+                + "\"discountType\":\"PROMO\",\"buyQuantity\":2,\"getQuantity\":1,"
+                + "\"priority\":1,\"active\":true}]");
+
+        CloudApiComponent.PromoRulesResult result = api.fetchPromotionalRules();
+
+        assertThat(result.ok()).isTrue();
+        assertThat(result.rules()).hasSize(1);
+        CloudApiComponent.PromoRule rule = result.rules().get(0);
+        assertThat(rule.targetUpc()).isEqualTo("070847811169");
+        assertThat(rule.buyQuantity()).isEqualTo(2);
+        assertThat(rule.getQuantity()).isEqualTo(1);
+        // Cached for later promo-to-line mapping.
+        assertThat(api.promoRuleByCode("BOGO_MONSTER")).isPresent();
+        assertThat(api.promoRuleByCode("NOPE")).isEmpty();
+    }
+
+    @Test
+    void freeUnitsFor_computesBuyNGetMLikeTheEngine() {
+        CloudApiComponent.PromoRule buy2get1 =
+                new CloudApiComponent.PromoRule("BOGO", "Buy 2 Get 1", "UPC", 2, 1);
+        // floor(7/3)*1 = 2; floor(5/3)*1 = 1; floor(2/3)*1 = 0.
+        assertThat(CloudApiComponent.freeUnitsFor(buy2get1, 7)).isEqualTo(2);
+        assertThat(CloudApiComponent.freeUnitsFor(buy2get1, 5)).isEqualTo(1);
+        assertThat(CloudApiComponent.freeUnitsFor(buy2get1, 2)).isZero();
+    }
+
+    @Test
     void engineUnreachable_isFailureNotException() {
         // Point at a port nothing is listening on — a connection refused must return a failed
         // result, never throw into checkout.

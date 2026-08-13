@@ -53,6 +53,15 @@ public final class PosTheme {
     public static final Color STOP = new Color(0xA3, 0x2A, 0x1F);
     /** Amber for "live / awaiting" states (tender enabled, processing card). */
     public static final Color LIVE = new Color(0xC9, 0x7A, 0x0E);
+    /**
+     * Violet reserved for promotional "free item" markers on a basket line. Deliberately none of
+     * the hues already carrying meaning: {@link #GO} green is the pay-forward / hover / selection /
+     * newest-scan-flash colour (a green promo tag would blend into those transient row states),
+     * {@link #LIVE} amber is the processing/awaiting state, {@link #STOP} red is void/error, and
+     * blue/indigo ({@link #CARD_DEBIT}/{@link #CARD_CREDIT}) are the tenders. Violet reads as a
+     * persistent "deal" accent that a cashier won't confuse with any of those.
+     */
+    public static final Color PROMO = new Color(0x9D, 0x2E, 0xA8);
     /** Tint used on selected basket rows and change-due strip. */
     public static final Color SELECTED = new Color(0xEC, 0xF3, 0xF0);
     /** Row hover background — one step darker than SURFACE, still lighter than SELECTED. */

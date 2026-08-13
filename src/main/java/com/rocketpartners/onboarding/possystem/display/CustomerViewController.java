@@ -3,6 +3,7 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.commons.dto.LineItemDto;
 import com.rocketpartners.onboarding.commons.dto.TransactionDto;
 import com.rocketpartners.onboarding.commons.model.Discount;
+import com.rocketpartners.onboarding.commons.model.DiscountType;
 import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.commons.model.Transaction;
 import com.rocketpartners.onboarding.commons.model.TransactionState;
@@ -410,13 +411,13 @@ public class CustomerViewController implements IController, IPosEventListener {
             view.setDiscountDescriptions(List.of());
             return;
         }
-        // Copy the aggregate's line-item list so the view (and any observer, such as a
-        // Mockito verify) sees a snapshot that reflects the exact state at render time.
-        List<LineItem> lines = new ArrayList<>(tx.getLineItems());
+        BigDecimal subtotal = tx.subtotal();
 
         if (!tx.getDiscounts().isEmpty()) {
-            // Engine discounts have been applied (post-Total): the aggregate is authoritative.
-            view.updateBasket(lines, tx.subtotal(), tx.discountTotal(), tx.taxTotal(), tx.grandTotal());
+            // Post-Total: the engine's applied discounts are authoritative for the totals; the free
+            // rows are driven by the engine's PROMO amounts.
+            view.updateBasket(displayRowsFromEngine(tx), subtotal,
+                    tx.discountTotal(), tx.taxTotal(), tx.grandTotal());
             List<String> descriptions = new ArrayList<>();
             for (Discount d : tx.getDiscounts()) {
                 descriptions.add(d.getDescription() + "  -" + money(d.getAppliedAmount()));
@@ -425,20 +426,34 @@ public class CustomerViewController implements IController, IPosEventListener {
             return;
         }
 
-        // No engine discounts yet (IN_PROGRESS, or the brief window while calculating): show the
-        // locally-computed preview of the selected eligibility discount so the running total stays
-        // correct as items are scanned, without a per-scan network round-trip. The engine result
-        // replaces this at Total. See DiscountPreview — this is the only discount arithmetic the
-        // POS performs. Tax and grand total are composed from that preview the same way the
-        // aggregate composes them from applied discounts (tax on subtotal − discount).
-        BigDecimal subtotal = tx.subtotal();
-        BigDecimal previewDiscount = DiscountPreview.previewTotal(discountSession.getSelectedRules(), subtotal);
+        // IN_PROGRESS live preview. Two locally-computed pieces, updated on every scan/qty change so
+        // the running total stays correct without a per-scan network round-trip; the engine result
+        // replaces both at Total:
+        //   1. buy-N-get-M promotions from the rules cached at startup — each yields an inert,
+        //      indented free row and reduces the total; and
+        //   2. the selected eligibility discount (see DiscountPreview).
+        // Tax and grand total are composed from the combined preview the same way the aggregate
+        // composes them from applied discounts (tax on subtotal − discount).
+        List<PromoLine> promos = localPromoLines(tx);
+        BigDecimal promoDiscount = BigDecimal.ZERO;
+        for (PromoLine p : promos) {
+            promoDiscount = promoDiscount.add(p.amount());
+        }
+        BigDecimal eligibilityDiscount =
+                DiscountPreview.previewTotal(discountSession.getSelectedRules(), subtotal);
+        BigDecimal previewDiscount = promoDiscount.add(eligibilityDiscount);
+        if (previewDiscount.compareTo(subtotal) > 0) previewDiscount = subtotal;
+
         BigDecimal taxable = subtotal.subtract(previewDiscount);
         BigDecimal tax = taxable.multiply(tx.getTaxRate());
         BigDecimal total = taxable.add(tax).setScale(2, RoundingMode.HALF_UP);
-        view.updateBasket(lines, subtotal, previewDiscount, tax, total);
+
+        view.updateBasket(interleaveFreeRows(tx, promos), subtotal, previewDiscount, tax, total);
 
         List<String> descriptions = new ArrayList<>();
+        for (PromoLine p : promos) {
+            descriptions.add(p.rule().description() + "  -" + money(p.amount()));
+        }
         for (EligibilityRule rule : discountSession.getSelectedRules()) {
             descriptions.add(rule.description() + "  -"
                     + money(DiscountPreview.previewAmount(rule, subtotal)));
@@ -446,7 +461,75 @@ public class CustomerViewController implements IController, IPosEventListener {
         view.setDiscountDescriptions(descriptions);
     }
 
+    /** A locally-previewed promotion on one basket line: how many units are free and their value. */
+    private record PromoLine(LineItem line, CloudApiComponent.PromoRule rule,
+                             int freeUnits, BigDecimal amount) {
+    }
+
+    /**
+     * Computes the buy-N-get-M promotions that currently apply to the basket, from the promo rules
+     * cached at startup — the live equivalent of what the engine will return at Total. Empty when no
+     * engine is wired or nothing qualifies.
+     */
+    private List<PromoLine> localPromoLines(Transaction tx) {
+        if (cloudApi == null) return List.of();
+        List<PromoLine> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            if (li.isVoided()) continue;
+            var ruleOpt = cloudApi.promoRuleForUpc(li.getItem().getUpc());
+            if (ruleOpt.isEmpty()) continue;
+            CloudApiComponent.PromoRule rule = ruleOpt.get();
+            int free = CloudApiComponent.freeUnitsFor(rule, li.getQuantity());
+            if (free <= 0) continue;
+            BigDecimal amount = li.getItem().getUnitPrice().multiply(BigDecimal.valueOf(free));
+            out.add(new PromoLine(li, rule, free, amount));
+        }
+        return out;
+    }
+
+    /** Real lines with a {@link FreeLineItem} inserted after each line that earned a promo (preview). */
+    private List<LineItem> interleaveFreeRows(Transaction tx, List<PromoLine> promos) {
+        Map<LineItem, PromoLine> byLine = new HashMap<>();
+        for (PromoLine p : promos) {
+            byLine.put(p.line(), p);
+        }
+        List<LineItem> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            out.add(li);
+            PromoLine p = byLine.get(li);
+            if (p != null) {
+                out.add(new FreeLineItem(li.getItem(), p.freeUnits(), p.amount()));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Post-Total display rows: real lines plus a {@link FreeLineItem} after each line an engine
+     * PROMO discount hit, using the engine's authoritative applied amount. The target UPC and
+     * free-unit count come from the promo rules cached at startup.
+     */
+    private List<LineItem> displayRowsFromEngine(Transaction tx) {
+        List<LineItem> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            out.add(li);
+            if (cloudApi == null || li.isVoided()) continue;
+            for (Discount d : tx.getDiscounts()) {
+                if (d.getType() != DiscountType.PROMO) continue;
+                var ruleOpt = cloudApi.promoRuleByCode(d.getDiscountId());
+                if (ruleOpt.isEmpty()) continue;
+                CloudApiComponent.PromoRule rule = ruleOpt.get();
+                if (!li.getItem().getUpc().equals(rule.targetUpc())) continue;
+                int free = CloudApiComponent.freeUnitsFor(rule, li.getQuantity());
+                out.add(new FreeLineItem(li.getItem(), free, d.getAppliedAmount()));
+                break;
+            }
+        }
+        return out;
+    }
+
     private static String money(BigDecimal amount) {
         return "$" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
+
 }

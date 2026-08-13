@@ -65,6 +65,7 @@ class CustomerViewControllerDiscountTest {
     private static final class StubApi extends CloudApiComponent {
         private final CalculateResult result;
         volatile Boolean calledOnEdt;
+        PromoRule promoRule; // returned by promoRuleByCode when the code matches
 
         StubApi(CalculateResult result) {
             super("http://localhost:1");
@@ -75,6 +76,12 @@ class CustomerViewControllerDiscountTest {
         public CalculateResult calculate(TransactionDto request) {
             calledOnEdt = SwingUtilities.isEventDispatchThread();
             return result;
+        }
+
+        @Override
+        public java.util.Optional<PromoRule> promoRuleByCode(String code) {
+            return promoRule != null && promoRule.code().equals(code)
+                    ? java.util.Optional.of(promoRule) : java.util.Optional.empty();
         }
     }
 
@@ -144,6 +151,35 @@ class CustomerViewControllerDiscountTest {
         assertThat(api.calledOnEdt)
                 .as("the discount engine call must not run on the EDT — a 2s timeout would freeze the UI")
                 .isFalse();
+    }
+
+    @Test
+    void promoDiscount_addsAnInertFreeRowBeneathTheProduct() {
+        // Buy-1-Get-1 on the widget; two widgets in the basket -> one free unit at $10.00 off.
+        Discount promo = new Discount("BOGO", "Buy 1 Get 1", DiscountType.PROMO,
+                BigDecimal.ZERO, new BigDecimal("10.00"));
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of(promo)));
+        api.promoRule = new CloudApiComponent.PromoRule("BOGO", "Buy 1 Get 1", WIDGET.getUpc(), 1, 1);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 2
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        // The display list handed to the view contains a FreeLineItem for the freed unit; the
+        // domain transaction still holds only the one real (qty-2) product line.
+        org.mockito.Mockito.verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                org.mockito.ArgumentMatchers.argThat(rows ->
+                        rows.stream().anyMatch(r -> r instanceof FreeLineItem)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        Transaction tx = pos.getTransactionService().getCurrentTransaction();
+        assertThat(tx.getLineItems()).hasSize(1);
+        assertThat(tx.discountTotal()).isEqualByComparingTo("10.00");
     }
 
     @Test

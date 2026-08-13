@@ -299,7 +299,8 @@ public class CustomerView extends JFrame {
         boolean flashIsBump = false;
         for (int i = 0; i < lines.size(); i++) {
             LineItem li = lines.get(i);
-            if (li.isVoided()) continue;
+            // Free rows are display-only and rebuilt every render — never flash them.
+            if (li.isVoided() || li instanceof FreeLineItem) continue;
             Integer prev = previousQuantities.get(li);
             if (prev == null) {
                 flashRow = i;
@@ -329,20 +330,24 @@ public class CustomerView extends JFrame {
                 basketList.setSelectedIndex(restored);
                 basketList.ensureIndexIsVisible(restored);
             }
+            // Never leave the selection resting on an inert free row (it follows its product line,
+            // so a "select the newest row" restore would otherwise land on it).
+            nudgeSelectionOffFreeRow();
         }
 
-        // Density derives strictly from item count. Voided lines still occupy screen space, so
-        // they count — the cashier still has to scroll past them.
-        BasketCellRenderer.Density target = BasketCellRenderer.densityFor(lines.size());
+        // Density derives from real line count. Voided lines still occupy screen space so they
+        // count; free rows are display sugar and don't drive the density switch.
+        BasketCellRenderer.Density target = BasketCellRenderer.densityFor(realLineCount(lines));
         if (target != basketRenderer.getDensity()) {
             animateDensityTransition(target);
         }
 
         // Snapshot the non-voided quantity sum first — the vertical summary shows the item count
-        // beside the Subtotal label, and it must match the value stored on this render.
+        // beside the Subtotal label, and it must match the value stored on this render. Free rows
+        // are not real merchandise, so they don't count.
         int qtySum = 0;
         for (LineItem li : lines) {
-            if (!li.isVoided()) qtySum += li.getQuantity();
+            if (!li.isVoided() && !(li instanceof FreeLineItem)) qtySum += li.getQuantity();
         }
         lastNonVoidedQuantitySum = qtySum;
 
@@ -359,6 +364,7 @@ public class CustomerView extends JFrame {
         // increase, not a new arrival.
         previousQuantities.clear();
         for (LineItem li : lines) {
+            if (li instanceof FreeLineItem) continue; // rebuilt each render; not tracked for flash
             previousQuantities.put(li, li.getQuantity());
         }
 
@@ -443,9 +449,40 @@ public class CustomerView extends JFrame {
 
     private void refreshSelectionDependentButtons() {
         LineItem sel = basketList.getSelectedValue();
-        boolean actionable = basketInputEnabled && sel != null && !sel.isVoided();
+        // A free row is inert: not actionable, so Change Qty / Void Line stay dark for it.
+        boolean actionable = basketInputEnabled && sel != null
+                && !sel.isVoided() && !(sel instanceof FreeLineItem);
         changeQtyButton.setEnabled(actionable);
         voidLineButton.setEnabled(actionable);
+    }
+
+    /** Real (non-free) line count, used for the density switch. */
+    private static int realLineCount(java.util.List<LineItem> lines) {
+        int count = 0;
+        for (LineItem li : lines) {
+            if (!(li instanceof FreeLineItem)) count++;
+        }
+        return count;
+    }
+
+    /**
+     * If the current selection has landed on an inert {@link FreeLineItem}, move it to the nearest
+     * preceding real line (a free row always follows the product that earned it), or clear it if
+     * there is none. Keeps free rows unselectable without fighting the model rebuild.
+     */
+    private void nudgeSelectionOffFreeRow() {
+        int i = basketList.getSelectedIndex();
+        if (i < 0) return;
+        Object sel = basketModel.getElementAt(i);
+        if (!(sel instanceof FreeLineItem)) return;
+        for (int j = i - 1; j >= 0; j--) {
+            if (!(basketModel.getElementAt(j) instanceof FreeLineItem)) {
+                basketList.setSelectedIndex(j);
+                basketList.ensureIndexIsVisible(j);
+                return;
+            }
+        }
+        basketList.clearSelection();
     }
 
     /** Enables or disables the tender controls (Pay Cash / Debit / Credit). */
@@ -491,9 +528,14 @@ public class CustomerView extends JFrame {
         }
     }
 
-    /** @return the line item currently selected in the basket list, or {@code null} if none */
+    /**
+     * @return the line item currently selected in the basket list, or {@code null} if none. An
+     *         inert {@link FreeLineItem} never counts as a selection — Void Line and Change Qty
+     *         must treat it as "nothing selected".
+     */
     public LineItem getSelectedLineItem() {
-        return basketList.getSelectedValue();
+        LineItem sel = basketList.getSelectedValue();
+        return sel instanceof FreeLineItem ? null : sel;
     }
 
     /** @return {@code true} if the Change Qty button is currently enabled */
@@ -800,7 +842,12 @@ public class CustomerView extends JFrame {
         // the left column's bottom cell and the bottom-right actions card respectively. The list
         // now owns the full height of the basket card.
         basketList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) refreshSelectionDependentButtons();
+            if (!e.getValueIsAdjusting()) {
+                // A click on an inert free row bounces to its product line (or clears) so the row
+                // can never appear highlighted or become the target of Void Line / Change Qty.
+                nudgeSelectionOffFreeRow();
+                refreshSelectionDependentButtons();
+            }
         });
         return PosTheme.card("Basket", body);
     }

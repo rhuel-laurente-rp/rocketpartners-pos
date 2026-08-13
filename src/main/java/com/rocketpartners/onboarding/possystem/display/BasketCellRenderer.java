@@ -108,6 +108,9 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     /** Index of the currently hovered row, or {@code -1} for none. */
     private int hoverIndex = -1;
 
+    /** Pre-rendered hex for {@link PosTheme#PROMO}, so the free-row HTML costs no per-row allocation. */
+    private final String promoHex = hex(PosTheme.PROMO);
+
     public BasketCellRenderer() {
         super(new BorderLayout(COL_GAP, 0));
         // The vertical inset IS the density knob — comfortable padding by default, tightened in
@@ -205,6 +208,7 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         return hoverIndex;
     }
 
+
     /**
      * Reports a modest preferred width so the {@link JList} tracks the viewport width rather than
      * growing to fit the widest description. Without this cap a long item name inflates the list's
@@ -227,6 +231,22 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     public Component getListCellRendererComponent(
             JList<? extends LineItem> list, LineItem value, int index,
             boolean isSelected, boolean cellHasFocus) {
+
+        // A promotion's free units render as their own inert, indented row: PROMO-violet, no
+        // hover/selection tint (it can't be selected), a "↳ … free" label, and a negative Total.
+        // The price and qty columns are blank — it isn't a priced, countable product line.
+        if (value instanceof FreeLineItem free) {
+            setBackground(PosTheme.SURFACE);
+            String label = free.getItem().getDisplayLabel().trim();
+            description.setText("<html><font color='" + promoHex + "'>&nbsp;&nbsp;&nbsp;&#8627; "
+                    + escapeHtml(label) + " — " + free.getFreeUnits() + " free</font></html>");
+            description.setForeground(PosTheme.PROMO);
+            price.setText("");
+            qty.setText("");
+            extended.setText("-" + PosTheme.money(free.getFreeAmount()));
+            extended.setForeground(PosTheme.PROMO);
+            return this;
+        }
 
         boolean voided = value.isVoided();
         boolean hovered = index == hoverIndex;
@@ -268,7 +288,22 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    /** {@code #RRGGBB} for a colour, for use inside an HTML {@code <font color>} attribute. */
+    private static String hex(java.awt.Color c) {
+        return String.format("#%02X%02X%02X", c.getRed(), c.getGreen(), c.getBlue());
+    }
+
     // ---- Test hooks --------------------------------------------------------
+
+    /** For tests: the description column's rendered text (may be HTML) after the last render pass. */
+    String getDescriptionTextForTest() {
+        return description.getText();
+    }
+
+    /** For tests: the Total column's rendered text after the last render pass. */
+    String getExtendedTextForTest() {
+        return extended.getText();
+    }
 
     /** For tests: the quantity column's rendered text after the last render pass. */
     String getQtyTextForTest() {

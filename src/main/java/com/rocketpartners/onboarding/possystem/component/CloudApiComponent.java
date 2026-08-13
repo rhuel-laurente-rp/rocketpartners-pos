@@ -25,6 +25,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The POS's HTTP client to the discount engine. This is the <em>only</em> seam between the POS and
@@ -58,6 +61,15 @@ public class CloudApiComponent implements Closeable {
     private final String baseUrl;
     private final ObjectMapper mapper;
     private final CloseableHttpClient client;
+
+    /**
+     * Promotional rules cached at startup, keyed by rule {@code code}. Promotions are engine-computed
+     * and auto-applied, so the calculate response's {@code Discount} carries only the code — not the
+     * UPC it hit or how many units were free. This cache lets the POS map an applied PROMO discount
+     * back to its target line for the "N FREE" basket badge. Concurrent because it is populated on
+     * the startup fetch thread and read on the EDT during render.
+     */
+    private final Map<String, PromoRule> promoCache = new ConcurrentHashMap<>();
 
     /**
      * @param baseUrl the discount engine base URL (e.g. {@code http://localhost:8080}); must not be
@@ -123,6 +135,29 @@ public class CloudApiComponent implements Closeable {
         }
     }
 
+    /**
+     * A POS-side view of one {@code PROMOTIONAL} rule (buy-N-get-M on a single UPC), enough to map
+     * an applied promo back to its basket line and label how many units were free.
+     */
+    public record PromoRule(String code, String description, String targetUpc,
+                            Integer buyQuantity, Integer getQuantity) {
+    }
+
+    /** Outcome of a promotional-rules fetch; mirrors {@link RulesResult}. */
+    public record PromoRulesResult(List<PromoRule> rules, String error) {
+        public boolean ok() {
+            return error == null;
+        }
+
+        static PromoRulesResult ok(List<PromoRule> rules) {
+            return new PromoRulesResult(rules, null);
+        }
+
+        static PromoRulesResult fail(String error) {
+            return new PromoRulesResult(List.of(), error);
+        }
+    }
+
     // ---- Endpoints ---------------------------------------------------------
 
     /**
@@ -142,6 +177,62 @@ public class CloudApiComponent implements Closeable {
             System.err.println("[discount-engine] rules fetch failed: " + reason);
             return RulesResult.fail(reason);
         }
+    }
+
+    /**
+     * Fetches the active {@code PROMOTIONAL} rules and caches them by code for later
+     * promo-to-line mapping. Called once at startup alongside {@link #fetchEligibilityRules()}.
+     * Returns a failed result (with a debug reason) on any error rather than throwing.
+     */
+    public PromoRulesResult fetchPromotionalRules() {
+        String url = baseUrl + "/discounts/rules?category="
+                + URLEncoder.encode("PROMOTIONAL", StandardCharsets.UTF_8);
+        try {
+            String body = execute(new HttpGet(url));
+            List<PromoRule> rules = parsePromoRules(body);
+            promoCache.clear();
+            for (PromoRule rule : rules) {
+                promoCache.put(rule.code(), rule);
+            }
+            return PromoRulesResult.ok(rules);
+        } catch (Exception e) {
+            String reason = e.getClass().getSimpleName() + ": " + e.getMessage();
+            System.err.println("[discount-engine] promo rules fetch failed: " + reason);
+            return PromoRulesResult.fail(reason);
+        }
+    }
+
+    /** @return the cached promotional rule for {@code code}, if one was fetched at startup */
+    public Optional<PromoRule> promoRuleByCode(String code) {
+        return code == null ? Optional.empty() : Optional.ofNullable(promoCache.get(code));
+    }
+
+    /**
+     * @return a cached promotional rule targeting the given UPC, if any. Used to compute the live
+     *         "free unit" preview as items are scanned, before the engine is called at Total. If
+     *         several rules target one UPC the first found is returned.
+     */
+    public Optional<PromoRule> promoRuleForUpc(String upc) {
+        if (upc == null) return Optional.empty();
+        for (PromoRule rule : promoCache.values()) {
+            if (upc.equals(rule.targetUpc())) return Optional.of(rule);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Free units a buy-N-get-M rule yields at the given line quantity:
+     * {@code floor(qty / (buy + get)) * get} — one completed group of {@code buy + get} units gives
+     * {@code get} free ones. Mirrors the engine's own computation so the badge count matches the
+     * amount the engine discounted. Returns 0 for a malformed or non-qualifying rule.
+     */
+    public static int freeUnitsFor(PromoRule rule, int quantity) {
+        if (rule == null) return 0;
+        int buy = rule.buyQuantity() == null ? 0 : rule.buyQuantity();
+        int get = rule.getQuantity() == null ? 0 : rule.getQuantity();
+        int group = buy + get;
+        if (group <= 0 || get <= 0) return 0;
+        return (quantity / group) * get;
     }
 
     /**
@@ -199,6 +290,26 @@ public class CloudApiComponent implements Closeable {
                         parseType(node.get("discountType")),
                         decimalOrNull(node.get("amount")),
                         text(node, "exclusivityGroup")));
+            }
+        }
+        return rules;
+    }
+
+    private List<PromoRule> parsePromoRules(String body) throws Exception {
+        JsonNode root = mapper.readTree(body);
+        List<PromoRule> rules = new ArrayList<>();
+        if (root != null && root.isArray()) {
+            for (JsonNode node : root) {
+                String code = text(node, "code");
+                if (code == null || code.isBlank()) {
+                    continue;
+                }
+                rules.add(new PromoRule(
+                        code,
+                        text(node, "description"),
+                        text(node, "targetValue"),
+                        intOrNull(node.get("buyQuantity")),
+                        intOrNull(node.get("getQuantity"))));
             }
         }
         return rules;
@@ -274,6 +385,15 @@ public class CloudApiComponent implements Closeable {
         if (n == null || n.isNull()) return null;
         try {
             return new BigDecimal(n.asText());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Integer intOrNull(JsonNode n) {
+        if (n == null || n.isNull()) return null;
+        try {
+            return Integer.valueOf(n.asText());
         } catch (NumberFormatException e) {
             return null;
         }
