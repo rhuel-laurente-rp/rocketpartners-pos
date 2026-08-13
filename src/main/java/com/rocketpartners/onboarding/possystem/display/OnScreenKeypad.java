@@ -41,6 +41,19 @@ import java.util.List;
  * nothing else. No validation, no formatting, no {@code TransactionService}, no knowledge of what
  * the number means. Keys are built once in the constructor; {@code paintComponent} allocates
  * nothing new.</p>
+ *
+ * <p><strong>Retargetable.</strong> The target is not fixed for the keypad's lifetime — {@link
+ * #setTarget(JTextComponent)} points it at a different field, so a single keypad can follow focus
+ * between several fields (the login screen has one keypad serving both the Operator ID and PIN
+ * fields). The digit/backspace/clear listeners read the current target at click time, so a
+ * retarget takes effect immediately with no rewiring.</p>
+ *
+ * <p><strong>Optional advance key.</strong> Constructed with a non-null {@code onNext} runnable, the
+ * keypad grows a keypad-sized {@value #NEXT_LABEL} key in its bottom row that fires {@code onNext} —
+ * a touch "move to the next field" affordance for lanes with no keyboard. It is a plain key, sized
+ * and coloured like Clear/backspace, deliberately <em>not</em> a full-width submit button: the
+ * commit control (e.g. a Login button) lives outside the pad. The two-argument constructor omits it
+ * entirely. Like every other key, it is non-focusable.</p>
  */
 public class OnScreenKeypad extends JPanel {
 
@@ -51,8 +64,10 @@ public class OnScreenKeypad extends JPanel {
     static final String BACKSPACE_LABEL = "⌫";
     static final String CLEAR_LABEL = "Clear";
     static final String DECIMAL_LABEL = ".";
+    /** Advance-to-next-field key glyph. An arrow, not the word "Enter": it navigates, it never submits. */
+    static final String NEXT_LABEL = "→";
 
-    private final JTextComponent target;
+    private JTextComponent target;
     private final boolean withDecimal;
     private final List<PosButton> keys = new ArrayList<>();
 
@@ -62,6 +77,17 @@ public class OnScreenKeypad extends JPanel {
      *                    omit it entirely (quantity)
      */
     public OnScreenKeypad(JTextComponent target, boolean withDecimal) {
+        this(target, withDecimal, null);
+    }
+
+    /**
+     * @param target      the field this keypad types into; must not be {@code null}
+     * @param withDecimal {@code true} to include a decimal-point key (money), {@code false} to
+     *                    omit it entirely (quantity)
+     * @param onNext      invoked when the on-screen {@value #NEXT_LABEL} advance key is tapped;
+     *                    {@code null} omits the key
+     */
+    public OnScreenKeypad(JTextComponent target, boolean withDecimal, Runnable onNext) {
         if (target == null) throw new IllegalArgumentException("target must not be null");
         this.target = target;
         this.withDecimal = withDecimal;
@@ -76,14 +102,51 @@ public class OnScreenKeypad extends JPanel {
         add(gap());
 
         PosButton clear = controlKey(CLEAR_LABEL);
-        clear.addActionListener(e -> OnScreenKeys.clear(target));
+        // Reference the mutable FIELD this.target, not the constructor parameter `target` (which
+        // shadows it here). Capturing the parameter would freeze these keys to the initial field, so
+        // Clear/backspace would keep hitting it after setTarget() moved the digit keys elsewhere.
+        clear.addActionListener(e -> OnScreenKeys.clear(this.target));
         PosButton backspace = controlKey(BACKSPACE_LABEL);
-        backspace.addActionListener(e -> OnScreenKeys.backspace(target));
+        backspace.addActionListener(e -> OnScreenKeys.backspace(this.target));
+
+        // The advance key, when requested, is a plain keypad key folded into the bottom row — same
+        // size and grey fill as Clear/backspace — so it reads as part of the pad, not a submit.
+        PosButton next = null;
+        if (onNext != null) {
+            next = controlKey(NEXT_LABEL);
+            next.addActionListener(e -> onNext.run());
+        }
+
         if (withDecimal) {
-            add(row(clear, digitKey("0"), digitKey(DECIMAL_LABEL), backspace));
+            if (next != null) {
+                add(row(clear, digitKey("0"), digitKey(DECIMAL_LABEL), backspace, next));
+            } else {
+                add(row(clear, digitKey("0"), digitKey(DECIMAL_LABEL), backspace));
+            }
+        } else if (next != null) {
+            add(row(clear, digitKey("0"), backspace, next));
         } else {
             add(row(clear, digitKey("0"), backspace));
         }
+    }
+
+    // ---- Retargeting -------------------------------------------------------
+
+    /** @return the field this keypad currently types into. */
+    public JTextComponent getTarget() {
+        return target;
+    }
+
+    /**
+     * Points the keypad at a different field. Every key operates on the new target from the next
+     * tap onward — no relisten, no rebuild. Used by the login screen to follow focus between the
+     * Operator ID and PIN fields with a single fixed keypad.
+     *
+     * @param target the new target field; must not be {@code null}
+     */
+    public void setTarget(JTextComponent target) {
+        if (target == null) throw new IllegalArgumentException("target must not be null");
+        this.target = target;
     }
 
     // ---- Key construction --------------------------------------------------
@@ -142,5 +205,10 @@ public class OnScreenKeypad extends JPanel {
     /** For tests: whether this keypad rendered a decimal-point key at all. */
     boolean hasDecimalKeyForTest() {
         return getKeyForTest(DECIMAL_LABEL) != null;
+    }
+
+    /** For tests: whether this keypad rendered an advance ({@value #NEXT_LABEL}) key at all. */
+    boolean hasNextKeyForTest() {
+        return getKeyForTest(NEXT_LABEL) != null;
     }
 }

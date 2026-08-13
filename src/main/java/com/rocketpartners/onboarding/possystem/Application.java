@@ -94,9 +94,29 @@ public final class Application {
         Journal journal = new Journals(localJournal, fileJournal, remoteJournal);
         System.err.println("[POS] journal log dir: " + logDir);
 
+        // Sign-in runs before the POS boots and before the event bus exists. LoginView journals
+        // the attempt and, on success, hands the operator id to bootPos which constructs the POS.
         SwingUtilities.invokeLater(() -> {
+            LoginView login = new LoginView(journal, args.storeName, args.laneNumber,
+                    operatorId -> bootPos(operatorId, itemRepository, taxService,
+                            quickAddItems, journal, remoteJournal, args));
+            // Closing the sign-in window ends the process — the POS never boots.
+            login.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            login.setVisible(true);
+        });
+    }
+
+    /**
+     * Builds and starts the POS once a cashier has signed in. Runs on the EDT (invoked from
+     * {@link LoginView}'s success callback). The operator id is carried into {@link PosComponent}
+     * so subsequent journal entries are attributable. Logout / shift-change (out of scope) would
+     * dispose the POS window and re-show a fresh {@link LoginView}, the inverse of this path.
+     */
+    private static void bootPos(String operatorId, H2ItemRepository itemRepository,
+                                TaxService taxService, List<Item> quickAddItems, Journal journal,
+                                RemoteJournal remoteJournal, Args args) {
             PosComponent pos = new PosComponent(
-                    itemRepository, taxService, args.storeName, args.laneNumber, args.debug);
+                    itemRepository, taxService, args.storeName, args.laneNumber, args.debug, operatorId);
             JournalListener journalListener = new JournalListener(journal);
 
             String title = "Rocket POS — " + args.storeName + " lane " + args.laneNumber;
@@ -206,7 +226,6 @@ public final class Application {
                         + " mode=" + args.appMode
                         + " quickAdd=" + quickAddItems.size() + " items");
             }
-        });
     }
 
     /** JCommander-parsed CLI arguments. Public for JCommander reflection access. */

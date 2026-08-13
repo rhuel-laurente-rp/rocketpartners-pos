@@ -2,6 +2,7 @@ package com.rocketpartners.onboarding.possystem.display;
 
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.commons.model.LineItem;
+import com.rocketpartners.onboarding.possystem.component.Journal;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 
 import javax.imageio.ImageIO;
@@ -43,6 +44,10 @@ public final class CustomerViewSnapshotTool {
         snapshot(15, new File(out, "customerview-15.png"));
         snapshot(40, new File(out, "customerview-40.png"));
         snapshotWithKeyboard(new File(out, "quickadd-qwerty-open.png"));
+
+        // The sign-in screen shown before the POS, idle and with the failed-attempt message shown.
+        snapshotLogin(false, new File(out, "login-idle.png"));
+        snapshotLogin(true, new File(out, "login-error.png"));
 
         // Bottom strip standalone, both enable states, so the border/60-40/single-row work can be
         // judged without the rest of the window.
@@ -231,6 +236,37 @@ public final class CustomerViewSnapshotTool {
         } finally {
             view.dispose();
         }
+    }
+
+    /**
+     * Renders the full {@link LoginView} window at the fixed 1512×982 surface — once idle, once
+     * with the failed-attempt message shown — so the two-half split, the INK vector panel, the
+     * centred form, and the reserved message row can be eyeballed. Forces a layout pass rather than
+     * showing a real window so the render measures the true register surface.
+     */
+    static void snapshotLogin(boolean withError, File target) throws Exception {
+        LoginView view = new LoginView(noopJournal(), "Rocket Store", 1, id -> { });
+        try {
+            if (withError) view.showMessageForTest();
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            layoutAll(content);
+            BufferedImage img = new BufferedImage(1512, 982, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                content.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            view.dispose();
+        }
+    }
+
+    private static Journal noopJournal() {
+        return record -> { };
     }
 
     /** Recursively lays out a container top-to-bottom so nested cards report their real bounds. */
