@@ -1,0 +1,5 @@
+code,description,category,targetType,targetValue,discountType,amount,buyQuantity,getQuantity,priority,exclusivityGroup,active
+SENIOR_20,Senior Citizen Discount 20%,ELIGIBILITY,TRANSACTION,,PERCENT_OFF,20,,,2,CUSTOMER_ELIGIBILITY,true
+VETERAN_15,Veteran Discount 15%,ELIGIBILITY,TRANSACTION,,PERCENT_OFF,15,,,2,CUSTOMER_ELIGIBILITY,true
+EMPLOYEE_5,Employee Discount $5 Off,ELIGIBILITY,TRANSACTION,,FIXED_AMOUNT_OFF,5.00,,,2,CUSTOMER_ELIGIBILITY,true
+BOGO_MONSTER,Buy 2 Get 1 Free Monster Energy,PROMOTIONAL,UPC,070847811169,PROMO,,2,1,1,,true
