@@ -121,6 +121,9 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.TENDER_DEBIT_PRESSED,
             PosEventType.TENDER_CREDIT_PRESSED,
             PosEventType.CHANGE_QTY_PRESSED,
+            PosEventType.DISCOUNT_PRESSED,
+            PosEventType.DISCOUNT_CONFIRM_PRESSED,
+            PosEventType.DISCOUNT_CANCEL_PRESSED,
             PosEventType.VOID_BASKET_PRESSED,
             PosEventType.CASH_CANCEL_PRESSED,
             PosEventType.CARD_TENDER_CANCELLED,
@@ -461,13 +464,14 @@ public class ScannerViewController implements IController, IPosEventListener {
             // void-basket confirm on VOID_BASKET_PRESSED; and the receipt modal on
             // TRANSACTION_COMPLETED (payment done, currentTransaction already released).
             case TENDER_CASH_PRESSED, TENDER_DEBIT_PRESSED, TENDER_CREDIT_PRESSED,
-                 CHANGE_QTY_PRESSED, VOID_BASKET_PRESSED,
+                 CHANGE_QTY_PRESSED, DISCOUNT_PRESSED, VOID_BASKET_PRESSED,
                  TRANSACTION_COMPLETED -> suspendCapture();
             // Modal closes → resume capture. Tender modals close on completion/cancel
             // (CASH_TENDERED / CARD_TENDERED / *_CANCELLED); the change-qty and void-basket
             // dialogs on their confirm/cancel/decline events.
             case CASH_CANCEL_PRESSED, CARD_TENDER_CANCELLED, CASH_TENDERED, CARD_TENDERED,
                  CHANGE_QTY_CONFIRM_PRESSED, CHANGE_QTY_CANCEL_PRESSED,
+                 DISCOUNT_CONFIRM_PRESSED, DISCOUNT_CANCEL_PRESSED,
                  VOID_BASKET_CONFIRM_PRESSED, VOID_BASKET_DECLINED -> resumeCapture();
             // Receipt dismissal closes the receipt modal and semantically starts a fresh sale:
             // resume capture and force unlocked unconditionally, independent of the

@@ -54,6 +54,8 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("ManualBarcodeEntryView.cancel",  "Cancel");
         LABELS.put("VoidBasketConfirmView.void",     "Void Basket");
         LABELS.put("VoidBasketConfirmView.keep",     "Keep Basket");
+        LABELS.put("DiscountView.confirm",           "Confirm Discount");
+        LABELS.put("DiscountView.cancel",            "Cancel");
 
         // ---- Dialog titles --------------------------------------------
         LABELS.put("title.errorDialog",        "Error");
@@ -64,6 +66,7 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("title.confirmPayment",     "Confirm Payment");
         LABELS.put("title.receipt",            "Receipt");
         LABELS.put("title.voidBasket",         "Void Basket?");
+        LABELS.put("title.applyDiscount",      "Apply Discount");
 
         // The void-basket confirmation dialog now follows the Title Case convention like every
         // other dialog (title and both button labels above). Body copy in that dialog stays

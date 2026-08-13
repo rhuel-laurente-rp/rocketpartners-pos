@@ -83,8 +83,13 @@ public final class ReceiptFormatter {
         sb.append(SINGLE_RULE).append('\n');
         sb.append(pad("Subtotal:", money(tx.subtotal()))).append('\n');
 
+        // One line per applied discount, then the combined discount total. A transaction with no
+        // discounts renders exactly as before — no lines, no "Discount Total" row, no empty section.
         for (Discount d : tx.getDiscounts()) {
             sb.append(pad("Discount: " + d.getDescription(), "-" + money(d.getAppliedAmount()))).append('\n');
+        }
+        if (!tx.getDiscounts().isEmpty()) {
+            sb.append(pad("Discount Total:", "-" + money(tx.discountTotal()))).append('\n');
         }
 
         sb.append(pad("Tax (7%):", money(tx.taxTotal()))).append('\n');

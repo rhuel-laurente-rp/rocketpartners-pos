@@ -40,11 +40,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * The customer-facing basket screen: a dumb Swing renderer laid out as a two-column proportional
@@ -149,6 +145,16 @@ public class CustomerView extends JFrame {
     private final JLabel totalValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private JPanel summaryTape;
 
+    /**
+     * Muted per-discount description lines, shown beneath the summary tape once discounts exist.
+     * Deliberately <em>separate</em> from {@link #summaryTape}: the tape's Discount row holds a
+     * fixed slot so its height never changes between zero and non-zero discount (an anti-layout-shift
+     * guarantee pinned by {@code CustomerViewSummaryTest}). The descriptions live here instead, so
+     * adding them cannot disturb the tape's geometry. Empty when there are no discounts — no rows,
+     * no "Discounts:" header.
+     */
+    private JPanel discountDetailPanel;
+
     private final JLabel amountDueValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
@@ -160,9 +166,9 @@ public class CustomerView extends JFrame {
     // stays "Change Quantity".
     private final PosButton changeQtyButton = PosButtons.secondary("Change Qty");
     private final PosButton voidLineButton = PosButtons.secondary("Void Line");
-    // Discount lives in the actions row but is disabled: applying a discount mid-transaction is a
-    // domain change (see PosEventType#DISCOUNT_PRESSED) scheduled for feature/in-progress-discounts.
-    // The button and its listener are wired so the slot is real; it never fires while disabled.
+    // Discount lives in the actions row and opens the eligibility-discount dialog. Enabled while
+    // the transaction accepts basket input (IN_PROGRESS); disabled at TOTALED alongside the other
+    // basket-mutation actions, since eligibility selection is an IN_PROGRESS concern.
     private final PosButton discountButton = PosButtons.secondary("Discount");
     private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
@@ -190,6 +196,13 @@ public class CustomerView extends JFrame {
 
     /** Sum of non-voided line-item quantities from the last render. Used to gate Void basket. */
     private int lastNonVoidedQuantitySum;
+
+    /**
+     * True between Total and the discount engine's reply — the window where tender is deliberately
+     * held so the cashier can't pay against a total that's about to change. Drives the header pill
+     * ("Calculating Discounts") so the pause reads as work in progress rather than a freeze.
+     */
+    private boolean calculatingDiscounts;
 
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
@@ -254,6 +267,7 @@ public class CustomerView extends JFrame {
         setContentPane(root);
 
         refreshTotalButton();
+        refreshDiscountButton();
         refreshStatusPill();
         setLocationRelativeTo(null);
     }
@@ -375,7 +389,23 @@ public class CustomerView extends JFrame {
         if (quickAddPanel != null) quickAddPanel.setTilesEnabled(enabled);
         refreshTotalButton();
         refreshSelectionDependentButtons();
+        refreshDiscountButton();
         refreshStatusPill();
+    }
+
+    /**
+     * Enables or disables the "Calculating Discounts" pending state — set while the discount engine
+     * is being called at Total. While true the header pill reads {@code CALCULATING DISCOUNTS}; the
+     * caller is responsible for holding tender disabled over the same window.
+     */
+    public void setCalculatingDiscounts(boolean calculating) {
+        this.calculatingDiscounts = calculating;
+        refreshStatusPill();
+    }
+
+    /** Discount is a basket-input-phase action: live IN_PROGRESS, dark once the basket is frozen. */
+    private void refreshDiscountButton() {
+        discountButton.setEnabled(basketInputEnabled);
     }
 
     /**
@@ -437,6 +467,14 @@ public class CustomerView extends JFrame {
      * phase directly.</p>
      */
     private void refreshStatusPill() {
+        if (calculatingDiscounts) {
+            // The gap between Total and tender: the engine round-trip. Say so, so the held tender
+            // buttons read as "working" rather than "frozen".
+            statusPill.setText("CALCULATING DISCOUNTS");
+            statusPill.setForeground(Color.WHITE);
+            statusPill.setBackground(PosTheme.LIVE);
+            return;
+        }
         boolean tenderOn = payCashButton.isEnabled();
         if (tenderOn) {
             statusPill.setText("AWAITING PAYMENT");
@@ -478,10 +516,14 @@ public class CustomerView extends JFrame {
         return totalButton.isEnabled();
     }
 
-    /** For tests: whether the Discount button is enabled. It stays disabled until the
-     *  in-progress-discount feature lands (see {@link PosEventType#DISCOUNT_PRESSED}). */
+    /** For tests: whether the Discount button is enabled. Live IN_PROGRESS, dark at TOTALED. */
     boolean isDiscountEnabledForTest() {
         return discountButton.isEnabled();
+    }
+
+    /** For tests: the header status pill's current text. */
+    String getStatusPillTextForTest() {
+        return statusPill.getText();
     }
 
     /** For tests: whether the three tender buttons (cash/debit/credit) are enabled. */
@@ -823,11 +865,51 @@ public class CustomerView extends JFrame {
         summaryTape = buildSummaryTape();
         renderVerticalSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
 
+        discountDetailPanel = new JPanel();
+        discountDetailPanel.setOpaque(false);
+        discountDetailPanel.setLayout(new BoxLayout(discountDetailPanel, BoxLayout.Y_AXIS));
+        discountDetailPanel.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
+
         JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(12, 16, 14, 16));
         body.add(summaryTape, BorderLayout.NORTH);
+        // Descriptions sit below the tape (CENTER), so a discountTotal alone is never unexplainable
+        // at the counter. Kept out of the tape itself to preserve its fixed height.
+        body.add(discountDetailPanel, BorderLayout.CENTER);
         return PosTheme.card("Summary", body);
+    }
+
+    /**
+     * Replaces the per-discount description lines beneath the summary tape. Pass an empty list to
+     * clear them — a no-discount transaction shows nothing here, matching the receipt.
+     *
+     * @param descriptions one label per applied (or previewed) discount; must not be {@code null}
+     */
+    public void setDiscountDescriptions(List<String> descriptions) {
+        if (descriptions == null) throw new IllegalArgumentException("descriptions must not be null");
+        if (discountDetailPanel == null) return;
+        discountDetailPanel.removeAll();
+        for (String text : descriptions) {
+            JLabel line = new JLabel(text);
+            line.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
+            line.setForeground(PosTheme.MUTED);
+            line.setAlignmentX(LEFT_ALIGNMENT);
+            discountDetailPanel.add(line);
+        }
+        discountDetailPanel.revalidate();
+        discountDetailPanel.repaint();
+    }
+
+    /** For tests: the discount-description lines currently shown beneath the summary tape. */
+    java.util.List<String> getDiscountDescriptionsForTest() {
+        java.util.List<String> out = new ArrayList<>();
+        if (discountDetailPanel != null) {
+            for (Component c : discountDetailPanel.getComponents()) {
+                if (c instanceof JLabel l) out.add(l.getText());
+            }
+        }
+        return out;
     }
 
     /**
@@ -843,8 +925,7 @@ public class CustomerView extends JFrame {
     private JPanel buildActionsCard() {
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
-        // Discount is wired but disabled — enabling it requires the IN_PROGRESS-discount domain
-        // change tracked on feature/in-progress-discounts (see PosEventType#DISCOUNT_PRESSED).
+        // Discount opens the eligibility-discount dialog (owned by DiscountViewController).
         discountButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.DISCOUNT_PRESSED)));
         // Void basket is destructive and one tap away on a touchscreen. Dispatch the "pressed"
@@ -856,7 +937,9 @@ public class CustomerView extends JFrame {
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
         changeQtyButton.setEnabled(false);
-        discountButton.setEnabled(false);
+        // Discount enablement follows the basket-input phase; refreshDiscountButton() drives it
+        // (called from the constructor and setBasketInputEnabled). It starts enabled because the
+        // fresh transaction opened at startup is IN_PROGRESS.
 
         // Single horizontal row; GridLayout stretches every button to the full section height, so
         // each fills the ~180px row as one tall target. Order: destructive-and-edit on the left,

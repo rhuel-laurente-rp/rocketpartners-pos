@@ -20,22 +20,27 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  *
  * <p>Selection-dependent rules (Change Qty / Void Line) and the Void Basket / Total content-and-
  * phase gates have their own dedicated tests; this class covers the two rules not asserted
- * elsewhere — Discount stays disabled, and tender is gated on {@link
- * CustomerView#setTenderInputEnabled(boolean)} — plus a phase-crossing sanity check that Total's
- * disablement at TOTALED does not drag Void Basket down with it.</p>
+ * elsewhere — Discount follows the basket-input phase (live IN_PROGRESS, dark at TOTALED), and
+ * tender is gated on {@link CustomerView#setTenderInputEnabled(boolean)} — plus a phase-crossing
+ * sanity check that Total's disablement at TOTALED does not drag Void Basket down with it.</p>
  */
 class CustomerViewBottomStripTest {
 
     private static final Item WIDGET = new Item("UPC-W", "Widget", new BigDecimal("10.00"));
 
     @Test
-    void discount_staysDisabled_beforeAndAfterTotal() {
+    void discount_enabledInProgress_disabledAtTotaled() {
+        // This assertion changed with feature/discount-engine-core: the Discount button used to be
+        // permanently disabled (feature not landed). Wiring the eligibility-discount dialog is the
+        // point of that branch, so the button is now live IN_PROGRESS and dark once the basket is
+        // frozen at Total — the same phase gate as the other basket-mutation actions.
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noop());
         view.updateBasket(List.of(new LineItem(WIDGET, 1)), new BigDecimal("10.00"));
-        assertThat(view.isDiscountEnabledForTest()).isFalse();
+        assertThat(view.isDiscountEnabledForTest()).isTrue();
 
-        // Simulate the Total press: basket input off, tender on. Discount must still be dark.
+        // Simulate the Total press: basket input off, tender on. Discount goes dark with the rest
+        // of the basket-mutation actions — eligibility selection is an IN_PROGRESS concern.
         view.setBasketInputEnabled(false);
         view.setTenderInputEnabled(true);
         assertThat(view.isDiscountEnabledForTest()).isFalse();

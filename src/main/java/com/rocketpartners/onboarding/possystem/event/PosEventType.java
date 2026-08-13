@@ -75,16 +75,55 @@ public enum PosEventType {
 
     /**
      * The Discount button on the main window was pressed. Input event; no properties.
-     *
-     * <p><strong>Not yet wired to a feature.</strong> The button is present in the actions row
-     * but disabled — applying a discount while a transaction is {@code IN_PROGRESS} is a domain
-     * change (widening {@link com.rocketpartners.onboarding.commons.model.Transaction#applyDiscount()}'s
-     * state rule and making running-subtotal discounts track basket mutations) that belongs on a
-     * dedicated {@code feature/in-progress-discounts} branch with its own tests, not bundled into
-     * a layout refactor. This event constant and the button's listener exist so the wiring is in
-     * place; nothing dispatches it until the button is enabled by that feature.</p>
+     * {@link com.rocketpartners.onboarding.possystem.display.DiscountViewController} opens the
+     * eligibility-discount dialog in response. Enabled while the transaction is {@code IN_PROGRESS}.
      */
     DISCOUNT_PRESSED,
+
+    /**
+     * The Confirm button on the eligibility-discount dialog was pressed. Input event; carries
+     * {@code code}, {@code description}, {@code discountType} (String), {@code amount} (BigDecimal,
+     * may be absent), {@code exclusivityGroup} (String, may be absent), and {@code idVerified}
+     * (Boolean) properties. {@link com.rocketpartners.onboarding.possystem.display.DiscountViewController}
+     * records the selection into the {@link com.rocketpartners.onboarding.possystem.service.DiscountSession}.
+     */
+    DISCOUNT_CONFIRM_PRESSED,
+
+    /**
+     * The Cancel button (or ESC) on the eligibility-discount dialog was pressed. Input event; no
+     * properties. Closes the dialog with the selection unchanged.
+     */
+    DISCOUNT_CANCEL_PRESSED,
+
+    /**
+     * The startup fetch of eligibility rules completed. Notification event; carries
+     * {@code ruleCount} (Integer), {@code available} (Boolean — false when the engine was
+     * unreachable), and, on failure, {@code reason} (String). Journalled so the log records
+     * whether the lane booted with a live discount service.
+     */
+    DISCOUNT_RULES_LOADED,
+
+    /**
+     * An eligibility discount was selected (or replaced) for the current transaction. Notification
+     * event; carries {@code code}, {@code description}, {@code idVerified} (Boolean), and — when the
+     * selection displaced another rule in the same exclusivity group — {@code replaced} (String, the
+     * displaced code). The operator id is stamped by {@code JournalListener}. An unverified-ID
+     * senior discount is a known shrink route, so the verification flag is part of the audit trail.
+     */
+    ELIGIBILITY_DISCOUNT_SELECTED,
+
+    /**
+     * A discount-calculation request was sent to the engine at Total. Notification event; carries
+     * {@code codes} (String, the applied eligibility codes) and {@code itemCount} (Integer).
+     */
+    DISCOUNT_REQUEST_SENT,
+
+    /**
+     * A single engine-computed discount was applied to the transaction at Total. Notification
+     * event; carries {@code discountId} (String), {@code description} (String), and {@code amount}
+     * (BigDecimal, the applied reduction). One is dispatched per returned discount, in order.
+     */
+    DISCOUNT_APPLIED,
 
     /**
      * The Pay Cash button was pressed. Input event; no properties. Opens the cash-mode-choice
@@ -289,6 +328,9 @@ public enum PosEventType {
      *   <li>{@code TOTALED_INVARIANT}, {@code NO_TRANSACTION}, {@code INVALID_ARGUMENT},
      *       {@code TRANSACTION_ALREADY_OPEN}, {@code ABOVE_MAX_QUANTITY}, {@code ILLEGAL_STATE}
      *       — {@code TransactionService} (state-machine and argument guards)</li>
+     *   <li>{@code DISCOUNTS_UNAVAILABLE} — {@code CustomerViewController}, when the discount
+     *       engine could not be reached (or returned an invalid response) at Total; the sale
+     *       proceeds with no discounts</li>
      * </ul>
      */
     ERROR
