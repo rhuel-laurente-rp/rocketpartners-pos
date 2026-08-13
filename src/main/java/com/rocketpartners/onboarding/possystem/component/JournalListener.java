@@ -95,13 +95,21 @@ public class JournalListener implements IController, IPosEventListener {
     }
 
     private JournalRecord buildSystem(String label) {
+        // Stamp the signed-in operator onto the session-boundary records (POS_STARTED / POS_STOPPED)
+        // so the whole session between them is attributable to a lane operator. The id was captured
+        // at LoginView and carried in on PosComponent; the PIN is never present here.
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (parent != null) {
+            String operator = parent.getOperatorId();
+            if (operator != null && !operator.isBlank()) fields.put("operator", operator);
+        }
         return new JournalRecord(
                 Instant.now(),
                 parent == null ? "?" : safeString(parent.getStoreName()),
                 parent == null ? 0 : parent.getLaneNumber(),
                 currentTxnId(),
                 label,
-                new LinkedHashMap<>());
+                fields);
     }
 
     private String currentTxnId() {
