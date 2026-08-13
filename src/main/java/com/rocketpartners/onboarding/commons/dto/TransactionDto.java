@@ -39,4 +39,13 @@ public class TransactionDto {
 
     /** Pre-tax, pre-discount total. */
     private BigDecimal subtotal;
+
+    /**
+     * Eligibility rule codes the cashier selected for this transaction (e.g. {@code ["SENIOR_20"]}),
+     * sent on {@code POST /discounts/calculate}. Each must name an active {@code ELIGIBILITY} rule;
+     * the engine rejects unknown codes and codes that collide within one exclusivity group. Null or
+     * empty means no eligibility discounts were chosen. Promotional discounts are not listed here —
+     * the engine applies those automatically when the basket qualifies.
+     */
+    private List<String> appliedEligibilityCodes;
 }

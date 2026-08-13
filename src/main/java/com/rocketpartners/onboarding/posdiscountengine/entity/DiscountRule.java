@@ -104,4 +104,26 @@ public class DiscountRule {
     /** Whether the rule is currently in effect. Inactive rules are stored but never offered. */
     @Column(nullable = false)
     private boolean active;
+
+    /**
+     * Whether this rule's {@link #discountType}/{@link #targetType} pairing is one the engine can
+     * actually evaluate. Exactly three combinations are supported today:
+     * <ul>
+     *   <li>{@link DiscountType#PROMO} on {@link TargetType#UPC} (buy-N-get-M),</li>
+     *   <li>{@link DiscountType#PERCENT_OFF} on {@link TargetType#TRANSACTION},</li>
+     *   <li>{@link DiscountType#FIXED_AMOUNT_OFF} on {@link TargetType#TRANSACTION}.</li>
+     * </ul>
+     * Anything else (e.g. {@code PROMO/TRANSACTION}, {@code PERCENT_OFF/UPC}) has no evaluation path
+     * and would silently apply no discount, so the seed loader rejects it at startup. Colocated here
+     * so the loader and {@code DiscountService} share one definition of "supported".
+     */
+    public boolean isSupportedCombination() {
+        if (discountType == null || targetType == null) {
+            return false;
+        }
+        return switch (discountType) {
+            case PROMO -> targetType == TargetType.UPC;
+            case PERCENT_OFF, FIXED_AMOUNT_OFF -> targetType == TargetType.TRANSACTION;
+        };
+    }
 }

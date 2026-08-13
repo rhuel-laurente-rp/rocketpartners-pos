@@ -56,6 +56,19 @@ public class CsvDiscountsLoader implements CommandLineRunner {
             rules = parse(reader);
         }
 
+        // Fail startup on a semantically unsupported type/target combination. This is distinct from
+        // the skip-and-warn handling of syntactically malformed rows: a well-formed row naming a
+        // combination the engine has no evaluation path for (e.g. PROMO/TRANSACTION) would silently
+        // apply no discount and be discovered only as a missing discount at the counter. Catch it at
+        // deploy instead.
+        for (DiscountRule rule : rules) {
+            if (!rule.isSupportedCombination()) {
+                throw new IllegalStateException(
+                        "unsupported discount rule combination for code '" + rule.getCode() + "': "
+                                + rule.getDiscountType() + " on " + rule.getTargetType());
+            }
+        }
+
         int seeded = 0;
         for (DiscountRule rule : rules) {
             // Idempotent across restarts: only insert a code we haven't seen before.

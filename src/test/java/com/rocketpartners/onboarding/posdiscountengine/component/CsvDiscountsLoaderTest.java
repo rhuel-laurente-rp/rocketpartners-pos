@@ -15,6 +15,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,5 +101,18 @@ class CsvDiscountsLoaderTest {
         assertEquals(1, rules.size());
         assertEquals("EMPLOYEE_5", rules.get(0).getCode());
         assertEquals(0, new BigDecimal("5.00").compareTo(rules.get(0).getAmount()));
+    }
+
+    @Test
+    void flagsAnUnsupportedTypeTargetCombination() throws IOException {
+        // Syntactically valid, but PROMO on a whole TRANSACTION has no evaluation path. parse() keeps
+        // it (it is well-formed), but isSupportedCombination() is false — which is exactly what the
+        // loader's startup check rejects before seeding.
+        String csv = HEADER + "\n" +
+                "BAD_COMBO,Promo on whole transaction,PROMOTIONAL,TRANSACTION,,PROMO,,2,2,1,,true\n";
+
+        DiscountRule rule = parse(csv).get(0);
+
+        assertFalse(rule.isSupportedCombination(), "PROMO/TRANSACTION must be flagged as unsupported");
     }
 }
