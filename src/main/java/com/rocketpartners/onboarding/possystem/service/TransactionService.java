@@ -427,6 +427,16 @@ public class TransactionService {
         return ReceiptFormatter.format(transaction, storeName, laneNumber);
     }
 
+    /**
+     * As {@link #generateReceipt(Transaction, String, Integer)}, but also stamps the signed-in
+     * cashier onto the header. The cashier code originates at the login screen and is carried on
+     * {@code PosComponent}.
+     */
+    public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber,
+                                  String cashier) {
+        return ReceiptFormatter.format(transaction, storeName, laneNumber, cashier);
+    }
+
     private void requireCurrentTransaction(String operation) {
         if (currentTransaction == null) {
             IllegalStateException ex = new IllegalStateException(
