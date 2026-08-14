@@ -65,6 +65,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             // event before committing the void.
             PosEventType.VOID_BASKET_CONFIRM_PRESSED,
             PosEventType.TOTAL_PRESSED,
+            PosEventType.RESUME_EDITING_PRESSED,
             PosEventType.ITEM_SCANNED,
             // Re-render whenever a peer controller has mutated the basket (e.g. the
             // change-qty dialog changed a quantity or voided a line via the zero path) or the
@@ -195,6 +196,7 @@ public class CustomerViewController implements IController, IPosEventListener {
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_CONFIRM_PRESSED -> handleVoidBasketConfirmed();
             case TOTAL_PRESSED -> handleTotal();
+            case RESUME_EDITING_PRESSED -> handleResumeEditing();
             case QUANTITY_CHANGED, LINE_VOIDED, ELIGIBILITY_DISCOUNT_SELECTED -> render();
             case DISCOUNT_RULES_LOADED -> markPromoTiles();
             case RECEIPT_DISMISSED -> beginNewTransaction();
@@ -386,6 +388,27 @@ public class CustomerViewController implements IController, IPosEventListener {
             if (!li.isVoided()) count += li.getQuantity();
         }
         return count;
+    }
+
+    /**
+     * Re-opens a finalized transaction so the cashier can add more items after Total — the standard
+     * POS recall/edit step. Moves {@code TOTALED} back to {@code IN_PROGRESS} (clearing the engine's
+     * applied discounts, which recompute on the next Total), re-enables basket input, and holds
+     * tender until Total is pressed again. The eligibility selection is kept so re-Totalling
+     * re-applies it. A rejected re-open (nothing open, or not TOTALED) leaves the view untouched.
+     */
+    private void handleResumeEditing() {
+        try {
+            parent.getTransactionService().resumeEditing();
+        } catch (RuntimeException ignored) {
+            return; // service already dispatched ILLEGAL_STATE
+        }
+        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_RESUMED));
+        view.setBasketInputEnabled(true);
+        view.setLifecycleInputEnabled(true);
+        view.setTenderInputEnabled(false);
+        view.setCalculatingDiscounts(false);
+        render();
     }
 
     /**

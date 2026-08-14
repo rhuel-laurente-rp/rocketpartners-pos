@@ -18,6 +18,7 @@ stateDiagram-v2
     IN_PROGRESS --> TOTALED: Total
 
     TOTALED --> TOTALED: applyDiscount
+    TOTALED --> IN_PROGRESS: Add Item (resume/edit)
     TOTALED --> TOTALED: Void Basket → Keep basket
     TOTALED --> VOIDED: Void Basket → Void basket
     TOTALED --> PAID: Pay Cash (Exact or Next Dollar) / Pay Debit / Pay Credit

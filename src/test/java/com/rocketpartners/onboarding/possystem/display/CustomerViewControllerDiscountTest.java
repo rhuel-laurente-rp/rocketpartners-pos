@@ -217,6 +217,30 @@ class CustomerViewControllerDiscountTest {
     }
 
     @Test
+    void resumeEditing_reopensTotaledOrder_clearsDiscounts_andLetsMoreItemsBeAdded() {
+        Discount d = new Discount("SENIOR_20", "Senior 20%", DiscountType.PERCENT_OFF,
+                new BigDecimal("20"), new BigDecimal("2.00"));
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of(d)));
+        addWidgetAndController(api, synchronous());
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        Transaction tx = pos.getTransactionService().getCurrentTransaction();
+        assertThat(tx.getState()).isEqualTo(TransactionState.TOTALED);
+        assertThat(tx.getDiscounts()).isNotEmpty();
+
+        // Press the header "Add Item" (resume) control.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.RESUME_EDITING_PRESSED));
+
+        assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
+        assertThat(tx.getDiscounts()).isEmpty();
+        assertThat(notifications.countOf(PosEventType.TRANSACTION_RESUMED)).isEqualTo(1);
+
+        // Editable again: a further scan rings up on the same transaction (qty 1 -> 2).
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
+        assertThat(tx.getLineItems().get(0).getQuantity()).isEqualTo(2);
+    }
+
+    @Test
     void withoutEngine_totalEnablesTenderImmediately_asBefore() {
         // The engine-less (Phase-1) constructor path must still work: tender on, no discount call.
         CustomerViewController controller = new CustomerViewController(view);

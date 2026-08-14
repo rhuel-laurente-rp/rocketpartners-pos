@@ -210,6 +210,27 @@ public class Transaction {
     }
 
     /**
+     * Re-opens a finalized transaction for editing: {@link TransactionState#TOTALED} back to
+     * {@link TransactionState#IN_PROGRESS}, so the cashier can add or void lines after pressing
+     * Total — the standard-POS "recall / edit order" step. Any engine-applied discounts are cleared:
+     * they were computed against the now-stale finalized basket and are recomputed on the next
+     * {@link #total()}.
+     *
+     * <p>This does <strong>not</strong> weaken the Total invariant. While the transaction is
+     * {@code TOTALED}, {@link #addLineItem}, {@link #voidLine}, and {@link #updateLineItemQuantity}
+     * still throw; the cashier must call this first to leave {@code TOTALED}. It is only legal in
+     * {@code TOTALED} — a fresh {@code IN_PROGRESS} has nothing to resume, and {@code PAID} /
+     * {@code VOIDED} are terminal.</p>
+     *
+     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
+     */
+    public void resumeEditing() {
+        requireState("resumeEditing", TransactionState.TOTALED);
+        discounts.clear();
+        this.state = TransactionState.IN_PROGRESS;
+    }
+
+    /**
      * Applies a discount computed by the discount engine to this transaction.
      * Legal only between {@link #total()} and {@link #tender(TenderType, BigDecimal)}.
      *

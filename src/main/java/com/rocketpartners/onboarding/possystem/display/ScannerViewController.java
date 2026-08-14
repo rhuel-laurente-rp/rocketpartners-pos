@@ -141,6 +141,7 @@ public class ScannerViewController implements IController, IPosEventListener {
             PosEventType.QUANTITY_CHANGED,
             PosEventType.BASKET_VOIDED,
             PosEventType.TRANSACTION_TOTALED,
+            PosEventType.TRANSACTION_RESUMED,
             PosEventType.ERROR));
 
     private final ScannerView view;
@@ -481,6 +482,11 @@ public class ScannerViewController implements IController, IPosEventListener {
             case RECEIPT_DISMISSED -> resumeReady();
 
             case TRANSACTION_TOTALED -> view.setLocked(true);
+
+            // The order was re-opened for editing (TOTALED → IN_PROGRESS): unlock the scan bar and
+            // put the caret back so the next scan lands in the basket again. resumeReady() forces
+            // the unlocked state and restores focus, mirroring the receipt-dismiss reset.
+            case TRANSACTION_RESUMED -> resumeReady();
 
             case ITEM_ADDED -> handleItemAdded();
 

@@ -112,6 +112,41 @@ class TransactionStateTest {
     }
 
     @Test
+    void resumeEditing_transitionsTotaledBackToInProgress_andAllowsMoreItems() {
+        Transaction tx = totaled();
+        tx.resumeEditing();
+        assertThat(tx.getState()).isEqualTo(TransactionState.IN_PROGRESS);
+        // Re-opened: line mutation is legal again.
+        tx.addLineItem(widget(), 1);
+        assertThat(tx.getLineItems().get(0).getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void resumeEditing_clearsEngineAppliedDiscounts() {
+        Transaction tx = totaled();
+        tx.applyDiscount(new Discount("SENIOR_20", "Senior 20%", DiscountType.PERCENT_OFF,
+                new BigDecimal("20"), new BigDecimal("0.20")));
+        assertThat(tx.getDiscounts()).isNotEmpty();
+        tx.resumeEditing();
+        assertThat(tx.getDiscounts()).isEmpty();
+    }
+
+    @Test
+    void resumeEditing_illegalFromInProgress() {
+        assertThatThrownBy(inProgress()::resumeEditing).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void resumeEditing_illegalFromPaid() {
+        assertThatThrownBy(paid()::resumeEditing).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void resumeEditing_illegalFromVoided() {
+        assertThatThrownBy(voided()::resumeEditing).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void addLineItem_illegalFromTotaled() {
         Transaction tx = totaled();
         assertThatThrownBy(() -> tx.addLineItem(widget(), 1)).isInstanceOf(IllegalStateException.class);

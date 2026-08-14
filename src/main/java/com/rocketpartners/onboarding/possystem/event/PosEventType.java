@@ -74,6 +74,14 @@ public enum PosEventType {
     TOTAL_PRESSED,
 
     /**
+     * The header "Add Item" (resume/recall) control was pressed while the transaction was
+     * {@code TOTALED}. Input event; no properties. The standard-POS re-open: it asks to move the
+     * finalized order back to {@code IN_PROGRESS} so more lines can be rung up.
+     * {@link com.rocketpartners.onboarding.possystem.display.CustomerViewController} handles it.
+     */
+    RESUME_EDITING_PRESSED,
+
+    /**
      * The Discount button on the main window was pressed. Input event; no properties.
      * {@link com.rocketpartners.onboarding.possystem.display.DiscountViewController} opens the
      * eligibility-discount dialog in response. Enabled while the transaction is {@code IN_PROGRESS}.
@@ -275,6 +283,15 @@ public enum PosEventType {
 
     /** The transaction was totaled — basket is frozen; tender is next. */
     TRANSACTION_TOTALED,
+
+    /**
+     * A finalized transaction was re-opened for editing: {@code TOTALED} back to
+     * {@code IN_PROGRESS}. Basket input is live again and any engine-applied discounts were cleared
+     * (they recompute on the next Total). Emitted by
+     * {@link com.rocketpartners.onboarding.possystem.display.CustomerViewController}; the scanner
+     * unlocks on it. No properties.
+     */
+    TRANSACTION_RESUMED,
 
     /**
      * Cash tender recorded. Carries {@code tenderType} (TenderType, always CASH),

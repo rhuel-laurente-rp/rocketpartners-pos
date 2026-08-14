@@ -163,6 +163,12 @@ public class CustomerView extends JFrame {
     private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
+    // The standard-POS "recall/edit" control, sitting in the header beside the AWAITING PAYMENT
+    // pill. Visible only while the transaction is TOTALED; pressing it re-opens the order
+    // (TOTALED → IN_PROGRESS) so more items can be rung up. Compact so the header strip keeps its
+    // height. Dispatches RESUME_EDITING_PRESSED; CustomerViewController performs the transition.
+    private final PosButton resumeButton = PosButtons.secondary("Add Item");
+
     private final PosButton payCashButton = PosButtons.tender("Pay Cash", PosTheme.GO);
     private final PosButton payDebitButton = PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT);
     private final PosButton payCreditButton = PosButtons.tender("Pay Credit", PosTheme.CARD_CREDIT);
@@ -362,6 +368,7 @@ public class CustomerView extends JFrame {
         refreshVoidBasketButton();
         refreshTotalButton();
         refreshDiscountButton();
+        refreshResumeButton();
     }
 
     /**
@@ -387,6 +394,7 @@ public class CustomerView extends JFrame {
         refreshTotalButton();
         refreshSelectionDependentButtons();
         refreshDiscountButton();
+        refreshResumeButton();
         refreshStatusPill();
     }
 
@@ -425,6 +433,7 @@ public class CustomerView extends JFrame {
     public void setLifecycleInputEnabled(boolean enabled) {
         lifecycleInputEnabled = enabled;
         refreshVoidBasketButton();
+        refreshResumeButton();
         refreshStatusPill();
     }
 
@@ -562,6 +571,16 @@ public class CustomerView extends JFrame {
     /** For tests: the header status pill's current text. */
     String getStatusPillTextForTest() {
         return statusPill.getText();
+    }
+
+    /** For tests: the header "Add Item" (resume/recall) button. */
+    PosButton getResumeButtonForTest() {
+        return resumeButton;
+    }
+
+    /** For tests: whether the header resume control is currently visible (shown only at TOTALED). */
+    boolean isResumeVisibleForTest() {
+        return resumeButton.isVisible();
     }
 
     /** For tests: whether the three tender buttons (cash/debit/credit) are enabled. */
@@ -729,14 +748,38 @@ public class CustomerView extends JFrame {
         statusPill.setOpaque(true);
         statusPill.setBorder(BorderFactory.createEmptyBorder(5, 14, 5, 14));
 
+        // Resume control: compact so it doesn't balloon the header strip, hidden until TOTALED.
+        resumeButton.setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
+        resumeButton.setVisible(false);
+        resumeButton.addActionListener(e ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RESUME_EDITING_PRESSED)));
+        int resumeH = 34;
+        Dimension resumeSize = new Dimension(resumeButton.getPreferredSize().width, resumeH);
+        resumeButton.setPreferredSize(resumeSize);
+        resumeButton.setMinimumSize(resumeSize);
+        resumeButton.setMaximumSize(resumeSize);
+
         JPanel rightSide = new JPanel();
         rightSide.setOpaque(false);
         rightSide.setLayout(new BoxLayout(rightSide, BoxLayout.X_AXIS));
         rightSide.add(journalIndicator);
         rightSide.add(Box.createHorizontalStrut(12));
+        rightSide.add(resumeButton);
+        rightSide.add(Box.createHorizontalStrut(12));
         rightSide.add(statusPill);
         header.add(rightSide, BorderLayout.EAST);
+        refreshResumeButton();
         return header;
+    }
+
+    /**
+     * Shows the header "Add Item" control only while the transaction is TOTALED (basket input off,
+     * lifecycle still on, at least one line) — the window in which re-opening the order to add more
+     * items makes sense. Hidden in IN_PROGRESS (already editable) and in PAID/VOIDED (terminal).
+     */
+    private void refreshResumeButton() {
+        resumeButton.setVisible(
+                !basketInputEnabled && lifecycleInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     /**

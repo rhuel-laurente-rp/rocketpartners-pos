@@ -3,10 +3,13 @@ package com.rocketpartners.onboarding.possystem.display;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
+import com.rocketpartners.onboarding.possystem.event.PosEvent;
+import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import org.junit.jupiter.api.Test;
 
 import java.awt.GraphicsEnvironment;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +92,34 @@ class CustomerViewBottomStripTest {
         view.setBasketInputEnabled(false);
         assertThat(view.isTotalEnabled()).isFalse();
         assertThat(view.isVoidBasketEnabled()).isTrue();
+    }
+
+    @Test
+    void resumeButton_visibleOnlyAtTotaled() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CustomerView view = new CustomerView("test", List.of(), noop());
+        view.updateBasket(List.of(new LineItem(WIDGET, 1)), new BigDecimal("10.00"));
+        // IN_PROGRESS: the order is already editable, so the recall control is hidden.
+        assertThat(view.isResumeVisibleForTest()).isFalse();
+
+        // TOTALED: basket input off, lifecycle still on -> the "Add Item" control appears.
+        view.setBasketInputEnabled(false);
+        assertThat(view.isResumeVisibleForTest()).isTrue();
+
+        // Re-opened -> hidden again.
+        view.setBasketInputEnabled(true);
+        assertThat(view.isResumeVisibleForTest()).isFalse();
+    }
+
+    @Test
+    void resumeButton_dispatchesResumeEditing() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        List<PosEvent> events = new ArrayList<>();
+        CustomerView view = new CustomerView("test", List.of(), events::add);
+        view.updateBasket(List.of(new LineItem(WIDGET, 1)), new BigDecimal("10.00"));
+        view.setBasketInputEnabled(false); // TOTALED -> button visible
+        view.getResumeButtonForTest().doClick();
+        assertThat(events).anyMatch(e -> e.getType() == PosEventType.RESUME_EDITING_PRESSED);
     }
 
     private static IPosEventDispatcher noop() {
