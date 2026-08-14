@@ -49,7 +49,17 @@ public class DiscountRule {
     @Column(nullable = false, unique = true)
     private String code;
 
-    /** Human-readable text for the receipt and the cashier dialog (e.g. "Senior Citizen Discount 20%"). */
+    /**
+     * Human-readable text for the receipt and the cashier dialog (e.g. "Senior Disc 20%").
+     *
+     * <p><strong>One field, two jobs.</strong> This single value both labels the button in the
+     * eligibility dialog and prints on the receipt, so its length is a compromise between the two —
+     * short enough to sit on a tile, human-readable enough for a customer document. If that
+     * compromise ever gets too tight, the proper fix is what item masters do: add a separate
+     * {@code receiptLabel} column alongside this full description, so each surface reads the text
+     * sized for it. Not worth doing today with one short label per rule; noted so the option stays
+     * visible.</p>
+     */
     @Column(nullable = false)
     private String description;
 
@@ -107,15 +117,20 @@ public class DiscountRule {
 
     /**
      * Whether this rule's {@link #discountType}/{@link #targetType} pairing is one the engine can
-     * actually evaluate. Exactly three combinations are supported today:
+     * actually evaluate. Five combinations are supported:
      * <ul>
-     *   <li>{@link DiscountType#PROMO} on {@link TargetType#UPC} (buy-N-get-M),</li>
-     *   <li>{@link DiscountType#PERCENT_OFF} on {@link TargetType#TRANSACTION},</li>
-     *   <li>{@link DiscountType#FIXED_AMOUNT_OFF} on {@link TargetType#TRANSACTION}.</li>
+     *   <li>{@link DiscountType#PROMO} on {@link TargetType#UPC} — buy-N-get-M free.</li>
+     *   <li>{@link DiscountType#PERCENT_OFF} on {@link TargetType#TRANSACTION} — % off the running net.</li>
+     *   <li>{@link DiscountType#PERCENT_OFF} on {@link TargetType#UPC} — % off the targeted line only.</li>
+     *   <li>{@link DiscountType#FIXED_AMOUNT_OFF} on {@link TargetType#TRANSACTION} — flat $ off the net.</li>
+     *   <li>{@link DiscountType#FIXED_AMOUNT_OFF} on {@link TargetType#UPC} — flat $ off the targeted
+     *       line: once if the UPC is present, or once per completed group of {@link #buyQuantity} units
+     *       when {@code buyQuantity} is set (e.g. "Buy 2 Save $1.00"). Capped at the line's own total.</li>
      * </ul>
-     * Anything else (e.g. {@code PROMO/TRANSACTION}, {@code PERCENT_OFF/UPC}) has no evaluation path
-     * and would silently apply no discount, so the seed loader rejects it at startup. Colocated here
-     * so the loader and {@code DiscountService} share one definition of "supported".
+     * The only unsupported pairing is {@code PROMO} on {@link TargetType#TRANSACTION} — a basket-wide
+     * buy-N-get-M has no defined target, no evaluation path, and would silently apply no discount, so
+     * the seed loader rejects it at startup. Colocated here so the loader and {@code DiscountService}
+     * share one definition of "supported".
      */
     public boolean isSupportedCombination() {
         if (discountType == null || targetType == null) {
@@ -123,7 +138,8 @@ public class DiscountRule {
         }
         return switch (discountType) {
             case PROMO -> targetType == TargetType.UPC;
-            case PERCENT_OFF, FIXED_AMOUNT_OFF -> targetType == TargetType.TRANSACTION;
+            case PERCENT_OFF, FIXED_AMOUNT_OFF ->
+                    targetType == TargetType.TRANSACTION || targetType == TargetType.UPC;
         };
     }
 }

@@ -6,6 +6,7 @@ import com.rocketpartners.onboarding.commons.dto.TransactionDto;
 import com.rocketpartners.onboarding.commons.model.Discount;
 import com.rocketpartners.onboarding.posdiscountengine.entity.DiscountCategory;
 import com.rocketpartners.onboarding.posdiscountengine.entity.DiscountRule;
+import com.rocketpartners.onboarding.posdiscountengine.entity.TargetType;
 import com.rocketpartners.onboarding.posdiscountengine.repository.DiscountRuleRepository;
 import org.springframework.stereotype.Service;
 
@@ -48,6 +49,13 @@ import java.util.Map;
  * Promotional rules stack freely and are not checked against exclusivity groups. This is a
  * deliberate decision for this phase; if a promotional rule ever carries an {@code exclusivityGroup}
  * this method must be revisited.</p>
+ *
+ * <p><strong>Target scope.</strong> A rule targets either the whole transaction or a single UPC (see
+ * {@link DiscountRule#isSupportedCombination()} for the supported matrix). Transaction-targeted
+ * percentages and fixed amounts compute against the running net; UPC-targeted ones compute against
+ * the targeted line only and are capped at that line's total, so a per-item deal never spills into
+ * the rest of the basket. Either way the applied amount is still subtracted from the running net in
+ * priority order, so the sequencing invariant above holds unchanged.</p>
  */
 @Service
 public class DiscountService {
@@ -110,16 +118,108 @@ public class DiscountService {
     /**
      * Computes the unrounded reduction a rule produces against the current {@code net}, or
      * {@code null} if the rule does not apply. The loader guarantees only supported type/target
-     * combinations are persisted, so the three arms below are exhaustive in practice.
+     * combinations are persisted (see {@link DiscountRule#isSupportedCombination()}).
+     *
+     * <p>{@link com.rocketpartners.onboarding.commons.model.DiscountType#PERCENT_OFF} and
+     * {@link com.rocketpartners.onboarding.commons.model.DiscountType#FIXED_AMOUNT_OFF} each have two
+     * arms: a {@link TargetType#TRANSACTION} arm computed against the whole running net, and a
+     * {@link TargetType#UPC} arm computed against the targeted line only (and capped at that line's
+     * total, so a per-item discount never eats into the rest of the basket).</p>
      */
     private BigDecimal rawAmountFor(DiscountRule rule, List<LineItemDto> lineItems, BigDecimal net) {
         return switch (rule.getDiscountType()) {
             case PROMO -> promoAmount(rule, lineItems);
-            // Exact percent: multiply then shift two places rather than divide(100), which would
-            // throw on a non-terminating quotient if the divisor were ever parameterised.
-            case PERCENT_OFF -> rule.getAmount() == null ? null : net.multiply(rule.getAmount()).movePointLeft(2);
-            case FIXED_AMOUNT_OFF -> rule.getAmount();
+            case PERCENT_OFF -> rule.getTargetType() == TargetType.UPC
+                    ? percentOffUpc(rule, lineItems)
+                    : percentOffTransaction(rule, net);
+            case FIXED_AMOUNT_OFF -> rule.getTargetType() == TargetType.UPC
+                    ? fixedOffUpc(rule, lineItems)
+                    : rule.getAmount();
         };
+    }
+
+    /**
+     * A percentage off the whole running net. Multiply then shift two places rather than
+     * {@code divide(100)}, which would throw on a non-terminating quotient if the divisor were ever
+     * parameterised.
+     */
+    private BigDecimal percentOffTransaction(DiscountRule rule, BigDecimal net) {
+        return rule.getAmount() == null ? null : net.multiply(rule.getAmount()).movePointLeft(2);
+    }
+
+    /**
+     * A percentage off the targeted UPC's line only: {@code lineTotal × amount%}. {@code null} when
+     * the basket doesn't contain the UPC or the rule carries no percentage.
+     */
+    private BigDecimal percentOffUpc(DiscountRule rule, List<LineItemDto> lineItems) {
+        if (rule.getAmount() == null) {
+            return null;
+        }
+        UpcLine line = aggregateUpc(rule.getTargetValue(), lineItems);
+        if (line == null) {
+            return null;
+        }
+        return line.lineTotal().multiply(rule.getAmount()).movePointLeft(2);
+    }
+
+    /**
+     * A flat dollar amount off the targeted UPC's line. Two shapes, distinguished by
+     * {@link DiscountRule#getBuyQuantity()}:
+     * <ul>
+     *   <li>no {@code buyQuantity} — {@code amount} off once if the UPC is present at all;</li>
+     *   <li>{@code buyQuantity = N} — {@code amount} off per completed group of N units
+     *       ({@code amount × floor(qty / N)}), i.e. "Buy 2 Save $1.00".</li>
+     * </ul>
+     * The reduction is capped at the line's own total so a large fixed amount can never discount past
+     * the targeted item into the rest of the basket. {@code null} when the UPC is absent, the rule
+     * carries no amount, or no qualifying group is met.
+     */
+    private BigDecimal fixedOffUpc(DiscountRule rule, List<LineItemDto> lineItems) {
+        if (rule.getAmount() == null) {
+            return null;
+        }
+        UpcLine line = aggregateUpc(rule.getTargetValue(), lineItems);
+        if (line == null) {
+            return null;
+        }
+        int buy = rule.getBuyQuantity() == null ? 0 : rule.getBuyQuantity();
+        BigDecimal raw;
+        if (buy > 0) {
+            int groups = line.quantity() / buy;
+            if (groups == 0) {
+                return null; // not enough units to complete a "buy N" group
+            }
+            raw = rule.getAmount().multiply(BigDecimal.valueOf(groups));
+        } else {
+            raw = rule.getAmount(); // once if present
+        }
+        BigDecimal lineTotal = line.lineTotal();
+        return raw.compareTo(lineTotal) > 0 ? lineTotal : raw;
+    }
+
+    /**
+     * Sums the quantity of a single UPC across the basket and captures its unit price, or
+     * {@code null} if the basket does not contain it. Same-UPC only, so every unit shares one price.
+     */
+    private static UpcLine aggregateUpc(String upc, List<LineItemDto> lineItems) {
+        int qty = 0;
+        BigDecimal unitPrice = null;
+        for (LineItemDto li : lineItems) {
+            if (upc != null && upc.equals(li.getUpc())) {
+                qty += li.getQuantity();
+                if (unitPrice == null) {
+                    unitPrice = li.getUnitPrice();
+                }
+            }
+        }
+        return unitPrice == null ? null : new UpcLine(qty, unitPrice);
+    }
+
+    /** One UPC's aggregate presence in the basket: total quantity and unit price. */
+    private record UpcLine(int quantity, BigDecimal unitPrice) {
+        BigDecimal lineTotal() {
+            return unitPrice.multiply(BigDecimal.valueOf(quantity));
+        }
     }
 
     /**

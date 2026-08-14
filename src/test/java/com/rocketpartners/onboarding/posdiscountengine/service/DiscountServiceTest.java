@@ -204,6 +204,73 @@ class DiscountServiceTest {
         assertEquals(2, res.getDiscountTotal().scale());
     }
 
+    // ---- per-UPC percent / fixed --------------------------------------------------------------
+
+    @Test
+    void percentOffUpc_discountsOnlyTheTargetedLine() {
+        // 25% off REIGN only. The $10 OTHER item must be untouched — proves the percent applies to
+        // the targeted line total (2 × 4.00 = 8.00), not the whole basket.
+        stubPromos(pctUpc("REIGN_25", "REIGN", 25, 1));
+
+        DiscountResponseDto res = service.calculate(
+                txn(List.of(), line("REIGN", 2, "4.00"), line("OTHER", 1, "10.00")));
+
+        assertEquals(List.of("REIGN_25"), codes(res));
+        assertEquals(DiscountType.PERCENT_OFF, res.getDiscounts().get(0).getType());
+        assertEquals(0, new BigDecimal("2.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+        assertEquals(0, new BigDecimal("2.00").compareTo(res.getDiscountTotal()));
+    }
+
+    @Test
+    void fixedOffUpc_withoutBuyQuantity_appliesOnceWhenPresent() {
+        stubPromos(fixedUpc("FIJI_1OFF", "FIJI", "1.00", null, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("FIJI", 3, "2.00")));
+
+        assertEquals(0, new BigDecimal("1.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+    }
+
+    @Test
+    void fixedOffUpc_withBuyQuantity_appliesPerCompletedGroup() {
+        // "Buy 2 Save $1.00": 5 units -> floor(5/2) = 2 groups -> $2.00 off.
+        stubPromos(fixedUpc("COKE_2FOR", "COKE", "1.00", 2, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("COKE", 5, "2.00")));
+
+        assertEquals(0, new BigDecimal("2.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+    }
+
+    @Test
+    void fixedOffUpc_withBuyQuantity_belowThreshold_appliesNothing() {
+        stubPromos(fixedUpc("COKE_2FOR", "COKE", "1.00", 2, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("COKE", 1, "2.00")));
+
+        assertTrue(res.getDiscounts().isEmpty());
+    }
+
+    @Test
+    void fixedOffUpc_isCappedAtTheTargetedLineTotal() {
+        // $5.00 off a single $0.50 item can only take $0.50 — the discount never spills past the line.
+        stubPromos(fixedUpc("SMALL_5OFF", "SM", "5.00", null, 1));
+
+        DiscountResponseDto res = service.calculate(
+                txn(List.of(), line("SM", 1, "0.50"), line("OTHER", 1, "10.00")));
+
+        assertEquals(0, new BigDecimal("0.50").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+        assertEquals(0, new BigDecimal("0.50").compareTo(res.getDiscountTotal()));
+    }
+
+    @Test
+    void upcTargetedRule_whenUpcAbsent_appliesNothing() {
+        stubPromos(pctUpc("REIGN_25", "REIGN", 25, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("OTHER", 1, "10.00")));
+
+        assertTrue(res.getDiscounts().isEmpty());
+        assertEquals(0, BigDecimal.ZERO.compareTo(res.getDiscountTotal()));
+    }
+
     // ---- helpers ------------------------------------------------------------------------------
 
     private void stubPromos(DiscountRule... rules) {
@@ -225,6 +292,27 @@ class DiscountServiceTest {
                 .category(DiscountCategory.PROMOTIONAL).targetType(TargetType.UPC).targetValue(upc)
                 .discountType(DiscountType.PROMO).buyQuantity(buy).getQuantity(get)
                 .priority(priority).active(true).build();
+    }
+
+    private static DiscountRule pctUpc(String code, String upc, int percent, int priority) {
+        return DiscountRule.builder()
+                .code(code).description(code)
+                .category(DiscountCategory.PROMOTIONAL).targetType(TargetType.UPC).targetValue(upc)
+                .discountType(DiscountType.PERCENT_OFF).amount(new BigDecimal(percent))
+                .priority(priority).active(true).build();
+    }
+
+    private static DiscountRule fixedUpc(String code, String upc, String amount, Integer buyQuantity,
+                                         int priority) {
+        DiscountRule.DiscountRuleBuilder b = DiscountRule.builder()
+                .code(code).description(code)
+                .category(DiscountCategory.PROMOTIONAL).targetType(TargetType.UPC).targetValue(upc)
+                .discountType(DiscountType.FIXED_AMOUNT_OFF).amount(new BigDecimal(amount))
+                .priority(priority).active(true);
+        if (buyQuantity != null) {
+            b.buyQuantity(buyQuantity);
+        }
+        return b.build();
     }
 
     private static DiscountRule senior(String code, int percent, int priority) {
