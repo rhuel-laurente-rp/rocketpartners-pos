@@ -163,11 +163,16 @@ public class CustomerView extends JFrame {
     private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
 
+    /** Header recall control label. "Basket" matches the Void Basket / Keep Basket vocabulary;
+     *  painted uppercase (see {@link #buildHeader}) to join the eyebrow/pill family of the dark
+     *  header strip. */
+    private static final String RESUME_LABEL = "Back to Basket";
     // The standard-POS "recall/edit" control, sitting in the header beside the AWAITING PAYMENT
     // pill. Visible only while the transaction is TOTALED; pressing it re-opens the order
-    // (TOTALED → IN_PROGRESS) so more items can be rung up. Compact so the header strip keeps its
-    // height. Dispatches RESUME_EDITING_PRESSED; CustomerViewController performs the transition.
-    private final PosButton resumeButton = PosButtons.secondary("Add Item");
+    // (TOTALED → IN_PROGRESS) so more items can be rung up. Sized to the status pill's height so
+    // showing/hiding it never resizes the header strip. Dispatches RESUME_EDITING_PRESSED;
+    // CustomerViewController performs the transition.
+    private final PosButton resumeButton = PosButtons.secondary(RESUME_LABEL.toUpperCase());
 
     private final PosButton payCashButton = PosButtons.tender("Pay Cash", PosTheme.GO);
     private final PosButton payDebitButton = PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT);
@@ -748,13 +753,23 @@ public class CustomerView extends JFrame {
         statusPill.setOpaque(true);
         statusPill.setBorder(BorderFactory.createEmptyBorder(5, 14, 5, 14));
 
-        // Resume control: compact so it doesn't balloon the header strip, hidden until TOTALED.
-        resumeButton.setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
+        // Recall control: styled as an uppercase eyebrow chip the same height as the status pill
+        // so that showing or hiding it never changes the header strip's height. Drop the
+        // fingertip touch-height floor and shrink the padding, then clamp the height to the
+        // tallest *other* header element (title / pill / journal indicator) — the height the
+        // header already has without this button — so the BoxLayout row can't grow when the chip
+        // appears at TOTALED. Hidden until then.
+        resumeButton.setFont(PosTheme.eyebrow());
         resumeButton.setVisible(false);
         resumeButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RESUME_EDITING_PRESSED)));
-        int resumeH = 34;
-        Dimension resumeSize = new Dimension(resumeButton.getPreferredSize().width, resumeH);
+        resumeButton.setTouchMinHeight(0);
+        resumeButton.setBorder(BorderFactory.createEmptyBorder(
+                3, 14, 3 + PosButton.SHADOW_INSET, 14));
+        int headerContentH = Math.max(label.getPreferredSize().height,
+                Math.max(statusPill.getPreferredSize().height,
+                        journalIndicator.getPreferredSize().height));
+        Dimension resumeSize = new Dimension(resumeButton.getPreferredSize().width, headerContentH);
         resumeButton.setPreferredSize(resumeSize);
         resumeButton.setMinimumSize(resumeSize);
         resumeButton.setMaximumSize(resumeSize);
