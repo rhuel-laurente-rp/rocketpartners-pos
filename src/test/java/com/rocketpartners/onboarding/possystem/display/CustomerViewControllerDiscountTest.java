@@ -83,6 +83,12 @@ class CustomerViewControllerDiscountTest {
             return promoRule != null && promoRule.code().equals(code)
                     ? java.util.Optional.of(promoRule) : java.util.Optional.empty();
         }
+
+        @Override
+        public java.util.Optional<PromoRule> promoRuleForUpc(String upc) {
+            return promoRule != null && promoRule.targetUpc().equals(upc)
+                    ? java.util.Optional.of(promoRule) : java.util.Optional.empty();
+        }
     }
 
     private void addWidgetAndController(StubApi api,
@@ -159,7 +165,8 @@ class CustomerViewControllerDiscountTest {
         Discount promo = new Discount("BOGO", "Buy 1 Get 1", DiscountType.PROMO,
                 BigDecimal.ZERO, new BigDecimal("10.00"));
         StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of(promo)));
-        api.promoRule = new CloudApiComponent.PromoRule("BOGO", "Buy 1 Get 1", WIDGET.getUpc(), 1, 1);
+        api.promoRule = new CloudApiComponent.PromoRule("BOGO", "Buy 1 Get 1", WIDGET.getUpc(),
+                DiscountType.PROMO, null, 1, 1);
         CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
         pos.addController(controller);
         pos.start();
@@ -180,6 +187,33 @@ class CustomerViewControllerDiscountTest {
         Transaction tx = pos.getTransactionService().getCurrentTransaction();
         assertThat(tx.getLineItems()).hasSize(1);
         assertThat(tx.discountTotal()).isEqualByComparingTo("10.00");
+    }
+
+    @Test
+    void perUpcDiscount_previewsAsADiscountRowOnAdd_andUpdatesTheSummary() {
+        // A 25%-off rule on the widget's UPC. Adding one widget ($10.00) should preview a discount
+        // row in the basket and a $2.50 discount in the summary — before Total, no engine call.
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of()));
+        api.promoRule = new CloudApiComponent.PromoRule("REIGN_25", "25% Off Reign", WIDGET.getUpc(),
+                DiscountType.PERCENT_OFF, new BigDecimal("25"), null, null);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 1 @ 10.00 -> 25% = 2.50 off
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<com.rocketpartners.onboarding.commons.model.LineItem>> rows =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        org.mockito.ArgumentCaptor<BigDecimal> subtotal = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        org.mockito.ArgumentCaptor<BigDecimal> discount = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                rows.capture(), subtotal.capture(), discount.capture(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        assertThat(rows.getValue()).anyMatch(r -> r instanceof DiscountLineItem);
+        assertThat(subtotal.getValue()).isEqualByComparingTo("10.00");
+        assertThat(discount.getValue()).isEqualByComparingTo("2.50");
     }
 
     @Test

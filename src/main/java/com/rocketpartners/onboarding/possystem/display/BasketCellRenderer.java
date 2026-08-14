@@ -110,6 +110,9 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
 
     /** Pre-rendered hex for {@link PosTheme#PROMO}, so the free-row HTML costs no per-row allocation. */
     private final String promoHex = hex(PosTheme.PROMO);
+    /** Pre-rendered hex for the percent-off / amount-off accents, same no-allocation reason. */
+    private final String promoPercentHex = hex(PosTheme.PROMO_PERCENT);
+    private final String promoFixedHex = hex(PosTheme.PROMO_FIXED);
 
     public BasketCellRenderer() {
         super(new BorderLayout(COL_GAP, 0));
@@ -245,6 +248,26 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
             qty.setText("");
             extended.setText("-" + PosTheme.money(free.getFreeAmount()));
             extended.setForeground(PosTheme.PROMO);
+            return this;
+        }
+
+        // A per-item discount (percent-off / amount-off) renders as its own inert, indented row too,
+        // tinted by the deal's accent colour so it matches the item's Quick Add tile edge and the
+        // grid legend. Blank price/qty, negative Total, no hover/selection tint.
+        if (value instanceof DiscountLineItem discount) {
+            setBackground(PosTheme.SURFACE);
+            Color accent = PosTheme.promoAccent(discount.getDiscountType());
+            String accentHex = discount.getDiscountType() == com.rocketpartners.onboarding.commons.model.DiscountType.PERCENT_OFF
+                    ? promoPercentHex
+                    : discount.getDiscountType() == com.rocketpartners.onboarding.commons.model.DiscountType.PROMO
+                    ? promoHex : promoFixedHex;
+            description.setText("<html><font color='" + accentHex + "'>&nbsp;&nbsp;&nbsp;&#8627; "
+                    + escapeHtml(discount.getLabel()) + "</font></html>");
+            description.setForeground(accent);
+            price.setText("");
+            qty.setText("");
+            extended.setText("-" + PosTheme.money(discount.getDiscountAmount()));
+            extended.setForeground(accent);
             return this;
         }
 

@@ -50,4 +50,26 @@ class BasketCellRendererPromoTest {
         assertThat(renderer.getDescriptionTextForTest()).isEqualTo("Widget");
         assertThat(renderer.getExtendedTextForTest()).isEqualTo("$20.00");
     }
+
+    @Test
+    void discountRow_rendersIndentedInItsTypeColour_withNegativeTotal() {
+        DiscountLineItem d = new DiscountLineItem(WIDGET,
+                com.rocketpartners.onboarding.commons.model.DiscountType.PERCENT_OFF,
+                "25% Off Widget", new BigDecimal("2.50"));
+        render(d);
+        String desc = renderer.getDescriptionTextForTest();
+        assertThat(desc).contains("25% Off Widget");
+        assertThat(desc.toUpperCase()).contains("#1C7ED6"); // PROMO_PERCENT azure, not the PROMO violet
+        assertThat(desc).contains("&#8627;");                // the ↳ indent glyph
+        assertThat(renderer.getExtendedTextForTest()).isEqualTo("-$2.50");
+    }
+
+    @Test
+    void discountRow_isNeverHighlighted_evenWhenSelected() {
+        DiscountLineItem d = new DiscountLineItem(WIDGET,
+                com.rocketpartners.onboarding.commons.model.DiscountType.FIXED_AMOUNT_OFF,
+                "$1.00 Off Widget", new BigDecimal("1.00"));
+        renderer.getListCellRendererComponent(list, d, 0, true, false);
+        assertThat(renderer.getBackground()).isEqualTo(PosTheme.SURFACE);
+    }
 }

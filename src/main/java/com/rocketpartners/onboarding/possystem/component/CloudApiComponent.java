@@ -24,6 +24,7 @@ import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -136,10 +137,13 @@ public class CloudApiComponent implements Closeable {
     }
 
     /**
-     * A POS-side view of one {@code PROMOTIONAL} rule (buy-N-get-M on a single UPC), enough to map
-     * an applied promo back to its basket line and label how many units were free.
+     * A POS-side view of one {@code PROMOTIONAL} rule on a single UPC, enough to (a) map an applied
+     * buy-N-get-M promo back to its basket line and label how many units were free, and (b) colour
+     * the item's Quick Add tile by the kind of deal it carries ({@code discountType}: percent-off,
+     * amount-off, or buy-N-get-M).
      */
     public record PromoRule(String code, String description, String targetUpc,
+                            DiscountType discountType, BigDecimal amount,
                             Integer buyQuantity, Integer getQuantity) {
     }
 
@@ -205,6 +209,23 @@ public class CloudApiComponent implements Closeable {
     /** @return the cached promotional rule for {@code code}, if one was fetched at startup */
     public Optional<PromoRule> promoRuleByCode(String code) {
         return code == null ? Optional.empty() : Optional.ofNullable(promoCache.get(code));
+    }
+
+    /**
+     * @return a map of UPC to the {@link DiscountType} of the promotional rule targeting it, for
+     *         colouring Quick Add tiles by the kind of deal they carry. When several promo rules
+     *         target one UPC the first cached wins. Empty when the promo fetch failed or returned
+     *         nothing — an unreachable engine simply means no tiles are marked, never a blocked
+     *         startup.
+     */
+    public Map<String, DiscountType> promoTypeByUpc() {
+        Map<String, DiscountType> byUpc = new HashMap<>();
+        for (PromoRule rule : promoCache.values()) {
+            if (rule.targetUpc() != null && rule.discountType() != null) {
+                byUpc.putIfAbsent(rule.targetUpc(), rule.discountType());
+            }
+        }
+        return byUpc;
     }
 
     /**
@@ -308,6 +329,8 @@ public class CloudApiComponent implements Closeable {
                         code,
                         text(node, "description"),
                         text(node, "targetValue"),
+                        parseType(node.get("discountType")),
+                        decimalOrNull(node.get("amount")),
                         intOrNull(node.get("buyQuantity")),
                         intOrNull(node.get("getQuantity"))));
             }

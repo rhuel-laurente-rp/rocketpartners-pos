@@ -54,14 +54,27 @@ public final class PosTheme {
     /** Amber for "live / awaiting" states (tender enabled, processing card). */
     public static final Color LIVE = new Color(0xC9, 0x7A, 0x0E);
     /**
-     * Violet reserved for promotional "free item" markers on a basket line. Deliberately none of
-     * the hues already carrying meaning: {@link #GO} green is the pay-forward / hover / selection /
-     * newest-scan-flash colour (a green promo tag would blend into those transient row states),
-     * {@link #LIVE} amber is the processing/awaiting state, {@link #STOP} red is void/error, and
-     * blue/indigo ({@link #CARD_DEBIT}/{@link #CARD_CREDIT}) are the tenders. Violet reads as a
-     * persistent "deal" accent that a cashier won't confuse with any of those.
+     * Violet — the buy-N-get-M "free item" / promo marker, on a basket free-row and on a Quick Add
+     * tile whose UPC carries a {@code PROMO} rule. Deliberately none of the hues already carrying
+     * meaning: {@link #GO} green is the pay-forward / hover / selection / newest-scan-flash colour (a
+     * green promo tag would blend into those transient row states), {@link #LIVE} amber is the
+     * processing/awaiting state, {@link #STOP} red is void/error, and blue/indigo
+     * ({@link #CARD_DEBIT}/{@link #CARD_CREDIT}) are the tenders. Violet reads as a persistent "deal"
+     * accent that a cashier won't confuse with any of those.
      */
     public static final Color PROMO = new Color(0x9D, 0x2E, 0xA8);
+    /**
+     * Azure — a Quick Add tile whose UPC carries a percent-off rule. Sits in the same "deal accent"
+     * family as {@link #PROMO} and {@link #PROMO_FIXED}, all three shown in the grid's colour legend.
+     * A brighter, greener blue than the deep navy {@link #CARD_DEBIT} tender so the two don't blur.
+     */
+    public static final Color PROMO_PERCENT = new Color(0x1C, 0x7E, 0xD6);
+    /**
+     * Teal — a Quick Add tile whose UPC carries a flat amount-off rule (including "Buy N Save $X").
+     * The third member of the promo-accent family, distinct from the azure {@link #PROMO_PERCENT} and
+     * the violet {@link #PROMO}, and clear of {@link #GO} green.
+     */
+    public static final Color PROMO_FIXED = new Color(0x0E, 0x8A, 0x7D);
     /** Tint used on selected basket rows and change-due strip. */
     public static final Color SELECTED = new Color(0xEC, 0xF3, 0xF0);
     /** Row hover background — one step darker than SURFACE, still lighter than SELECTED. */
@@ -174,6 +187,25 @@ public final class PosTheme {
      */
     public static String money(BigDecimal amount) {
         return "$" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    // ---- Promo accent mapping ---------------------------------------------
+
+    /**
+     * The accent colour for a promotional discount's kind, shared by the Quick Add tile edge, the
+     * grid's colour legend, and the basket's per-item discount / free rows so one deal reads as one
+     * colour everywhere: percent-off {@link #PROMO_PERCENT} azure, buy-N-get-M {@link #PROMO} violet,
+     * amount-off {@link #PROMO_FIXED} teal.
+     *
+     * @param type the discount type; must not be {@code null}
+     * @return the theme token for that type
+     */
+    public static Color promoAccent(com.rocketpartners.onboarding.commons.model.DiscountType type) {
+        return switch (type) {
+            case PERCENT_OFF -> PROMO_PERCENT;
+            case FIXED_AMOUNT_OFF -> PROMO_FIXED;
+            case PROMO -> PROMO;
+        };
     }
 
     // ---- Colour helpers ---------------------------------------------------

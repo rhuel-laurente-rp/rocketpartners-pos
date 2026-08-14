@@ -145,16 +145,6 @@ public class CustomerView extends JFrame {
     private final JLabel totalValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private JPanel summaryTape;
 
-    /**
-     * Muted per-discount description lines, shown beneath the summary tape once discounts exist.
-     * Deliberately <em>separate</em> from {@link #summaryTape}: the tape's Discount row holds a
-     * fixed slot so its height never changes between zero and non-zero discount (an anti-layout-shift
-     * guarantee pinned by {@code CustomerViewSummaryTest}). The descriptions live here instead, so
-     * adding them cannot disturb the tape's geometry. Empty when there are no discounts — no rows,
-     * no "Discounts:" header.
-     */
-    private JPanel discountDetailPanel;
-
     private final JLabel amountDueValue = new JLabel("$0.00", SwingConstants.RIGHT);
     private final JLabel statusPill = new JLabel("OPEN", SwingConstants.CENTER);
     private final JournalStatusIndicator journalIndicator = new JournalStatusIndicator();
@@ -300,7 +290,7 @@ public class CustomerView extends JFrame {
         for (int i = 0; i < lines.size(); i++) {
             LineItem li = lines.get(i);
             // Free rows are display-only and rebuilt every render — never flash them.
-            if (li.isVoided() || li instanceof FreeLineItem) continue;
+            if (li.isVoided() || li instanceof PreviewRow) continue;
             Integer prev = previousQuantities.get(li);
             if (prev == null) {
                 flashRow = i;
@@ -347,7 +337,7 @@ public class CustomerView extends JFrame {
         // are not real merchandise, so they don't count.
         int qtySum = 0;
         for (LineItem li : lines) {
-            if (!li.isVoided() && !(li instanceof FreeLineItem)) qtySum += li.getQuantity();
+            if (!li.isVoided() && !(li instanceof PreviewRow)) qtySum += li.getQuantity();
         }
         lastNonVoidedQuantitySum = qtySum;
 
@@ -364,13 +354,14 @@ public class CustomerView extends JFrame {
         // increase, not a new arrival.
         previousQuantities.clear();
         for (LineItem li : lines) {
-            if (li instanceof FreeLineItem) continue; // rebuilt each render; not tracked for flash
+            if (li instanceof PreviewRow) continue; // rebuilt each render; not tracked for flash
             previousQuantities.put(li, li.getQuantity());
         }
 
         refreshSelectionDependentButtons();
         refreshVoidBasketButton();
         refreshTotalButton();
+        refreshDiscountButton();
     }
 
     /**
@@ -409,9 +400,14 @@ public class CustomerView extends JFrame {
         refreshStatusPill();
     }
 
-    /** Discount is a basket-input-phase action: live IN_PROGRESS, dark once the basket is frozen. */
+    /**
+     * Discount is a basket-input-phase action, and only meaningful once there's something to
+     * discount. Two gates, same shape as {@link #refreshTotalButton()}: the phase gate
+     * ({@link #basketInputEnabled} is off outside IN_PROGRESS) and the content gate (nothing to
+     * discount when every line is voided or the basket is empty). Either closed disables it.
+     */
     private void refreshDiscountButton() {
-        discountButton.setEnabled(basketInputEnabled);
+        discountButton.setEnabled(basketInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     /**
@@ -451,7 +447,7 @@ public class CustomerView extends JFrame {
         LineItem sel = basketList.getSelectedValue();
         // A free row is inert: not actionable, so Change Qty / Void Line stay dark for it.
         boolean actionable = basketInputEnabled && sel != null
-                && !sel.isVoided() && !(sel instanceof FreeLineItem);
+                && !sel.isVoided() && !(sel instanceof PreviewRow);
         changeQtyButton.setEnabled(actionable);
         voidLineButton.setEnabled(actionable);
     }
@@ -460,7 +456,7 @@ public class CustomerView extends JFrame {
     private static int realLineCount(java.util.List<LineItem> lines) {
         int count = 0;
         for (LineItem li : lines) {
-            if (!(li instanceof FreeLineItem)) count++;
+            if (!(li instanceof PreviewRow)) count++;
         }
         return count;
     }
@@ -474,9 +470,9 @@ public class CustomerView extends JFrame {
         int i = basketList.getSelectedIndex();
         if (i < 0) return;
         Object sel = basketModel.getElementAt(i);
-        if (!(sel instanceof FreeLineItem)) return;
+        if (!(sel instanceof PreviewRow)) return;
         for (int j = i - 1; j >= 0; j--) {
-            if (!(basketModel.getElementAt(j) instanceof FreeLineItem)) {
+            if (!(basketModel.getElementAt(j) instanceof PreviewRow)) {
                 basketList.setSelectedIndex(j);
                 basketList.ensureIndexIsVisible(j);
                 return;
@@ -535,7 +531,7 @@ public class CustomerView extends JFrame {
      */
     public LineItem getSelectedLineItem() {
         LineItem sel = basketList.getSelectedValue();
-        return sel instanceof FreeLineItem ? null : sel;
+        return sel instanceof PreviewRow ? null : sel;
     }
 
     /** @return {@code true} if the Change Qty button is currently enabled */
@@ -572,6 +568,49 @@ public class CustomerView extends JFrame {
     boolean isTenderEnabledForTest() {
         return payCashButton.isEnabled() && payDebitButton.isEnabled()
                 && payCreditButton.isEnabled();
+    }
+
+    /**
+     * Marks the Quick Add tiles whose UPC carries a promotion, keyed by discount type so each tile's
+     * edge and the colour legend match. Forwarded to {@link QuickAddPanel}; delivered once the
+     * discount engine's promotional-rules fetch completes. An empty map (engine unreachable) marks
+     * nothing and hides the legend. No-op before the grid is built.
+     *
+     * @param marks UPC → discount type; must not be {@code null} (may be empty)
+     */
+    public void setPromoMarks(java.util.Map<String,
+            com.rocketpartners.onboarding.commons.model.DiscountType> marks) {
+        if (marks == null) throw new IllegalArgumentException("marks must not be null");
+        if (quickAddPanel != null) quickAddPanel.setPromoMarks(marks);
+    }
+
+    /**
+     * Sets the tax rate shown in the summary's Tax label, e.g. {@code 0.07} renders as
+     * {@code "Tax (7%)"}. Derived from the transaction so a configured rate is never contradicted
+     * by a hard-coded literal. The receipt applies the same treatment.
+     *
+     * @param rate the transaction's tax rate; must not be {@code null}
+     */
+    public void setTaxRate(BigDecimal rate) {
+        if (rate == null) throw new IllegalArgumentException("rate must not be null");
+        taxLabel.setText("Tax (" + percent(rate) + "%)");
+    }
+
+    /**
+     * Sets the count shown beside the Discount label — {@code "Discount (2)"} when two discounts
+     * are in play, bare {@code "Discount"} at zero. With the per-discount detail lines gone, this
+     * is the only on-screen hint that a lone discount total covers more than one thing, between
+     * Total and the receipt.
+     *
+     * @param count number of discounts applied or previewed; negative is treated as zero
+     */
+    public void setDiscountCount(int count) {
+        discountLabel.setText(count > 0 ? "Discount (" + count + ")" : "Discount");
+    }
+
+    /** Whole-number (or shortest-decimal) percentage of a rate: {@code 0.07 → "7"}, {@code 0.075 → "7.5"}. */
+    private static String percent(BigDecimal rate) {
+        return rate.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString();
     }
 
     /**
@@ -907,56 +946,27 @@ public class CustomerView extends JFrame {
         return empty;
     }
 
+    /** The Summary card, retained so the snapshot harness can render it standalone. */
+    private JPanel summaryCard;
+
+    /** For the snapshot harness: the Summary card (tape only). */
+    JPanel getSummaryCardForTest() { return summaryCard; }
+
     /** Left column, bottom cell: the summary tape (Subtotal / Discount / Tax / TOTAL). */
     private JPanel buildSummaryCard() {
         summaryTape = buildSummaryTape();
         renderVerticalSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
 
-        discountDetailPanel = new JPanel();
-        discountDetailPanel.setOpaque(false);
-        discountDetailPanel.setLayout(new BoxLayout(discountDetailPanel, BoxLayout.Y_AXIS));
-        discountDetailPanel.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
-
         JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(12, 16, 14, 16));
+        // The tape alone: Subtotal, the Discount total, Tax, and TOTAL. Per-discount detail lines
+        // were dropped — the receipt itemises every discount, and the summary has no room for both.
+        // The Discount label carries a count (see setDiscountCount) so the cashier at least knows
+        // how many discounts a lone "Discount (2)  -$11.37" total covers.
         body.add(summaryTape, BorderLayout.NORTH);
-        // Descriptions sit below the tape (CENTER), so a discountTotal alone is never unexplainable
-        // at the counter. Kept out of the tape itself to preserve its fixed height.
-        body.add(discountDetailPanel, BorderLayout.CENTER);
-        return PosTheme.card("Summary", body);
-    }
-
-    /**
-     * Replaces the per-discount description lines beneath the summary tape. Pass an empty list to
-     * clear them — a no-discount transaction shows nothing here, matching the receipt.
-     *
-     * @param descriptions one label per applied (or previewed) discount; must not be {@code null}
-     */
-    public void setDiscountDescriptions(List<String> descriptions) {
-        if (descriptions == null) throw new IllegalArgumentException("descriptions must not be null");
-        if (discountDetailPanel == null) return;
-        discountDetailPanel.removeAll();
-        for (String text : descriptions) {
-            JLabel line = new JLabel(text);
-            line.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
-            line.setForeground(PosTheme.MUTED);
-            line.setAlignmentX(LEFT_ALIGNMENT);
-            discountDetailPanel.add(line);
-        }
-        discountDetailPanel.revalidate();
-        discountDetailPanel.repaint();
-    }
-
-    /** For tests: the discount-description lines currently shown beneath the summary tape. */
-    java.util.List<String> getDiscountDescriptionsForTest() {
-        java.util.List<String> out = new ArrayList<>();
-        if (discountDetailPanel != null) {
-            for (Component c : discountDetailPanel.getComponents()) {
-                if (c instanceof JLabel l) out.add(l.getText());
-            }
-        }
-        return out;
+        summaryCard = PosTheme.card("Summary", body);
+        return summaryCard;
     }
 
     /**

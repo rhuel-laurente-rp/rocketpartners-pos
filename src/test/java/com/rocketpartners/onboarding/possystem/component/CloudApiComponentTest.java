@@ -151,7 +151,8 @@ class CloudApiComponentTest {
     @Test
     void freeUnitsFor_computesBuyNGetMLikeTheEngine() {
         CloudApiComponent.PromoRule buy2get1 =
-                new CloudApiComponent.PromoRule("BOGO", "Buy 2 Get 1", "UPC", 2, 1);
+                new CloudApiComponent.PromoRule("BOGO", "Buy 2 Get 1", "UPC", DiscountType.PROMO,
+                        null, 2, 1);
         // floor(7/3)*1 = 2; floor(5/3)*1 = 1; floor(2/3)*1 = 0.
         assertThat(CloudApiComponent.freeUnitsFor(buy2get1, 7)).isEqualTo(2);
         assertThat(CloudApiComponent.freeUnitsFor(buy2get1, 5)).isEqualTo(1);
@@ -165,5 +166,31 @@ class CloudApiComponentTest {
         api = new CloudApiComponent("http://localhost:1");
         assertThat(api.calculate(request("26.53")).ok()).isFalse();
         assertThat(api.fetchEligibilityRules().ok()).isFalse();
+    }
+
+    @Test
+    void promoTypeByUpc_mapsEachUpcToItsDiscountType() throws IOException {
+        serve(200, "[{\"code\":\"BOGO_MONSTER\",\"description\":\"Buy 2 Get 1 Monster\","
+                + "\"category\":\"PROMOTIONAL\",\"targetType\":\"UPC\",\"targetValue\":\"070847811169\","
+                + "\"discountType\":\"PROMO\",\"buyQuantity\":2,\"getQuantity\":1,"
+                + "\"priority\":1,\"active\":true},"
+                + "{\"code\":\"REIGN_25\",\"description\":\"25% Off Reign\","
+                + "\"category\":\"PROMOTIONAL\",\"targetType\":\"UPC\",\"targetValue\":\"815154021906\","
+                + "\"discountType\":\"PERCENT_OFF\",\"amount\":25,\"priority\":1,\"active\":true}]");
+
+        api.fetchPromotionalRules();
+
+        assertThat(api.promoTypeByUpc())
+                .containsEntry("070847811169", DiscountType.PROMO)
+                .containsEntry("815154021906", DiscountType.PERCENT_OFF);
+    }
+
+    @Test
+    void promoTypeByUpc_emptyWhenEngineUnreachable() {
+        // The promo fetch fails against a dead port; the tile-marking map is simply empty — no
+        // marks, never a blocked startup or a thrown exception.
+        api = new CloudApiComponent("http://localhost:1");
+        assertThat(api.fetchPromotionalRules().ok()).isFalse();
+        assertThat(api.promoTypeByUpc()).isEmpty();
     }
 }

@@ -47,6 +47,22 @@ class CustomerViewBottomStripTest {
     }
 
     @Test
+    void discount_disabledWhenBasketEmpty_evenInProgress() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CustomerView view = new CustomerView("test", List.of(), noop());
+        // Fresh, IN_PROGRESS, empty basket: nothing to discount yet, so Discount is dark.
+        assertThat(view.isDiscountEnabledForTest()).isFalse();
+
+        // First item rung up: Discount lights up.
+        view.updateBasket(List.of(new LineItem(WIDGET, 1)), new BigDecimal("10.00"));
+        assertThat(view.isDiscountEnabledForTest()).isTrue();
+
+        // Basket emptied again: back to dark.
+        view.updateBasket(new java.util.ArrayList<>(), BigDecimal.ZERO);
+        assertThat(view.isDiscountEnabledForTest()).isFalse();
+    }
+
+    @Test
     void tender_disabledByDefault_enabledOnlyWhenTenderInputOn() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noop());

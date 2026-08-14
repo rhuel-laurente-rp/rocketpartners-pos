@@ -153,6 +153,56 @@ class CustomerViewSummaryTest {
     }
 
     @Test
+    void taxLabelReflectsTransactionRate_andChangesWhenTheRateChanges() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CustomerView view = new CustomerView("test", List.of(), noop());
+        try {
+            view.setTaxRate(new BigDecimal("0.07"));
+            // 0.07 renders as 7, never 7.00.
+            assertThat(view.getTaxLabelForTest().getText()).isEqualTo("Tax (7%)");
+
+            view.setTaxRate(new BigDecimal("0.085"));
+            assertThat(view.getTaxLabelForTest().getText()).isEqualTo("Tax (8.5%)");
+        } finally {
+            view.dispose();
+        }
+    }
+
+    @Test
+    void discountLabelCarriesTheCount_bareAtZero() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CustomerView view = new CustomerView("test", List.of(), noop());
+        try {
+            view.setDiscountCount(2);
+            assertThat(view.getDiscountLabelForTest().getText()).isEqualTo("Discount (2)");
+            view.setDiscountCount(0);
+            assertThat(view.getDiscountLabelForTest().getText()).isEqualTo("Discount");
+        } finally {
+            view.dispose();
+        }
+    }
+
+    @Test
+    void summaryShowsDiscountTotal_butNoPerDiscountDetailLines() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CustomerView view = new CustomerView("test", List.of(), noop());
+        try {
+            view.updateBasket(List.of(new LineItem(WIDGET, 1)),
+                    new BigDecimal("10.00"),
+                    new BigDecimal("2.00"),
+                    new BigDecimal("0.56"),
+                    new BigDecimal("8.56"));
+            // The combined discount total still renders in the tape.
+            assertThat(view.getDiscountValueForTest().getText()).isEqualTo("-$2.00");
+            // Per-discount description lines are gone: the summary body holds only the tape, with
+            // no extra label rows beneath it.
+            assertThat(view.getSummaryTapeForTest().getParent().getComponentCount()).isEqualTo(1);
+        } finally {
+            view.dispose();
+        }
+    }
+
+    @Test
     void subtotalLabelIncludesItemCount() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CustomerView view = new CustomerView("test", List.of(), noop());

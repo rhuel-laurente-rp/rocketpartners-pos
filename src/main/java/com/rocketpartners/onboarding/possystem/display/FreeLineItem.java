@@ -22,7 +22,7 @@ import java.math.BigDecimal;
  * quantity-changed. {@link #extendedTotal()} is the negative reduction so the Total column reads
  * {@code -$X.XX}.</p>
  */
-final class FreeLineItem extends LineItem {
+final class FreeLineItem extends LineItem implements PreviewRow {
 
     private final int freeUnits;
     private final BigDecimal freeAmount; // positive magnitude of the reduction
