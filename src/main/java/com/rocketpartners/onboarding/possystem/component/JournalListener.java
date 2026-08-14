@@ -85,6 +85,12 @@ public class JournalListener implements IController, IPosEventListener {
     private JournalRecord build(PosEvent event) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fillFields(fields, event);
+        // Stamp the signed-in operator onto the eligibility-discount record here (rather than in the
+        // static fillFields, which has no access to parent) so the applied discount is attributable.
+        if (event.getType() == PosEventType.ELIGIBILITY_DISCOUNT_SELECTED && parent != null) {
+            String operator = parent.getOperatorId();
+            if (operator != null && !operator.isBlank()) fields.put("operator", operator);
+        }
         return new JournalRecord(
                 Instant.now(),
                 parent == null ? "?" : safeString(parent.getStoreName()),
@@ -95,13 +101,21 @@ public class JournalListener implements IController, IPosEventListener {
     }
 
     private JournalRecord buildSystem(String label) {
+        // Stamp the signed-in operator onto the session-boundary records (POS_STARTED / POS_STOPPED)
+        // so the whole session between them is attributable to a lane operator. The id was captured
+        // at LoginView and carried in on PosComponent; the PIN is never present here.
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (parent != null) {
+            String operator = parent.getOperatorId();
+            if (operator != null && !operator.isBlank()) fields.put("operator", operator);
+        }
         return new JournalRecord(
                 Instant.now(),
                 parent == null ? "?" : safeString(parent.getStoreName()),
                 parent == null ? 0 : parent.getLaneNumber(),
                 currentTxnId(),
                 label,
-                new LinkedHashMap<>());
+                fields);
     }
 
     private String currentTxnId() {
@@ -186,6 +200,33 @@ public class JournalListener implements IController, IPosEventListener {
                 putIfNotNull(fields, "operation", event.getProperty("operation", String.class));
                 putIfNotNull(fields, "raw", event.getProperty("raw", String.class));
                 putIfNotNull(fields, "upc", event.getProperty("upc", String.class));
+            }
+            case DISCOUNT_RULES_LOADED -> {
+                Integer ruleCount = event.getProperty("ruleCount", Integer.class);
+                if (ruleCount != null) fields.put("ruleCount", ruleCount);
+                Boolean available = event.getProperty("available", Boolean.class);
+                if (available != null) fields.put("available", available);
+                putIfNotNull(fields, "reason", event.getProperty("reason", String.class));
+            }
+            case ELIGIBILITY_DISCOUNT_SELECTED -> {
+                putIfNotNull(fields, "code", event.getProperty("code", String.class));
+                putIfNotNull(fields, "desc", event.getProperty("description", String.class));
+                Boolean idVerified = event.getProperty("idVerified", Boolean.class);
+                if (idVerified != null) fields.put("idVerified", idVerified);
+                putIfNotNull(fields, "replaced", event.getProperty("replaced", String.class));
+                // The operator id is stamped in build() (which has the parent) — an unverified-ID
+                // discount on a named operator is exactly what a shrink review looks for.
+            }
+            case DISCOUNT_REQUEST_SENT -> {
+                putIfNotNull(fields, "codes", event.getProperty("codes", String.class));
+                Integer itemCount = event.getProperty("itemCount", Integer.class);
+                if (itemCount != null) fields.put("itemCount", itemCount);
+            }
+            case DISCOUNT_APPLIED -> {
+                putIfNotNull(fields, "id", event.getProperty("discountId", String.class));
+                putIfNotNull(fields, "desc", event.getProperty("description", String.class));
+                BigDecimal amount = event.getProperty("amount", BigDecimal.class);
+                if (amount != null) fields.put("amount", money(amount));
             }
             default -> {
                 // No interesting body — the event name alone is the record.

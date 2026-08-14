@@ -1,11 +1,13 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.commons.model.DiscountType;
 import com.rocketpartners.onboarding.commons.model.Item;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -175,9 +177,94 @@ class QuickAddPanelTest {
         assertThat(labels(p)).containsExactly("Cola Zero", "Cola", "Water", "Apple");
     }
 
+    @Test
+    void sort_discountsFirst_groupsPromoMarkedAheadOfUnmarked_thenNameAscWithinEachGroup() {
+        // Cola + Water carry a deal; Apple + Cola Zero do not. The two marked items lead (name A–Z
+        // within the group), the two unmarked follow (name A–Z within the group).
+        QuickAddPanel p = panelOf(SORTABLE);
+        p.setCapacityForTest(4, 50);
+        p.setPromoMarks(Map.of(
+                "1", DiscountType.PROMO,          // Cola
+                "4", DiscountType.PERCENT_OFF));  // Water
+        p.setSortForTest(QuickAddPanel.SortMode.DISCOUNT_FIRST);
+
+        assertThat(labels(p)).containsExactly("Cola", "Water", "Apple", "Cola Zero");
+    }
+
+    @Test
+    void sort_discountsFirst_withNoMarks_fallsBackToPlainNameOrder() {
+        // Engine unreachable / fetch not landed: no item is marked, so the ordering must collapse to
+        // a plain name A–Z sort rather than reorder arbitrarily.
+        QuickAddPanel p = panelOf(SORTABLE);
+        p.setCapacityForTest(4, 50);
+        p.setSortForTest(QuickAddPanel.SortMode.DISCOUNT_FIRST);
+
+        assertThat(labels(p)).containsExactly("Apple", "Cola", "Cola Zero", "Water");
+    }
+
     private static List<String> labels(QuickAddPanel p) {
         List<String> out = new ArrayList<>();
         for (Item i : p.filteredSortedForTest()) out.add(i.getDisplayLabel());
         return out;
+    }
+
+    // ---- Promotional tile marking + colour legend -------------------------
+
+    private static final Item PROMO_ITEM = new Item("PROMO-UPC", "Monster", new BigDecimal("2.00"));
+    private static final Item PCT_ITEM = new Item("PCT-UPC", "Reign", new BigDecimal("3.00"));
+    private static final Item PLAIN_ITEM = new Item("PLAIN-UPC", "Water", new BigDecimal("1.00"));
+
+    @Test
+    void tileWhoseUpcHasAPromotion_isMarkedWithItsType_oneWithoutIsNot() {
+        QuickAddPanel p = panelOf(List.of(PROMO_ITEM, PLAIN_ITEM));
+        p.setCapacityForTest(2, 4); // both on one page
+        p.setPromoMarks(Map.of("PROMO-UPC", DiscountType.PROMO));
+
+        List<Item> shown = p.currentPageItemsForTest();
+        for (int i = 0; i < shown.size(); i++) {
+            if ("PROMO-UPC".equals(shown.get(i).getUpc())) {
+                assertThat(p.isTilePromoForTest(i)).isTrue();
+                assertThat(p.tileMarkTypeForTest(i)).isEqualTo(DiscountType.PROMO);
+            } else {
+                assertThat(p.isTilePromoForTest(i)).isFalse();
+                assertThat(p.tileMarkTypeForTest(i)).isNull();
+            }
+        }
+    }
+
+    @Test
+    void legend_showsOneEntryPerDistinctMarkedType() {
+        QuickAddPanel p = panelOf(List.of(PROMO_ITEM, PCT_ITEM, PLAIN_ITEM));
+        p.setCapacityForTest(3, 6);
+        // Two distinct types across the marks -> two legend entries; the plain item is unmarked.
+        p.setPromoMarks(Map.of(
+                "PROMO-UPC", DiscountType.PROMO,
+                "PCT-UPC", DiscountType.PERCENT_OFF));
+
+        assertThat(p.legendVisibleForTest()).isTrue();
+        assertThat(p.legendEntryCountForTest()).isEqualTo(2);
+    }
+
+    @Test
+    void withNoPromoMarks_noTilesMarked_andLegendHidden() {
+        // The default state before (or without) any promotional-rules fetch: nothing marked.
+        QuickAddPanel p = panelOf(List.of(PROMO_ITEM, PLAIN_ITEM));
+        p.setCapacityForTest(2, 4);
+        for (int i = 0; i < p.tileCountForTest(); i++) {
+            assertThat(p.isTilePromoForTest(i)).isFalse();
+        }
+        assertThat(p.legendVisibleForTest()).isFalse();
+    }
+
+    @Test
+    void emptyPromoMarks_marksNothing_andHidesLegend() {
+        // An unreachable engine yields an empty map — no tiles marked, no legend, grid still built.
+        QuickAddPanel p = panelOf(List.of(PROMO_ITEM, PLAIN_ITEM));
+        p.setCapacityForTest(2, 4);
+        p.setPromoMarks(Map.of());
+        for (int i = 0; i < p.tileCountForTest(); i++) {
+            assertThat(p.isTilePromoForTest(i)).isFalse();
+        }
+        assertThat(p.legendVisibleForTest()).isFalse();
     }
 }

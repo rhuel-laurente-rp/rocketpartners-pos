@@ -237,7 +237,22 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
                 return "Cash received is less than the amount due.";
             case "TOTALED_INVARIANT":
             case "NO_TRANSACTION":
+            case "ILLEGAL_STATE":
+                // ILLEGAL_STATE is a corollary of TOTALED_INVARIANT — the same cashier-facing
+                // meaning ("you can't do that from here"), so it shares the copy.
                 return "That action isn't allowed right now.";
+            case "TRANSACTION_ALREADY_OPEN":
+                return "Finish the current transaction first.";
+            case "DISCOUNTS_UNAVAILABLE":
+                // The discount engine was unreachable or returned an invalid response at Total. The
+                // sale proceeds with no discounts; the cashier is told rather than left to wonder
+                // why a known discount silently vanished.
+                return "Discounts Unavailable — Continuing Without Them.";
+            case "ABOVE_MAX_QUANTITY":
+                Integer max = event.getProperty("max", Integer.class);
+                return max != null
+                        ? "Quantity is limited to " + max + "."
+                        : "Quantity is above the allowed limit.";
             case "INVALID_ARGUMENT":
                 // Fall back to the technical message when we have one — the aggregate's
                 // "quantity must be >= 1" is at least specific.

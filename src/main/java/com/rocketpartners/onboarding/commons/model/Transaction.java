@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A wholesale: its line items, discounts, tender, and lifecycle state.
@@ -37,7 +37,19 @@ import java.util.UUID;
 @Getter
 public class Transaction {
 
-    /** Stable, unique identifier for this transaction. */
+    /**
+     * Per-process sequence behind the auto-numbered constructor. One POS runs per JVM, so this is
+     * effectively the terminal's running transaction counter: the first sale of a session is
+     * {@code 0000001}, the next {@code 0000002}, and so on. Replaces the former random-UUID id with a
+     * short, cashier-readable, zero-padded integer. Persisting the counter across restarts is out of
+     * scope.
+     */
+    private static final AtomicInteger SEQUENCE = new AtomicInteger(0);
+
+    /** Zero-padding width for the auto-numbered transaction id (e.g. {@code 0000001}). */
+    private static final int ID_WIDTH = 7;
+
+    /** Stable, unique identifier for this transaction. A sequential integer, rendered as text. */
     private final String transactionId;
 
     /** Wall-clock time this transaction was opened. */
@@ -68,16 +80,17 @@ public class Transaction {
     private BigDecimal amountDue;
 
     /**
-     * Opens a new transaction with a freshly generated short id and the current instant.
+     * Opens a new transaction with the next sequential id and the current instant.
      *
-     * <p>The id is the first 8 hex chars of a random {@link UUID}. {@link #getCreatedAt()}
-     * carries the wall-clock time separately, so the id is not required to encode it —
-     * cashier-readable brevity wins over collision-proof entropy at this scale.</p>
+     * <p>The id is a monotonically increasing integer ({@link #SEQUENCE}), zero-padded to
+     * {@link #ID_WIDTH} digits (e.g. {@code 0000001}), not a random UUID — short and
+     * cashier-readable, and it prints on the receipt as a plain running number.
+     * {@link #getCreatedAt()} carries the wall-clock time separately, so the id need not encode it.</p>
      *
      * @param taxRate flat sales-tax rate; must not be {@code null}
      */
     public Transaction(BigDecimal taxRate) {
-        this(UUID.randomUUID().toString().substring(0, 23), Instant.now(), taxRate);
+        this(String.format("%0" + ID_WIDTH + "d", SEQUENCE.incrementAndGet()), Instant.now(), taxRate);
     }
 
     /**
@@ -197,6 +210,27 @@ public class Transaction {
     }
 
     /**
+     * Re-opens a finalized transaction for editing: {@link TransactionState#TOTALED} back to
+     * {@link TransactionState#IN_PROGRESS}, so the cashier can add or void lines after pressing
+     * Total — the standard-POS "recall / edit order" step. Any engine-applied discounts are cleared:
+     * they were computed against the now-stale finalized basket and are recomputed on the next
+     * {@link #total()}.
+     *
+     * <p>This does <strong>not</strong> weaken the Total invariant. While the transaction is
+     * {@code TOTALED}, {@link #addLineItem}, {@link #voidLine}, and {@link #updateLineItemQuantity}
+     * still throw; the cashier must call this first to leave {@code TOTALED}. It is only legal in
+     * {@code TOTALED} — a fresh {@code IN_PROGRESS} has nothing to resume, and {@code PAID} /
+     * {@code VOIDED} are terminal.</p>
+     *
+     * @throws IllegalStateException if the transaction is not {@link TransactionState#TOTALED}
+     */
+    public void resumeEditing() {
+        requireState("resumeEditing", TransactionState.TOTALED);
+        discounts.clear();
+        this.state = TransactionState.IN_PROGRESS;
+    }
+
+    /**
      * Applies a discount computed by the discount engine to this transaction.
      * Legal only between {@link #total()} and {@link #tender(TenderType, BigDecimal)}.
      *
@@ -249,14 +283,22 @@ public class Transaction {
      * @param cashTendered amount the customer presented; must not be {@code null}
      * @param amountDue    settled amount due; may be {@code null} to mean "same as grand total"
      * @throws IllegalStateException    if the transaction is not {@link TransactionState#TOTALED}
-     * @throws IllegalArgumentException if {@code type} is not {@link TenderType#CASH}, or
-     *                                  {@code cashTendered} is null
+     * @throws IllegalArgumentException if {@code type} is not {@link TenderType#CASH},
+     *                                  {@code cashTendered} is null, or a non-null
+     *                                  {@code amountDue} is below {@link #grandTotal()}
      */
     public void tender(TenderType type, BigDecimal cashTendered, BigDecimal amountDue) {
         requireState("tender", TransactionState.TOTALED);
         if (type == null) throw new IllegalArgumentException("tender type must not be null");
         if (cashTendered == null) throw new IllegalArgumentException("cashTendered must not be null");
         if (type != TenderType.CASH) throw new IllegalArgumentException("type must be CASH");
+        // A settled amount due below the grand total would let changeDue() frame an underpayment
+        // as change owed. The aggregate owns this invariant — callers must not settle for less
+        // than the sale is worth. A null amountDue means "same as grand total" and is always safe.
+        if (amountDue != null && amountDue.compareTo(grandTotal()) < 0) {
+            throw new IllegalArgumentException(
+                    "amountDue " + amountDue + " must be >= grand total " + grandTotal());
+        }
         this.tenderType = type;
         this.cashTendered = cashTendered;
         this.amountDue = amountDue == null ? null : amountDue.setScale(2, RoundingMode.HALF_UP);

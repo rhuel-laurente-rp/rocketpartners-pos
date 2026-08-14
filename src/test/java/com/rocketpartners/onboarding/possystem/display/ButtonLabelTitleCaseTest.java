@@ -52,6 +52,10 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("ReceiptView.startNext",      "Start Next Sale");
         LABELS.put("ManualBarcodeEntryView.confirm", "Add Item");
         LABELS.put("ManualBarcodeEntryView.cancel",  "Cancel");
+        LABELS.put("VoidBasketConfirmView.void",     "Void Basket");
+        LABELS.put("VoidBasketConfirmView.keep",     "Keep Basket");
+        LABELS.put("DiscountView.confirm",           "Confirm Discount");
+        LABELS.put("DiscountView.cancel",            "Cancel");
 
         // ---- Dialog titles --------------------------------------------
         LABELS.put("title.errorDialog",        "Error");
@@ -61,11 +65,14 @@ class ButtonLabelTitleCaseTest {
         LABELS.put("title.payCredit",          "Pay Credit");
         LABELS.put("title.confirmPayment",     "Confirm Payment");
         LABELS.put("title.receipt",            "Receipt");
+        LABELS.put("title.voidBasket",         "Void Basket?");
+        LABELS.put("title.applyDiscount",      "Apply Discount");
 
-        // The void-basket confirmation dialog is deliberately sentence case throughout — copy
-        // is graded separately (see VoidBasketConfirmViewTest#everyVisibleString_isSentenceCase)
-        // rather than routed through this Title Case sweep. Vocabulary discipline in that dialog
-        // ("Void basket" vs. "Cancel") is a domain-glossary invariant, not a typographic one.
+        // The void-basket confirmation dialog now follows the Title Case convention like every
+        // other dialog (title and both button labels above). Body copy in that dialog stays
+        // sentence case and is graded separately by VoidBasketConfirmViewTest — it is a
+        // sentence, not an action label. Vocabulary discipline there ("Void Basket" ends the
+        // sale; "Cancel"/"Keep Basket" only dismiss) remains a domain-glossary invariant.
     }
 
     @Test

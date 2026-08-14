@@ -70,15 +70,17 @@ class VoidBasketConfirmViewTest {
     }
 
     @Test
-    void everyVisibleString_isSentenceCase() throws Exception {
+    void visibleStrings_followCopyConvention() throws Exception {
         openFor(3, new BigDecimal("5.00"));
 
+        // Dialog title and both button labels are Title Case, matching the app-wide convention
+        // enforced by ButtonLabelTitleCaseTest — which now covers this dialog too.
         assertThat(view.getHeaderTitleLabelForTest().getText())
-                .as("dialog title is sentence case, matching the copy convention in this view")
-                .isEqualTo("Void basket?");
-        assertThat(view.getVoidButtonForTest().getText()).isEqualTo("Void basket");
-        assertThat(view.getKeepButtonForTest().getText()).isEqualTo("Keep basket");
-        // Description and summary body copy — sentence case, not title case.
+                .as("dialog title is Title Case")
+                .isEqualTo("Void Basket?");
+        assertThat(view.getVoidButtonForTest().getText()).isEqualTo("Void Basket");
+        assertThat(view.getKeepButtonForTest().getText()).isEqualTo("Keep Basket");
+        // Body copy stays sentence case — it's a sentence, not an action label.
         assertThat(view.getDescriptionLabelForTest().getText()).isEqualTo("This will discard the whole sale.");
     }
 
@@ -87,7 +89,7 @@ class VoidBasketConfirmViewTest {
         // JDialog's native title bar is left empty on construction so the header strip is the
         // sole place the title lives — otherwise the WM would render a second copy.
         assertThat(view.getTitle()).as("native window title must be empty").isEmpty();
-        assertThat(view.getHeaderTitleLabelForTest().getText()).isEqualTo("Void basket?");
+        assertThat(view.getHeaderTitleLabelForTest().getText()).isEqualTo("Void Basket?");
     }
 
     // ---- Footer consistency ---------------------------------------------

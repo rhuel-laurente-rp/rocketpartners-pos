@@ -116,13 +116,17 @@ The rule is strict: **views render, controllers decide.** For every screen there
 
 ### Views
 
-Each `*View` (e.g. `CustomerView`, `PayWithCashView`, `ChangeQuantityView`, `ReceiptView`, `ScannerView`) is a `JPanel` / `JDialog` that:
+Each `*View` (e.g. `CustomerView`, `PayWithCashView`, `ChangeQuantityView`, `ReceiptView`, `ScannerView`, `ManualBarcodeEntryView`) is a `JPanel` / `JDialog` that:
 
 - Renders state.
 - Exposes hooks (buttons, list selection, key bindings) that dispatch a `PosEvent` when the user acts.
 - Holds a reference to an `IPosEventDispatcher` (typically the `PosComponent`), never a service.
 
 Business logic does *not* live in a view. If you catch yourself typing `transactionService.` inside a `*View`, stop.
+
+**`QuickAddPanel`** is the extracted Quick Add grid (tiles + paging pills + a search field), pulled out of `CustomerView`. **`ManualBarcodeEntryView`** is a touch-keypad fallback for hand-keying a UPC when a barcode won't scan.
+
+**On-screen input widgets — `OnScreenKeyboard`, `OnScreenKeypad`, `OnScreenKeys`.** Touch keyboards for a keyboard-less terminal: a QWERTY panel for the Quick Add search field and a numeric keypad for the money / quantity / manual-entry dialogs, over a shared document-mutation helper. They are dumb by construction — non-focusable keys that type by mutating the target field's `Document` (never a `PosEvent`, never a synthesised `KeyEvent`), which keeps taps invisible to the scanner's `KeyEventDispatcher` and preserves the field's own `DocumentFilter` and `PERSIST` validation. See [swing-notes.md](swing-notes.md).
 
 ### View controllers
 
@@ -144,10 +148,11 @@ Each `*ViewController` (e.g. `CustomerViewController`, `PayWithCashViewControlle
 
 Behind an interface, so services and controllers never see the concrete impl.
 
-- **`ItemRepository`** — the interface: `Optional<Item> findByUpc(String)`, `int size()`.
+- **`ItemRepository`** — the interface: `Optional<Item> findByUpc(String)`, `List<Item> getAll()` (backs the Quick Add grid), `int size()`.
 - **`h2/H2ItemRepository`** — production. File-mode H2, one JDBC connection held for the process lifetime. On first run the `ITEMS` table is seeded from the classpath `pricebook.tsv`; on later runs the seed is skipped and lookups come straight from the DB. Edits to `ITEMS` survive restarts.
 - **`inmemory/InMemoryItemRepository`** — the same interface, backed by a `Map<String, Item>`. Used by tests and any in-process fixture that shouldn't touch disk.
 - **`PricebookTsv`** — a shared parser both implementations reuse.
+- **`UpcResolver`** — an ordered normalization ladder (exact → strip leading zeros → drop UPC-A check digit) that resolves a scanned code against the pricebook without rewriting it, since the scanner always emits 12 digits but the pricebook keys items on codes of assorted lengths. Used by `TransactionService.addItemByUpcDetailed`. When *every* rung misses **and** the raw input is 12 digits with an invalid UPC-A check digit, the service treats it as a likely scanner misread and dispatches `ERROR{code=UPC_MISREAD}` (prompt to rescan) rather than `UPC_NOT_FOUND` (unlisted item).
 
 Everything downstream (`TransactionService`, `PosComponent`, controllers) depends only on `ItemRepository`. Swapping impls doesn't ripple.
 
@@ -208,8 +213,11 @@ Scan a UPC through to a printed receipt:
     → CASH_TENDERED + TRANSACTION_COMPLETED events
 
 8.  ReceiptViewController listens for TRANSACTION_COMPLETED
-    → calls TransactionService.generateReceipt(tx, storeName, laneNumber)
+    → calls TransactionService.generateReceipt(tx, storeName, laneNumber, cashier)
+      (cashier = the operator id from the login screen, carried on PosComponent;
+       the receipt header prints it as a "Cashier:" line)
     → ReceiptView opens showing the formatted text
+      (the transaction id on the header is a plain sequential integer, not a UUID)
 
 9.  Cashier dismisses receipt → RECEIPT_DISMISS_PRESSED → RECEIPT_DISMISSED
     → CustomerViewController opens a fresh transaction — ready for the next customer

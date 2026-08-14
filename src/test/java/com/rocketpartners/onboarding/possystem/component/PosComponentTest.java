@@ -38,6 +38,23 @@ class PosComponentTest {
         return component(false);
     }
 
+    // ---- Operator session --------------------------------------------------
+
+    @Test
+    void operatorId_fromLogin_isAvailableToThePos() {
+        Map<String, Item> items = new LinkedHashMap<>();
+        items.put(WIDGET.getUpc(), WIDGET);
+        PosComponent pos = new PosComponent(
+                new InMemoryItemRepository(items), new TaxService(BigDecimal.ZERO),
+                "Test Store", 1, false, "1234");
+        assertThat(pos.getOperatorId()).isEqualTo("1234");
+    }
+
+    @Test
+    void operatorId_defaultsToNull_whenConstructedWithoutLogin() {
+        assertThat(component().getOperatorId()).isNull();
+    }
+
     // ---- Listener registry -------------------------------------------------
 
     @Test

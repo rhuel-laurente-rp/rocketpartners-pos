@@ -1,16 +1,25 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.commons.dto.LineItemDto;
+import com.rocketpartners.onboarding.commons.dto.TransactionDto;
+import com.rocketpartners.onboarding.commons.model.Discount;
+import com.rocketpartners.onboarding.commons.model.DiscountType;
 import com.rocketpartners.onboarding.commons.model.LineItem;
 import com.rocketpartners.onboarding.commons.model.Transaction;
 import com.rocketpartners.onboarding.commons.model.TransactionState;
+import com.rocketpartners.onboarding.possystem.component.CloudApiComponent;
 import com.rocketpartners.onboarding.possystem.component.IController;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
 import com.rocketpartners.onboarding.possystem.event.IPosEventListener;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
+import com.rocketpartners.onboarding.possystem.service.DiscountPreview;
+import com.rocketpartners.onboarding.possystem.service.DiscountSession;
 import com.rocketpartners.onboarding.possystem.service.TransactionService;
 
+import javax.swing.SwingUtilities;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -18,6 +27,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Handles user input from {@link CustomerView} and mirrors {@link TransactionService} state back
@@ -54,22 +65,101 @@ public class CustomerViewController implements IController, IPosEventListener {
             // event before committing the void.
             PosEventType.VOID_BASKET_CONFIRM_PRESSED,
             PosEventType.TOTAL_PRESSED,
+            PosEventType.RESUME_EDITING_PRESSED,
             PosEventType.ITEM_SCANNED,
             // Re-render whenever a peer controller has mutated the basket (e.g. the
-            // change-qty dialog changed a quantity or voided a line via the zero path).
+            // change-qty dialog changed a quantity or voided a line via the zero path) or the
+            // eligibility selection changed (so the running preview updates).
             PosEventType.QUANTITY_CHANGED,
             PosEventType.LINE_VOIDED,
+            PosEventType.ELIGIBILITY_DISCOUNT_SELECTED,
+            // Fired once the startup discount-rules fetch lands (eligibility + promotional). By this
+            // point CloudApiComponent's promo cache is populated, so it's the cue to mark the Quick
+            // Add tiles whose UPC carries a promotion.
+            PosEventType.DISCOUNT_RULES_LOADED,
             PosEventType.RECEIPT_DISMISSED));
 
+    /**
+     * Runs the discount-engine call off the EDT and delivers the result back on the EDT. A
+     * two-second timeout executed inline on {@code TOTAL_PRESSED} (which arrives on the EDT) would
+     * freeze the whole UI — including the repaint that shows "Calculating Discounts". The default
+     * runs the work on a daemon thread and marshals the callback via
+     * {@link SwingUtilities#invokeLater}. Tests inject a synchronous variant.
+     */
+    @FunctionalInterface
+    public interface DiscountCalcScheduler {
+        void schedule(Supplier<CloudApiComponent.CalculateResult> work,
+                      Consumer<CloudApiComponent.CalculateResult> onResult);
+    }
+
     private final CustomerView view;
+    private final CloudApiComponent cloudApi;
+    private final DiscountSession discountSession;
+    private final DiscountCalcScheduler discountScheduler;
     private PosComponent parent;
 
     /**
+     * Phase-1 constructor: no discount engine wired. Total enables tender immediately and the
+     * summary shows no discount. Retained so tests and any engine-less boot behave exactly as
+     * before this feature landed.
+     *
      * @param view the view this controller drives; must not be {@code null}
      */
     public CustomerViewController(CustomerView view) {
+        this(view, null, new DiscountSession(), defaultScheduler());
+    }
+
+    /**
+     * Wires the discount engine and the eligibility selection with the default off-EDT scheduler
+     * (a daemon thread; callback marshalled via {@link SwingUtilities#invokeLater}). This is the
+     * production wiring used by {@code Application}.
+     *
+     * @param view     the view this controller drives; must not be {@code null}
+     * @param cloudApi the discount-engine client; must not be {@code null}
+     * @param session  the eligibility-discount selection for the current transaction; must not be
+     *                 {@code null}
+     */
+    public CustomerViewController(CustomerView view, CloudApiComponent cloudApi, DiscountSession session) {
+        this(view, cloudApi, session, defaultScheduler());
+    }
+
+    /**
+     * Full constructor: wires the discount engine, the transaction-scoped eligibility selection,
+     * and the off-EDT scheduler used at Total.
+     *
+     * @param view      the view this controller drives; must not be {@code null}
+     * @param cloudApi  the discount-engine client; {@code null} disables the engine call at Total
+     * @param session   the eligibility-discount selection for the current transaction; must not be
+     *                  {@code null}
+     * @param scheduler runs the engine call off the EDT; must not be {@code null}
+     */
+    public CustomerViewController(CustomerView view, CloudApiComponent cloudApi,
+                                  DiscountSession session, DiscountCalcScheduler scheduler) {
         if (view == null) throw new IllegalArgumentException("view must not be null");
+        if (session == null) throw new IllegalArgumentException("session must not be null");
+        if (scheduler == null) throw new IllegalArgumentException("scheduler must not be null");
         this.view = view;
+        this.cloudApi = cloudApi;
+        this.discountSession = session;
+        this.discountScheduler = scheduler;
+    }
+
+    private static DiscountCalcScheduler defaultScheduler() {
+        return (work, onResult) -> {
+            Thread t = new Thread(() -> {
+                CloudApiComponent.CalculateResult result;
+                try {
+                    result = work.get();
+                } catch (RuntimeException e) {
+                    result = CloudApiComponent.CalculateResult.fail(
+                            e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
+                CloudApiComponent.CalculateResult delivered = result;
+                SwingUtilities.invokeLater(() -> onResult.accept(delivered));
+            }, "discount-calc");
+            t.setDaemon(true);
+            t.start();
+        };
     }
 
     // ---- IController ------------------------------------------------------
@@ -106,7 +196,9 @@ public class CustomerViewController implements IController, IPosEventListener {
             case VOID_LINE_PRESSED -> handleVoidLine(event);
             case VOID_BASKET_CONFIRM_PRESSED -> handleVoidBasketConfirmed();
             case TOTAL_PRESSED -> handleTotal();
-            case QUANTITY_CHANGED, LINE_VOIDED -> render();
+            case RESUME_EDITING_PRESSED -> handleResumeEditing();
+            case QUANTITY_CHANGED, LINE_VOIDED, ELIGIBILITY_DISCOUNT_SELECTED -> render();
+            case DISCOUNT_RULES_LOADED -> markPromoTiles();
             case RECEIPT_DISMISSED -> beginNewTransaction();
             default -> { /* not subscribed */ }
         }
@@ -191,8 +283,9 @@ public class CustomerViewController implements IController, IPosEventListener {
     }
 
     private void handleTotal() {
+        Transaction tx;
         try {
-            parent.getTransactionService().total();
+            tx = parent.getTransactionService().total();
         } catch (RuntimeException ignored) {
             return;
         }
@@ -202,13 +295,139 @@ public class CustomerViewController implements IController, IPosEventListener {
         // walk away. Basket input off; lifecycle input on.
         view.setBasketInputEnabled(false);
         view.setLifecycleInputEnabled(true);
+
+        if (cloudApi == null) {
+            // Phase-1 behaviour: no discount engine wired. Enable tender against the undiscounted
+            // total immediately.
+            view.setTenderInputEnabled(true);
+            render();
+            return;
+        }
+
+        // Hold tender: the cashier must not take payment against a total that's about to change.
+        // Show the "Calculating Discounts" pending state so the round-trip doesn't read as a freeze,
+        // then call the engine OFF the EDT — a 2s timeout inline would freeze this very repaint.
+        view.setTenderInputEnabled(false);
+        view.setCalculatingDiscounts(true);
+
+        TransactionDto request = buildRequest(tx);
+        Map<String, Object> reqProps = new HashMap<>();
+        reqProps.put("codes", String.join(",", discountSession.getSelectedCodes()));
+        reqProps.put("itemCount", nonVoidedItemCount(tx));
+        parent.dispatchPosEvent(new PosEvent(PosEventType.DISCOUNT_REQUEST_SENT, reqProps));
+
+        discountScheduler.schedule(
+                () -> cloudApi.calculate(request),
+                result -> applyEngineResult(tx, result));
+    }
+
+    /**
+     * Handles the engine's reply on the EDT: applies each returned discount to the (still TOTALED)
+     * transaction in order, or — on any failure — applies nothing and surfaces a visible error.
+     * Both paths converge on tender being enabled, so a failed call can never strand the sale in
+     * TOTALED with no way to pay.
+     */
+    private void applyEngineResult(Transaction tx, CloudApiComponent.CalculateResult result) {
+        view.setCalculatingDiscounts(false);
+
+        // If the cashier voided the basket (legal at TOTALED) while the engine was being called,
+        // the transaction we captured is no longer current — the void flow already reset the view,
+        // so do nothing rather than apply discounts to a dead transaction or re-enable tender.
+        if (parent.getTransactionService().getCurrentTransaction() != tx
+                || tx.getState() != TransactionState.TOTALED) {
+            return;
+        }
+
+        if (result != null && result.ok()) {
+            for (Discount d : result.discounts()) {
+                // applyDiscount() requires TOTALED, which this flow already satisfies — the state
+                // rule is deliberately NOT widened.
+                tx.applyDiscount(d);
+                Map<String, Object> props = new HashMap<>();
+                props.put("discountId", d.getDiscountId());
+                props.put("description", d.getDescription());
+                props.put("amount", d.getAppliedAmount());
+                parent.dispatchPosEvent(new PosEvent(PosEventType.DISCOUNT_APPLIED, props));
+            }
+        } else {
+            // A sale that quietly drops a discount is worse than one that says it couldn't reach the
+            // engine. Surface it; the sale still completes against the undiscounted total.
+            Map<String, Object> props = new HashMap<>();
+            props.put("code", "DISCOUNTS_UNAVAILABLE");
+            props.put("message", "Discounts Unavailable — Continuing Without Them.");
+            if (result != null && result.error() != null) props.put("detail", result.error());
+            parent.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
+        }
+
         view.setTenderInputEnabled(true);
         render();
+    }
+
+    /** Maps the current transaction and the selected eligibility codes onto the engine's wire form. */
+    private TransactionDto buildRequest(Transaction tx) {
+        List<LineItemDto> lineItems = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            if (li.isVoided()) continue;
+            lineItems.add(new LineItemDto(
+                    li.getItem().getUpc(),
+                    li.getItem().getDescription(),
+                    li.getQuantity(),
+                    li.getItem().getUnitPrice()));
+        }
+        return new TransactionDto(
+                tx.getTransactionId(),
+                tx.getCreatedAt(),
+                lineItems,
+                tx.subtotal(),
+                new ArrayList<>(discountSession.getSelectedCodes()));
+    }
+
+    private static int nonVoidedItemCount(Transaction tx) {
+        int count = 0;
+        for (LineItem li : tx.getLineItems()) {
+            if (!li.isVoided()) count += li.getQuantity();
+        }
+        return count;
+    }
+
+    /**
+     * Re-opens a finalized transaction so the cashier can add more items after Total — the standard
+     * POS recall/edit step. Moves {@code TOTALED} back to {@code IN_PROGRESS} (clearing the engine's
+     * applied discounts, which recompute on the next Total), re-enables basket input, and holds
+     * tender until Total is pressed again. The eligibility selection is kept so re-Totalling
+     * re-applies it. A rejected re-open (nothing open, or not TOTALED) leaves the view untouched.
+     */
+    private void handleResumeEditing() {
+        try {
+            parent.getTransactionService().resumeEditing();
+        } catch (RuntimeException ignored) {
+            return; // service already dispatched ILLEGAL_STATE
+        }
+        parent.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_RESUMED));
+        view.setBasketInputEnabled(true);
+        view.setLifecycleInputEnabled(true);
+        view.setTenderInputEnabled(false);
+        view.setCalculatingDiscounts(false);
+        render();
+    }
+
+    /**
+     * Marks the Quick Add tiles whose UPC carries a promotion, from the promotional rules cached at
+     * startup. No-op without an engine wired. The set is empty when the engine was unreachable, so
+     * this never blocks and simply leaves the grid unmarked — a tile's mark never depends on the
+     * engine being reachable.
+     */
+    private void markPromoTiles() {
+        if (cloudApi == null) return;
+        view.setPromoMarks(cloudApi.promoTypeByUpc());
     }
 
     // ---- State transitions ------------------------------------------------
 
     private void beginNewTransaction() {
+        // The eligibility selection is transaction-scoped — a new sale starts with no discount.
+        discountSession.clear();
+        view.setCalculatingDiscounts(false);
         try {
             parent.getTransactionService().startTransaction();
         } catch (RuntimeException ignored) {
@@ -227,17 +446,183 @@ public class CustomerViewController implements IController, IPosEventListener {
         Transaction tx = parent.getTransactionService().getCurrentTransaction();
         if (tx == null) {
             view.updateBasket(List.of(), BigDecimal.ZERO);
+            view.setDiscountCount(0);
             return;
         }
-        // Copy the aggregate's line-item list so the view (and any observer, such as a
-        // Mockito verify) sees a snapshot that reflects the exact state at render time. Feed
-        // the full breakdown — subtotal, discount, tax, grand total — so the inline summary
-        // strip renders live tax instead of always $0.00.
-        view.updateBasket(
-                new ArrayList<>(tx.getLineItems()),
-                tx.subtotal(),
-                tx.discountTotal(),
-                tx.taxTotal(),
-                tx.grandTotal());
+        BigDecimal subtotal = tx.subtotal();
+        // The Tax label shows the transaction's actual rate ("Tax (7%)"), derived rather than
+        // hard-coded — the same value the receipt prints.
+        view.setTaxRate(tx.getTaxRate());
+
+        if (!tx.getDiscounts().isEmpty()) {
+            // Post-Total: the engine's applied discounts are authoritative for the totals; the free
+            // rows are driven by the engine's PROMO amounts. Per-discount detail lines are gone; the
+            // count on the Discount label is the only on-screen hint of how many are folded in.
+            view.updateBasket(displayRowsFromEngine(tx), subtotal,
+                    tx.discountTotal(), tx.taxTotal(), tx.grandTotal());
+            view.setDiscountCount(tx.getDiscounts().size());
+            return;
+        }
+
+        // IN_PROGRESS live preview. Three locally-computed pieces, updated on every scan/qty change
+        // so the running total stays correct without a per-scan network round-trip; the engine result
+        // replaces them at Total:
+        //   1. buy-N-get-M promotions — each yields an inert, indented "N free" row;
+        //   2. per-UPC percent-off / amount-off promotions — each yields an inert, indented discount
+        //      row (the same style as a promo), mirroring the engine's per-item math; and
+        //   3. the selected eligibility discount (see DiscountPreview).
+        // All come from the rules cached at startup. Tax and grand total are composed from the
+        // combined preview the same way the aggregate composes them (tax on subtotal − discount).
+        List<PromoLine> promos = localPromoLines(tx);
+        List<UpcDiscountLine> upcDiscounts = localUpcDiscountLines(tx);
+        BigDecimal promoDiscount = BigDecimal.ZERO;
+        for (PromoLine p : promos) {
+            promoDiscount = promoDiscount.add(p.amount());
+        }
+        for (UpcDiscountLine d : upcDiscounts) {
+            promoDiscount = promoDiscount.add(d.amount());
+        }
+        BigDecimal eligibilityDiscount =
+                DiscountPreview.previewTotal(discountSession.getSelectedRules(), subtotal);
+        BigDecimal previewDiscount = promoDiscount.add(eligibilityDiscount);
+        if (previewDiscount.compareTo(subtotal) > 0) previewDiscount = subtotal;
+
+        BigDecimal taxable = subtotal.subtract(previewDiscount);
+        BigDecimal tax = taxable.multiply(tx.getTaxRate());
+        BigDecimal total = taxable.add(tax).setScale(2, RoundingMode.HALF_UP);
+
+        view.updateBasket(interleavePreviewRows(tx, promos, upcDiscounts),
+                subtotal, previewDiscount, tax, total);
+
+        // The previewed discount count: each qualifying promotion, each per-UPC discount, and each
+        // selected eligibility rule. Feeds the "Discount (N)" label; the breakdown is on the receipt.
+        view.setDiscountCount(
+                promos.size() + upcDiscounts.size() + discountSession.getSelectedRules().size());
     }
+
+    /** A locally-previewed promotion on one basket line: how many units are free and their value. */
+    private record PromoLine(LineItem line, CloudApiComponent.PromoRule rule,
+                             int freeUnits, BigDecimal amount) {
+    }
+
+    /** A locally-previewed per-UPC discount on one line: its kind, the deal label, and the amount. */
+    private record UpcDiscountLine(LineItem line, DiscountType type, String label, BigDecimal amount) {
+    }
+
+    /**
+     * Computes the buy-N-get-M promotions that currently apply to the basket, from the promo rules
+     * cached at startup — the live equivalent of what the engine will return at Total. Empty when no
+     * engine is wired or nothing qualifies.
+     */
+    private List<PromoLine> localPromoLines(Transaction tx) {
+        if (cloudApi == null) return List.of();
+        List<PromoLine> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            if (li.isVoided()) continue;
+            var ruleOpt = cloudApi.promoRuleForUpc(li.getItem().getUpc());
+            if (ruleOpt.isEmpty()) continue;
+            CloudApiComponent.PromoRule rule = ruleOpt.get();
+            int free = CloudApiComponent.freeUnitsFor(rule, li.getQuantity());
+            if (free <= 0) continue;
+            BigDecimal amount = li.getItem().getUnitPrice().multiply(BigDecimal.valueOf(free));
+            out.add(new PromoLine(li, rule, free, amount));
+        }
+        return out;
+    }
+
+    /**
+     * Computes the per-UPC percent-off / amount-off discounts that currently apply, from the promo
+     * rules cached at startup — the live equivalent of the engine's per-item math. Empty when no
+     * engine is wired or nothing qualifies. PROMO (buy-N-get-M) rules are handled by
+     * {@link #localPromoLines(Transaction)} as free rows and skipped here.
+     */
+    private List<UpcDiscountLine> localUpcDiscountLines(Transaction tx) {
+        if (cloudApi == null) return List.of();
+        List<UpcDiscountLine> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            if (li.isVoided()) continue;
+            var ruleOpt = cloudApi.promoRuleForUpc(li.getItem().getUpc());
+            if (ruleOpt.isEmpty()) continue;
+            CloudApiComponent.PromoRule rule = ruleOpt.get();
+            DiscountType type = rule.discountType();
+            if (type == null || type == DiscountType.PROMO || rule.amount() == null) continue;
+
+            BigDecimal lineTotal =
+                    li.getItem().getUnitPrice().multiply(BigDecimal.valueOf(li.getQuantity()));
+            BigDecimal amount;
+            if (type == DiscountType.PERCENT_OFF) {
+                amount = lineTotal.multiply(rule.amount()).movePointLeft(2);
+            } else { // FIXED_AMOUNT_OFF: once, or once per completed "buy N" group; capped at the line
+                int buy = rule.buyQuantity() == null ? 0 : rule.buyQuantity();
+                if (buy > 0) {
+                    int groups = li.getQuantity() / buy;
+                    if (groups == 0) continue;
+                    amount = rule.amount().multiply(BigDecimal.valueOf(groups));
+                } else {
+                    amount = rule.amount();
+                }
+                if (amount.compareTo(lineTotal) > 0) amount = lineTotal;
+            }
+            amount = amount.setScale(2, RoundingMode.HALF_UP);
+            if (amount.signum() <= 0) continue;
+            out.add(new UpcDiscountLine(li, type, rule.description(), amount));
+        }
+        return out;
+    }
+
+    /**
+     * Real lines with an inert preview row inserted after each line that earned one: a
+     * {@link FreeLineItem} for a buy-N-get-M promo, or a {@link DiscountLineItem} for a per-UPC
+     * percent/amount discount. A line earns at most one (one rule per UPC); a promo wins if both.
+     */
+    private List<LineItem> interleavePreviewRows(Transaction tx, List<PromoLine> promos,
+                                                 List<UpcDiscountLine> upcDiscounts) {
+        Map<LineItem, LineItem> extraByLine = new HashMap<>();
+        for (PromoLine p : promos) {
+            extraByLine.put(p.line(), new FreeLineItem(p.line().getItem(), p.freeUnits(), p.amount()));
+        }
+        for (UpcDiscountLine d : upcDiscounts) {
+            extraByLine.putIfAbsent(d.line(),
+                    new DiscountLineItem(d.line().getItem(), d.type(), d.label(), d.amount()));
+        }
+        List<LineItem> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            out.add(li);
+            LineItem extra = extraByLine.get(li);
+            if (extra != null) out.add(extra);
+        }
+        return out;
+    }
+
+    /**
+     * Post-Total display rows: real lines plus an inert preview row after each line an engine promo
+     * discount hit — a {@link FreeLineItem} for a PROMO (buy-N-get-M) discount, or a
+     * {@link DiscountLineItem} for a per-UPC percent/amount discount — using the engine's
+     * authoritative applied amount. The target UPC comes from the promo rules cached at startup;
+     * transaction-level eligibility discounts have no cached promo rule and so get no per-line row.
+     */
+    private List<LineItem> displayRowsFromEngine(Transaction tx) {
+        List<LineItem> out = new ArrayList<>();
+        for (LineItem li : tx.getLineItems()) {
+            out.add(li);
+            if (cloudApi == null || li.isVoided()) continue;
+            for (Discount d : tx.getDiscounts()) {
+                var ruleOpt = cloudApi.promoRuleByCode(d.getDiscountId());
+                if (ruleOpt.isEmpty()) continue;
+                CloudApiComponent.PromoRule rule = ruleOpt.get();
+                if (!li.getItem().getUpc().equals(rule.targetUpc())) continue;
+                DiscountType type = rule.discountType();
+                if (type == DiscountType.PROMO) {
+                    int free = CloudApiComponent.freeUnitsFor(rule, li.getQuantity());
+                    out.add(new FreeLineItem(li.getItem(), free, d.getAppliedAmount()));
+                } else if (type != null) {
+                    out.add(new DiscountLineItem(li.getItem(), type, d.getDescription(),
+                            d.getAppliedAmount()));
+                }
+                break;
+            }
+        }
+        return out;
+    }
+
 }

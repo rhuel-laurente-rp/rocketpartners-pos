@@ -335,15 +335,39 @@ class ScannerViewControllerTest {
     }
 
     @Test
-    void tenderCashPressed_leavesCaptureRunning_burstStillDispatches() {
+    void tenderCashPressed_suspendsCapture_burstDoesNotDispatch() {
         ensureInProgress();
 
+        // TENDER_CASH_PRESSED opens the cash modal — capture suspends so a scanner burst can't
+        // leak into it.
         pos.dispatchPosEvent(new PosEvent(PosEventType.TENDER_CASH_PRESSED));
-        assertThat(controller.isSuspended()).isFalse();
+        assertThat(controller.isSuspended()).isTrue();
 
         burst("049000053418", 5);
         typed('\n');
 
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
+    }
+
+    @Test
+    void transactionCompleted_suspendsCapture_thenReceiptDismissed_resumes() {
+        ensureInProgress();
+
+        // The receipt modal opens on TRANSACTION_COMPLETED → capture suspends; a burst fired
+        // while the receipt is up must not dispatch.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TRANSACTION_COMPLETED));
+        assertThat(controller.isSuspended()).isTrue();
+
+        burst("049000053418", 5);
+        typed('\n');
+        assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isZero();
+
+        // Dismissing the receipt resumes capture and starts a fresh sale — a burst now dispatches.
+        pos.dispatchPosEvent(new PosEvent(PosEventType.RECEIPT_DISMISSED));
+        assertThat(controller.isSuspended()).isFalse();
+
+        burst("049000053418", 5);
+        typed('\n');
         assertThat(notifications.countOf(PosEventType.ITEM_SCANNED)).isEqualTo(1);
     }
 

@@ -43,6 +43,7 @@ classDiagram
         +voidBasket()
         +total()
         +applyDiscount(Discount)
+        +payNextDollar() «ceils grandTotal, tenders as cash»
         +tender(TenderType, BigDecimal) «cards only»
         +tender(TenderType, BigDecimal, BigDecimal) «cash only»
     }
@@ -96,13 +97,14 @@ stateDiagram-v2
     IN_PROGRESS --> VOIDED: voidBasket
     IN_PROGRESS --> TOTALED: total()
     TOTALED --> TOTALED: applyDiscount
+    TOTALED --> IN_PROGRESS: resumeEditing
     TOTALED --> VOIDED: voidBasket
     TOTALED --> PAID: tender(...)
     PAID --> [*]
     VOIDED --> [*]
 ```
 
-`addLineItem`, `voidLine`, `updateLineItemQuantity` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `applyDiscount` are legal only in `TOTALED`. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
+`addLineItem`, `voidLine`, `updateLineItemQuantity` are illegal in `TOTALED`, `PAID`, and `VOIDED`. `total()` is illegal outside `IN_PROGRESS`. `tender` / `applyDiscount` are legal only in `TOTALED`. `resumeEditing()` is legal only in `TOTALED` and returns to `IN_PROGRESS` (the standard-POS recall/edit — it clears engine-applied discounts, which recompute at the next `total()`); it does not weaken the freeze, since mutation still throws until the cashier resumes. `voidBasket` is legal in `IN_PROGRESS` and `TOTALED`. `PAID` and `VOIDED` are terminal. The check lives on `Transaction` (or `TransactionService`), never solely on the button.
 
 ## Money — one rounding site
 

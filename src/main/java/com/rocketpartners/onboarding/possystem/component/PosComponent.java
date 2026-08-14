@@ -47,6 +47,15 @@ public class PosComponent implements IPosEventDispatcher, IPosEventListener, IPo
     @Getter
     private final int laneNumber;
 
+    /**
+     * The operator signed in at {@link com.rocketpartners.onboarding.possystem.display.LoginView}
+     * before the POS booted, carried into the session so journal entries can be attributed. May be
+     * {@code null} when the POS is constructed without a login step (chiefly tests). Not a session
+     * object — just the one id, passed at construction, per the Phase-1 "do the minimum" rule.
+     */
+    @Getter
+    private final String operatorId;
+
     private final boolean debug;
 
     private final LinkedHashSet<IPosEventListener> listeners = new LinkedHashSet<>();
@@ -65,11 +74,26 @@ public class PosComponent implements IPosEventDispatcher, IPosEventListener, IPo
      */
     public PosComponent(ItemRepository itemRepository, TaxService taxService,
                         String storeName, int laneNumber, boolean debug) {
+        this(itemRepository, taxService, storeName, laneNumber, debug, null);
+    }
+
+    /**
+     * @param itemRepository pricebook lookup; must not be {@code null}
+     * @param taxService     supplies the flat tax rate; must not be {@code null}
+     * @param storeName      store label for receipts/journal; must not be {@code null}
+     * @param laneNumber     terminal id; any int
+     * @param debug          when {@code true}, registers an internal listener that traces every
+     *                       dispatched event to {@code System.err}
+     * @param operatorId     operator signed in before boot; may be {@code null}
+     */
+    public PosComponent(ItemRepository itemRepository, TaxService taxService,
+                        String storeName, int laneNumber, boolean debug, String operatorId) {
         if (itemRepository == null) throw new IllegalArgumentException("itemRepository must not be null");
         if (taxService == null) throw new IllegalArgumentException("taxService must not be null");
         if (storeName == null) throw new IllegalArgumentException("storeName must not be null");
         this.storeName = storeName;
         this.laneNumber = laneNumber;
+        this.operatorId = operatorId;
         this.debug = debug;
         this.transactionService = new TransactionService(itemRepository, taxService, this);
         if (debug) {

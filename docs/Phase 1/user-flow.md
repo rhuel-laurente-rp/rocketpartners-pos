@@ -2,7 +2,7 @@
 
 The cashier drives one Transaction from empty basket to Receipt. Pressing **Total** is the hinge: before Total the basket is mutable; after Total it is finalized and only tender actions plus Void Basket are legal. `Transaction` and `TransactionService` enforce this — disabling buttons in the UI is a nicety, not the guarantee.
 
-The scanner has both a burst-detection path (a real scanner types keystrokes application-wide) and a manual submit path (typing digits into the scan field and hitting Enter). That distinction is below the level a cashier-facing flow diagram should carry — the states below say "scan UPC" and mean both. See [event-flow.md](event-flow.md) for the mechanics.
+The scanner has both a burst-detection path (a real scanner types keystrokes application-wide) and a manual submit path (typing digits into the scan field and hitting Enter). A third fallback — the scan bar's keypad button — opens a touch-keypad dialog (`ManualBarcodeEntryView`) for hand-keying a UPC when a barcode won't scan; its confirm re-uses the same submit path. All three distinctions are below the level a cashier-facing flow diagram should carry — the states below say "scan UPC" and mean all of them. See [event-flow.md](event-flow.md) for the mechanics.
 
 ## States and legal actions
 
@@ -18,6 +18,7 @@ stateDiagram-v2
     IN_PROGRESS --> TOTALED: Total
 
     TOTALED --> TOTALED: applyDiscount
+    TOTALED --> IN_PROGRESS: Add Item (resume/edit)
     TOTALED --> TOTALED: Void Basket → Keep basket
     TOTALED --> VOIDED: Void Basket → Void basket
     TOTALED --> PAID: Pay Cash (Exact or Next Dollar) / Pay Debit / Pay Credit

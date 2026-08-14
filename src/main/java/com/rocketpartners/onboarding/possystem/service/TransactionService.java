@@ -250,7 +250,7 @@ public class TransactionService {
             IllegalArgumentException ex = new IllegalArgumentException(
                     "quantity " + newQuantity + " exceeds max " + maxLineQuantity);
             dispatchError("ABOVE_MAX_QUANTITY", ex.getMessage(), ex,
-                    "operation", "updateLineItemQuantity");
+                    "operation", "updateLineItemQuantity", "max", maxLineQuantity);
             throw ex;
         }
         // Unchanged quantity on a non-voided line: no-op, no event, no recompute.
@@ -307,6 +307,26 @@ public class TransactionService {
             currentTransaction.total();
         } catch (IllegalStateException e) {
             dispatchError("TOTALED_INVARIANT", e.getMessage(), e, "operation", "total");
+            throw e;
+        }
+        return currentTransaction;
+    }
+
+    /**
+     * Re-opens the current (finalized) transaction for editing — {@code TOTALED} back to
+     * {@code IN_PROGRESS} — so more lines can be rung up after Total. Engine-applied discounts are
+     * cleared and recompute on the next {@link #total()}. Rejected (as {@code ILLEGAL_STATE}) if no
+     * transaction is open or it is not in {@code TOTALED}.
+     *
+     * @return the re-opened transaction
+     * @throws IllegalStateException if there is no current transaction, or it is not TOTALED
+     */
+    public Transaction resumeEditing() {
+        requireCurrentTransaction("resumeEditing");
+        try {
+            currentTransaction.resumeEditing();
+        } catch (IllegalStateException e) {
+            dispatchError("ILLEGAL_STATE", e.getMessage(), e, "operation", "resumeEditing");
             throw e;
         }
         return currentTransaction;
@@ -427,6 +447,16 @@ public class TransactionService {
         return ReceiptFormatter.format(transaction, storeName, laneNumber);
     }
 
+    /**
+     * As {@link #generateReceipt(Transaction, String, Integer)}, but also stamps the signed-in
+     * cashier onto the header. The cashier code originates at the login screen and is carried on
+     * {@code PosComponent}.
+     */
+    public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber,
+                                  String cashier) {
+        return ReceiptFormatter.format(transaction, storeName, laneNumber, cashier);
+    }
+
     private void requireCurrentTransaction(String operation) {
         if (currentTransaction == null) {
             IllegalStateException ex = new IllegalStateException(
@@ -450,6 +480,17 @@ public class TransactionService {
         props.put("message", message);
         if (cause != null) props.put("cause", cause);
         if (extraKey != null) props.put(extraKey, extraValue);
+        eventDispatcher.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
+    }
+
+    private void dispatchError(String code, String message, Throwable cause,
+                               String key1, Object val1, String key2, Object val2) {
+        Map<String, Object> props = new HashMap<>();
+        props.put("code", code);
+        props.put("message", message);
+        if (cause != null) props.put("cause", cause);
+        if (key1 != null) props.put(key1, val1);
+        if (key2 != null) props.put(key2, val2);
         eventDispatcher.dispatchPosEvent(new PosEvent(PosEventType.ERROR, props));
     }
 }
