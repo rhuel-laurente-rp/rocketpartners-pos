@@ -77,7 +77,12 @@ class QuickAddPanel extends JPanel {
         NAME_ASC("Name (A–Z)", Comparator.comparing(QuickAddPanel::label, String.CASE_INSENSITIVE_ORDER)),
         NAME_DESC("Name (Z–A)", NAME_ASC_COMPARATOR().reversed()),
         PRICE_ASC("Price (Low–High)", Comparator.comparing(Item::getUnitPrice)),
-        PRICE_DESC("Price (High–Low)", Comparator.<Item, java.math.BigDecimal>comparing(Item::getUnitPrice).reversed());
+        PRICE_DESC("Price (High–Low)", Comparator.<Item, java.math.BigDecimal>comparing(Item::getUnitPrice).reversed()),
+        // "Discounts First" is the one ordering the enum can't express on its own: it needs the
+        // live promoMarks map (keyed by UPC), which is instance state. The stored comparator here
+        // is only the within-group tiebreaker (name A–Z); the has-a-discount grouping is applied in
+        // effectiveComparator().
+        DISCOUNT_FIRST("Discounts First", NAME_ASC_COMPARATOR());
 
         private final String label;
         private final Comparator<Item> comparator;
@@ -446,8 +451,25 @@ class QuickAddPanel extends JPanel {
         for (Item item : allItems) {
             if (q.isEmpty() || matches(item, q)) out.add(item);
         }
-        out.sort(sort.comparator);
+        out.sort(effectiveComparator());
         return out;
+    }
+
+    /**
+     * The comparator for the current sort. Name and price read straight off the {@link Item}, so
+     * those use the enum's static comparator. "Discounts First" is the one ordering that needs live
+     * state — the {@link #promoMarks} map keyed by UPC — so it's assembled here: promo-marked items
+     * lead, everything else follows, alphabetical within each group (the enum's stored comparator is
+     * that tiebreaker). When the discount engine is unreachable, or its fetch hasn't landed yet, the
+     * map is empty and no item is marked, so this collapses to a plain name sort — the grid never
+     * reorders on missing discount data.
+     */
+    private Comparator<Item> effectiveComparator() {
+        if (sort == SortMode.DISCOUNT_FIRST) {
+            return Comparator.comparingInt((Item it) -> promoMarks.containsKey(it.getUpc()) ? 0 : 1)
+                    .thenComparing(sort.comparator);
+        }
+        return sort.comparator;
     }
 
     private static boolean matches(Item item, String lowerQuery) {

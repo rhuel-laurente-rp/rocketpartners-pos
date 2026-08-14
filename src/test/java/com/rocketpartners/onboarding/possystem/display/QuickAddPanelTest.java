@@ -177,6 +177,31 @@ class QuickAddPanelTest {
         assertThat(labels(p)).containsExactly("Cola Zero", "Cola", "Water", "Apple");
     }
 
+    @Test
+    void sort_discountsFirst_groupsPromoMarkedAheadOfUnmarked_thenNameAscWithinEachGroup() {
+        // Cola + Water carry a deal; Apple + Cola Zero do not. The two marked items lead (name A–Z
+        // within the group), the two unmarked follow (name A–Z within the group).
+        QuickAddPanel p = panelOf(SORTABLE);
+        p.setCapacityForTest(4, 50);
+        p.setPromoMarks(Map.of(
+                "1", DiscountType.PROMO,          // Cola
+                "4", DiscountType.PERCENT_OFF));  // Water
+        p.setSortForTest(QuickAddPanel.SortMode.DISCOUNT_FIRST);
+
+        assertThat(labels(p)).containsExactly("Cola", "Water", "Apple", "Cola Zero");
+    }
+
+    @Test
+    void sort_discountsFirst_withNoMarks_fallsBackToPlainNameOrder() {
+        // Engine unreachable / fetch not landed: no item is marked, so the ordering must collapse to
+        // a plain name A–Z sort rather than reorder arbitrarily.
+        QuickAddPanel p = panelOf(SORTABLE);
+        p.setCapacityForTest(4, 50);
+        p.setSortForTest(QuickAddPanel.SortMode.DISCOUNT_FIRST);
+
+        assertThat(labels(p)).containsExactly("Apple", "Cola", "Cola Zero", "Water");
+    }
+
     private static List<String> labels(QuickAddPanel p) {
         List<String> out = new ArrayList<>();
         for (Item i : p.filteredSortedForTest()) out.add(i.getDisplayLabel());
