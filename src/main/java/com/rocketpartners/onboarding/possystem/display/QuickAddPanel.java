@@ -61,8 +61,15 @@ class QuickAddPanel extends JPanel {
 
     /** Target minimum tile width; the grid fits as many whole columns as this allows. */
     private static final int TILE_MIN_WIDTH = 165;
-    /** Tile face height (the shadow inset is added on top by {@link QuickAddTile}). */
-    static final int TILE_HEIGHT = 92;
+    /**
+     * Tile face height (the shadow inset is added on top by {@link QuickAddTile}). Sized so the
+     * fixed grid area fits <strong>four</strong> rows of tall, easy-to-hit tiles rather than five —
+     * a bigger fingertip target. Rows are derived in {@link #recomputeCapacity()} from the grid
+     * height over the row pitch ({@code TILE_HEIGHT + SHADOW_INSET + TILE_GAP}); at the register's
+     * fixed grid height this value lands squarely in the four-row band. Width is unchanged
+     * ({@link #TILE_MIN_WIDTH}) — only the height grew.
+     */
+    static final int TILE_HEIGHT = 116;
     private static final int TILE_GAP = PosTheme.BUTTON_GAP;
 
     /** Sort orderings offered in the header combo. */
