@@ -7,12 +7,10 @@ import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 import org.junit.jupiter.api.Test;
 
-import javax.swing.JRadioButton;
 import java.awt.GraphicsEnvironment;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -33,11 +31,11 @@ class DiscountViewTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         DiscountView view = new DiscountView(null, recorder);
         try {
-            view.openFor(List.of(SENIOR, VETERAN), List.of());
+            view.prepareForTest(List.of(SENIOR, VETERAN), List.of());
             assertThat(view.getConfirmButtonForTest().isEnabled()).isFalse();
 
             // Selecting a rule alone is not enough — ID must be verified first.
-            view.getRuleButtonsForTest().get("SENIOR_20").doClick();
+            view.clickRuleForTest("SENIOR_20");
             assertThat(view.getConfirmButtonForTest().isEnabled()).isFalse();
 
             view.getIdVerifiedForTest().doClick();
@@ -56,12 +54,11 @@ class DiscountViewTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         DiscountView view = new DiscountView(null, recorder);
         try {
-            view.openFor(List.of(SENIOR, VETERAN), List.of());
-            Map<String, JRadioButton> buttons = view.getRuleButtonsForTest();
-            buttons.get("SENIOR_20").doClick();
-            buttons.get("VETERAN_15").doClick();
-            assertThat(buttons.get("SENIOR_20").isSelected()).isFalse();
-            assertThat(buttons.get("VETERAN_15").isSelected()).isTrue();
+            view.prepareForTest(List.of(SENIOR, VETERAN), List.of());
+            view.clickRuleForTest("SENIOR_20");
+            view.clickRuleForTest("VETERAN_15");
+            assertThat(view.isRuleSelectedForTest("SENIOR_20")).isFalse();
+            assertThat(view.isRuleSelectedForTest("VETERAN_15")).isTrue();
         } finally {
             view.dispose();
         }
@@ -72,8 +69,8 @@ class DiscountViewTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         DiscountView view = new DiscountView(null, recorder);
         try {
-            view.openFor(List.of(SENIOR, VETERAN), List.of());
-            view.getRuleButtonsForTest().get("SENIOR_20").doClick();
+            view.prepareForTest(List.of(SENIOR, VETERAN), List.of());
+            view.clickRuleForTest("SENIOR_20");
             view.getIdVerifiedForTest().doClick();
             dispatched.clear();
             view.getConfirmButtonForTest().doClick();
@@ -89,12 +86,29 @@ class DiscountViewTest {
     }
 
     @Test
+    void idVerifiedLabel_ridesOnTheCheckbox_soTappingTheTextTogglesIt() {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        DiscountView view = new DiscountView(null, recorder);
+        try {
+            javax.swing.JCheckBox box = view.getIdVerifiedForTest();
+            // The label is the checkbox's own text (not a separate JLabel beside it), so the whole
+            // control — glyph and label — is one hit area: tapping the text toggles the same box.
+            assertThat(box.getText()).isEqualTo("ID Verified");
+            assertThat(box.isSelected()).isFalse();
+            box.doClick();
+            assertThat(box.isSelected()).isTrue();
+        } finally {
+            view.dispose();
+        }
+    }
+
+    @Test
     void emptyRules_confirmStaysDisabled() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         DiscountView view = new DiscountView(null, recorder);
         try {
-            view.openFor(List.of(), List.of());
-            assertThat(view.getRuleButtonsForTest()).isEmpty();
+            view.prepareForTest(List.of(), List.of());
+            assertThat(view.ruleCodesForTest()).isEmpty();
             // Even checking ID can't enable confirm with nothing to apply.
             view.getIdVerifiedForTest().doClick();
             assertThat(view.getConfirmButtonForTest().isEnabled()).isFalse();
