@@ -60,6 +60,15 @@ springBoot {
     mainClass = 'com.rocketpartners.onboarding.posdiscountengine.Application'
 }
 
+// The Spring Boot plugin otherwise leaves two artifacts in build/libs: the executable
+// bootJar and a '-plain.jar' from the standard 'jar' task. A Dockerfile that does
+// `COPY build/libs/*.jar app.jar` would match both and fail. We only ship the fat
+// bootJar, so disable the plain jar. Keep this even though Phase 3's Dockerfile isn't
+// written yet — it makes `./gradlew bootJar` produce exactly one jar.
+tasks.named('jar') {
+    enabled = false
+}
+
 tasks.named('bootJar') {
     mainClass = 'com.rocketpartners.onboarding.posdiscountengine.Application'
 }

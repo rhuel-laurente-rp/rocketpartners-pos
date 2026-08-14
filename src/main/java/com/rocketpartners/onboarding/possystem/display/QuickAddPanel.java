@@ -1,5 +1,6 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.commons.model.DiscountType;
 import com.rocketpartners.onboarding.commons.model.Item;
 
 import javax.swing.AbstractAction;
@@ -19,6 +20,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
@@ -33,9 +35,12 @@ import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -56,8 +61,15 @@ class QuickAddPanel extends JPanel {
 
     /** Target minimum tile width; the grid fits as many whole columns as this allows. */
     private static final int TILE_MIN_WIDTH = 165;
-    /** Tile face height (the shadow inset is added on top by {@link QuickAddTile}). */
-    static final int TILE_HEIGHT = 92;
+    /**
+     * Tile face height (the shadow inset is added on top by {@link QuickAddTile}). Sized so the
+     * fixed grid area fits <strong>four</strong> rows of tall, easy-to-hit tiles rather than five —
+     * a bigger fingertip target. Rows are derived in {@link #recomputeCapacity()} from the grid
+     * height over the row pitch ({@code TILE_HEIGHT + SHADOW_INSET + TILE_GAP}); at the register's
+     * fixed grid height this value lands squarely in the four-row band. Width is unchanged
+     * ({@link #TILE_MIN_WIDTH}) — only the height grew.
+     */
+    static final int TILE_HEIGHT = 116;
     private static final int TILE_GAP = PosTheme.BUTTON_GAP;
 
     /** Sort orderings offered in the header combo. */
@@ -113,6 +125,9 @@ class QuickAddPanel extends JPanel {
     private final PagePill pageBox = new PagePill();
     private final JLabel pagesIndicator = new JLabel("1 of 1 pages", SwingConstants.RIGHT);
 
+    /** Colour legend for the tile markers, shown just above the pager when any tile is marked. */
+    private final JPanel legendPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 14, 0));
+
     /** Minimum touch target for a pager control, in pixels. A glyph is not a target — each arrow
      *  needs a real hit area around it (the 44px accessibility touch minimum). */
     private static final int PAGER_TOUCH = 44;
@@ -124,6 +139,15 @@ class QuickAddPanel extends JPanel {
     private int capacity = 1;
     private int columns = 1;
     private boolean tilesEnabled = true;
+
+    /**
+     * UPC to the {@link DiscountType} of the promotional rule it carries — drives both the coloured
+     * top-edge accent on that item's tile and the colour legend above the pager. Sourced from the
+     * discount engine's cached promotional rules; empty until (and unless) that fetch lands. An empty
+     * map marks nothing and hides the legend — an unreachable engine simply leaves the grid unmarked,
+     * never blocks it.
+     */
+    private Map<String, DiscountType> promoMarks = Collections.emptyMap();
 
     QuickAddPanel(List<Item> items, Consumer<Item> tileHandler) {
         super(new BorderLayout(0, 10));
@@ -153,7 +177,15 @@ class QuickAddPanel extends JPanel {
         center.add(keyboardSlot, BorderLayout.SOUTH);
         add(center, BorderLayout.CENTER);
 
-        add(buildFooter(), BorderLayout.SOUTH);
+        // South stack: the marker colour legend sits directly above the pagination footer. The
+        // legend is empty and hidden until promotional marks arrive (see rebuildLegend).
+        legendPanel.setOpaque(false);
+        legendPanel.setVisible(false);
+        JPanel south = new JPanel(new BorderLayout(0, 6));
+        south.setOpaque(false);
+        south.add(legendPanel, BorderLayout.NORTH);
+        south.add(buildFooter(), BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
 
         wireKeyboardTriggers();
 
@@ -321,6 +353,66 @@ class QuickAddPanel extends JPanel {
         for (Component c : grid.getComponents()) c.setEnabled(enabled);
     }
 
+    /**
+     * Sets the promotional marks: each UPC mapped to the {@link DiscountType} of the deal it carries.
+     * Colours that item's tile top-edge and populates the colour legend above the pager. Delivered
+     * once the discount engine's promotional-rules fetch completes; a re-render repaints the visible
+     * page. Passing an empty map (the engine was unreachable) clears every mark and hides the legend.
+     *
+     * @param marks UPC → discount type; must not be {@code null} (may be empty)
+     */
+    void setPromoMarks(Map<String, DiscountType> marks) {
+        if (marks == null) throw new IllegalArgumentException("marks must not be null");
+        this.promoMarks = new HashMap<>(marks);
+        rebuildLegend();
+        rebuild();
+    }
+
+    /**
+     * Rebuilds the colour legend from the discount types currently present in {@link #promoMarks},
+     * in a fixed order (percent, promo, amount). Hidden when nothing is marked so an engine-offline
+     * grid carries no stray legend.
+     */
+    private void rebuildLegend() {
+        legendPanel.removeAll();
+        boolean any = !promoMarks.isEmpty();
+        if (any) {
+            java.util.Set<DiscountType> present = new java.util.HashSet<>(promoMarks.values());
+            if (present.contains(DiscountType.PERCENT_OFF)) {
+                legendPanel.add(legendSwatch(PosTheme.PROMO_PERCENT, "Percent Off"));
+            }
+            if (present.contains(DiscountType.PROMO)) {
+                legendPanel.add(legendSwatch(PosTheme.PROMO, "Promo"));
+            }
+            if (present.contains(DiscountType.FIXED_AMOUNT_OFF)) {
+                legendPanel.add(legendSwatch(PosTheme.PROMO_FIXED, "Amount Off"));
+            }
+        }
+        legendPanel.setVisible(any);
+        legendPanel.revalidate();
+        legendPanel.repaint();
+    }
+
+    /** A legend entry: a small colour box beside its label. */
+    private static JComponent legendSwatch(Color color, String text) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        JPanel box = new JPanel();
+        box.setBackground(color);
+        box.setBorder(BorderFactory.createLineBorder(PosTheme.RULE));
+        Dimension d = new Dimension(14, 14);
+        box.setPreferredSize(d);
+        box.setMinimumSize(d);
+        box.setMaximumSize(d);
+        JLabel label = new JLabel(text);
+        label.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
+        label.setForeground(PosTheme.MUTED);
+        row.add(box);
+        row.add(label);
+        return row;
+    }
+
+
     // ---- Paging ------------------------------------------------------------
 
     private void goToPage(int target) {
@@ -390,7 +482,7 @@ class QuickAddPanel extends JPanel {
         grid.setLayout(new GridLayout(rows, columns, TILE_GAP, TILE_GAP));
         for (Item item : pageItems) {
             QuickAddTile tile = new QuickAddTile(item.getDisplayLabel().trim(),
-                    PosTheme.money(item.getUnitPrice()));
+                    PosTheme.money(item.getUnitPrice()), promoMarks.get(item.getUpc()));
             tile.setEnabled(tilesEnabled);
             tile.addActionListener(e -> {
                 // Selecting a tile dismisses the keyboard — the cashier found the item.
@@ -455,6 +547,28 @@ class QuickAddPanel extends JPanel {
     List<Item> currentPageItemsForTest() { return currentPageItems(); }
     List<Item> filteredSortedForTest() { return filteredSorted(); }
     int tileCountForTest() { return grid.getComponentCount(); }
+
+    /** For tests: whether the tile at {@code index} on the current page is marked as promotional. */
+    boolean isTilePromoForTest(int index) {
+        Component c = grid.getComponent(index);
+        return c instanceof QuickAddTile tile && tile.isPromo();
+    }
+
+    /** For tests: the discount type the tile at {@code index} is marked with, or {@code null}. */
+    DiscountType tileMarkTypeForTest(int index) {
+        Component c = grid.getComponent(index);
+        return c instanceof QuickAddTile tile ? tile.markType() : null;
+    }
+
+    /** For tests: whether the colour legend is visible (shown only when tiles are marked). */
+    boolean legendVisibleForTest() {
+        return legendPanel.isVisible();
+    }
+
+    /** For tests: the number of entries in the colour legend. */
+    int legendEntryCountForTest() {
+        return legendPanel.getComponentCount();
+    }
 
     /** For tests: force a deterministic tiles-per-page without a real display, then rebuild. */
     void setCapacityForTest(int columns, int capacity) {
@@ -529,17 +643,32 @@ class QuickAddPanel extends JPanel {
      */
     private static final class QuickAddTile extends PosButton {
         private static final int PAD = 10;
+        /** Height of the promotional accent stripe along the tile's top edge. */
+        private static final int PROMO_EDGE_HEIGHT = 5;
         private static final Font DESC_FONT = PosTheme.base(Font.PLAIN, PosTheme.BODY);
         private static final Font PRICE_FONT = PosTheme.base(Font.BOLD, PosTheme.BUTTON);
 
         private final String description;
         private final String price;
+        /** The kind of deal this item's UPC carries, or {@code null} if none. Drives the edge colour. */
+        private final DiscountType mark;
 
-        QuickAddTile(String description, String price) {
+        QuickAddTile(String description, String price, DiscountType mark) {
             super("", PosTheme.SURFACE, PosTheme.INK, PosTheme.base(Font.PLAIN, PosTheme.BODY));
             this.description = description;
             this.price = price;
+            this.mark = mark;
             setPreferredSize(new Dimension(10, TILE_HEIGHT + SHADOW_INSET));
+        }
+
+        /** For tests: whether this tile is marked as carrying a promotion. */
+        boolean isPromo() {
+            return mark != null;
+        }
+
+        /** For tests: the discount type this tile is marked with, or {@code null}. */
+        DiscountType markType() {
+            return mark;
         }
 
         @Override
@@ -555,6 +684,21 @@ class QuickAddPanel extends JPanel {
             int sink = pressed ? PRESSED_SINK : 0;
             int height = getHeight() - SHADOW_INSET;
             int maxWidth = getWidth() - PAD * 2;
+
+            // Promotional marker: a coloured stripe along the top edge, its hue keyed to the deal
+            // type (percent / promo / amount) and matching the legend swatch below the grid. Clipped
+            // to the tile's rounded face the same way PosButton clips its bottom lip. The fill stays
+            // white (green would read as tender, a saturated fill would wreck the text contrast) —
+            // the edge just catches the eye while scanning the grid. Painted only on a live tile so a
+            // disabled tile dims uniformly. No allocation: the colours are shared PosTheme tokens.
+            if (mark != null && on) {
+                int arc = PosTheme.BUTTON_CORNER_RADIUS;
+                java.awt.Shape prevClip = g2.getClip();
+                g2.clipRect(0, 0, getWidth(), PROMO_EDGE_HEIGHT);
+                g2.setColor(PosTheme.promoAccent(mark));
+                g2.fillRoundRect(0, 0, getWidth(), height, arc, arc);
+                g2.setClip(prevClip);
+            }
 
             g2.setFont(DESC_FONT);
             FontMetrics dfm = g2.getFontMetrics();

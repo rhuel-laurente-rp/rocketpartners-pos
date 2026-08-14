@@ -20,7 +20,14 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class LineItemDto {
 
-    /** Barcode of the product. */
+    /**
+     * The product's <strong>pricebook key</strong> — the identifier the POS looked this item up
+     * under — not a raw scanned barcode. On the POS, a scan passes through a normalisation ladder
+     * (prefix stripping, check-digit handling, zero-padding variants) before a line item exists, so
+     * by the time a {@code LineItemDto} is built the value here is the resolved pricebook key. A
+     * discount rule whose {@code targetValue} is, say, a zero-padded UPC would therefore never match
+     * a shorter pricebook key: rule {@code targetValue}s must be expressed as pricebook keys too.
+     */
     private String upc;
 
     /** Human-readable description (helpful for engine-side rule diagnostics). */

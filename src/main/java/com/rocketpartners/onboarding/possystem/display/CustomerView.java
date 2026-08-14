@@ -40,11 +40,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * The customer-facing basket screen: a dumb Swing renderer laid out as a two-column proportional
@@ -160,12 +156,18 @@ public class CustomerView extends JFrame {
     // stays "Change Quantity".
     private final PosButton changeQtyButton = PosButtons.secondary("Change Qty");
     private final PosButton voidLineButton = PosButtons.secondary("Void Line");
-    // Discount lives in the actions row but is disabled: applying a discount mid-transaction is a
-    // domain change (see PosEventType#DISCOUNT_PRESSED) scheduled for feature/in-progress-discounts.
-    // The button and its listener are wired so the slot is real; it never fires while disabled.
+    // Discount lives in the actions row and opens the eligibility-discount dialog. Enabled while
+    // the transaction accepts basket input (IN_PROGRESS); disabled at TOTALED alongside the other
+    // basket-mutation actions, since eligibility selection is an IN_PROGRESS concern.
     private final PosButton discountButton = PosButtons.secondary("Discount");
     private final PosButton voidBasketButton = PosButtons.danger("Void Basket");
     private final PosButton totalButton = PosButtons.primary("Total");
+
+    // The standard-POS "recall/edit" control, sitting in the header beside the AWAITING PAYMENT
+    // pill. Visible only while the transaction is TOTALED; pressing it re-opens the order
+    // (TOTALED → IN_PROGRESS) so more items can be rung up. Compact so the header strip keeps its
+    // height. Dispatches RESUME_EDITING_PRESSED; CustomerViewController performs the transition.
+    private final PosButton resumeButton = PosButtons.secondary("Add Item");
 
     private final PosButton payCashButton = PosButtons.tender("Pay Cash", PosTheme.GO);
     private final PosButton payDebitButton = PosButtons.tender("Pay Debit", PosTheme.CARD_DEBIT);
@@ -190,6 +192,13 @@ public class CustomerView extends JFrame {
 
     /** Sum of non-voided line-item quantities from the last render. Used to gate Void basket. */
     private int lastNonVoidedQuantitySum;
+
+    /**
+     * True between Total and the discount engine's reply — the window where tender is deliberately
+     * held so the cashier can't pay against a total that's about to change. Drives the header pill
+     * ("Calculating Discounts") so the pause reads as work in progress rather than a freeze.
+     */
+    private boolean calculatingDiscounts;
 
     /** Mount point for the {@link ScannerView} at the top of the Basket column. */
     private final JPanel basketNorthSlot = new JPanel(new BorderLayout());
@@ -254,6 +263,7 @@ public class CustomerView extends JFrame {
         setContentPane(root);
 
         refreshTotalButton();
+        refreshDiscountButton();
         refreshStatusPill();
         setLocationRelativeTo(null);
     }
@@ -285,7 +295,8 @@ public class CustomerView extends JFrame {
         boolean flashIsBump = false;
         for (int i = 0; i < lines.size(); i++) {
             LineItem li = lines.get(i);
-            if (li.isVoided()) continue;
+            // Free rows are display-only and rebuilt every render — never flash them.
+            if (li.isVoided() || li instanceof PreviewRow) continue;
             Integer prev = previousQuantities.get(li);
             if (prev == null) {
                 flashRow = i;
@@ -315,20 +326,24 @@ public class CustomerView extends JFrame {
                 basketList.setSelectedIndex(restored);
                 basketList.ensureIndexIsVisible(restored);
             }
+            // Never leave the selection resting on an inert free row (it follows its product line,
+            // so a "select the newest row" restore would otherwise land on it).
+            nudgeSelectionOffFreeRow();
         }
 
-        // Density derives strictly from item count. Voided lines still occupy screen space, so
-        // they count — the cashier still has to scroll past them.
-        BasketCellRenderer.Density target = BasketCellRenderer.densityFor(lines.size());
+        // Density derives from real line count. Voided lines still occupy screen space so they
+        // count; free rows are display sugar and don't drive the density switch.
+        BasketCellRenderer.Density target = BasketCellRenderer.densityFor(realLineCount(lines));
         if (target != basketRenderer.getDensity()) {
             animateDensityTransition(target);
         }
 
         // Snapshot the non-voided quantity sum first — the vertical summary shows the item count
-        // beside the Subtotal label, and it must match the value stored on this render.
+        // beside the Subtotal label, and it must match the value stored on this render. Free rows
+        // are not real merchandise, so they don't count.
         int qtySum = 0;
         for (LineItem li : lines) {
-            if (!li.isVoided()) qtySum += li.getQuantity();
+            if (!li.isVoided() && !(li instanceof PreviewRow)) qtySum += li.getQuantity();
         }
         lastNonVoidedQuantitySum = qtySum;
 
@@ -345,12 +360,15 @@ public class CustomerView extends JFrame {
         // increase, not a new arrival.
         previousQuantities.clear();
         for (LineItem li : lines) {
+            if (li instanceof PreviewRow) continue; // rebuilt each render; not tracked for flash
             previousQuantities.put(li, li.getQuantity());
         }
 
         refreshSelectionDependentButtons();
         refreshVoidBasketButton();
         refreshTotalButton();
+        refreshDiscountButton();
+        refreshResumeButton();
     }
 
     /**
@@ -375,7 +393,29 @@ public class CustomerView extends JFrame {
         if (quickAddPanel != null) quickAddPanel.setTilesEnabled(enabled);
         refreshTotalButton();
         refreshSelectionDependentButtons();
+        refreshDiscountButton();
+        refreshResumeButton();
         refreshStatusPill();
+    }
+
+    /**
+     * Enables or disables the "Calculating Discounts" pending state — set while the discount engine
+     * is being called at Total. While true the header pill reads {@code CALCULATING DISCOUNTS}; the
+     * caller is responsible for holding tender disabled over the same window.
+     */
+    public void setCalculatingDiscounts(boolean calculating) {
+        this.calculatingDiscounts = calculating;
+        refreshStatusPill();
+    }
+
+    /**
+     * Discount is a basket-input-phase action, and only meaningful once there's something to
+     * discount. Two gates, same shape as {@link #refreshTotalButton()}: the phase gate
+     * ({@link #basketInputEnabled} is off outside IN_PROGRESS) and the content gate (nothing to
+     * discount when every line is voided or the basket is empty). Either closed disables it.
+     */
+    private void refreshDiscountButton() {
+        discountButton.setEnabled(basketInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     /**
@@ -393,6 +433,7 @@ public class CustomerView extends JFrame {
     public void setLifecycleInputEnabled(boolean enabled) {
         lifecycleInputEnabled = enabled;
         refreshVoidBasketButton();
+        refreshResumeButton();
         refreshStatusPill();
     }
 
@@ -413,9 +454,40 @@ public class CustomerView extends JFrame {
 
     private void refreshSelectionDependentButtons() {
         LineItem sel = basketList.getSelectedValue();
-        boolean actionable = basketInputEnabled && sel != null && !sel.isVoided();
+        // A free row is inert: not actionable, so Change Qty / Void Line stay dark for it.
+        boolean actionable = basketInputEnabled && sel != null
+                && !sel.isVoided() && !(sel instanceof PreviewRow);
         changeQtyButton.setEnabled(actionable);
         voidLineButton.setEnabled(actionable);
+    }
+
+    /** Real (non-free) line count, used for the density switch. */
+    private static int realLineCount(java.util.List<LineItem> lines) {
+        int count = 0;
+        for (LineItem li : lines) {
+            if (!(li instanceof PreviewRow)) count++;
+        }
+        return count;
+    }
+
+    /**
+     * If the current selection has landed on an inert {@link FreeLineItem}, move it to the nearest
+     * preceding real line (a free row always follows the product that earned it), or clear it if
+     * there is none. Keeps free rows unselectable without fighting the model rebuild.
+     */
+    private void nudgeSelectionOffFreeRow() {
+        int i = basketList.getSelectedIndex();
+        if (i < 0) return;
+        Object sel = basketModel.getElementAt(i);
+        if (!(sel instanceof PreviewRow)) return;
+        for (int j = i - 1; j >= 0; j--) {
+            if (!(basketModel.getElementAt(j) instanceof PreviewRow)) {
+                basketList.setSelectedIndex(j);
+                basketList.ensureIndexIsVisible(j);
+                return;
+            }
+        }
+        basketList.clearSelection();
     }
 
     /** Enables or disables the tender controls (Pay Cash / Debit / Credit). */
@@ -437,6 +509,14 @@ public class CustomerView extends JFrame {
      * phase directly.</p>
      */
     private void refreshStatusPill() {
+        if (calculatingDiscounts) {
+            // The gap between Total and tender: the engine round-trip. Say so, so the held tender
+            // buttons read as "working" rather than "frozen".
+            statusPill.setText("CALCULATING DISCOUNTS");
+            statusPill.setForeground(Color.WHITE);
+            statusPill.setBackground(PosTheme.LIVE);
+            return;
+        }
         boolean tenderOn = payCashButton.isEnabled();
         if (tenderOn) {
             statusPill.setText("AWAITING PAYMENT");
@@ -453,9 +533,14 @@ public class CustomerView extends JFrame {
         }
     }
 
-    /** @return the line item currently selected in the basket list, or {@code null} if none */
+    /**
+     * @return the line item currently selected in the basket list, or {@code null} if none. An
+     *         inert {@link FreeLineItem} never counts as a selection — Void Line and Change Qty
+     *         must treat it as "nothing selected".
+     */
     public LineItem getSelectedLineItem() {
-        return basketList.getSelectedValue();
+        LineItem sel = basketList.getSelectedValue();
+        return sel instanceof PreviewRow ? null : sel;
     }
 
     /** @return {@code true} if the Change Qty button is currently enabled */
@@ -478,16 +563,73 @@ public class CustomerView extends JFrame {
         return totalButton.isEnabled();
     }
 
-    /** For tests: whether the Discount button is enabled. It stays disabled until the
-     *  in-progress-discount feature lands (see {@link PosEventType#DISCOUNT_PRESSED}). */
+    /** For tests: whether the Discount button is enabled. Live IN_PROGRESS, dark at TOTALED. */
     boolean isDiscountEnabledForTest() {
         return discountButton.isEnabled();
+    }
+
+    /** For tests: the header status pill's current text. */
+    String getStatusPillTextForTest() {
+        return statusPill.getText();
+    }
+
+    /** For tests: the header "Add Item" (resume/recall) button. */
+    PosButton getResumeButtonForTest() {
+        return resumeButton;
+    }
+
+    /** For tests: whether the header resume control is currently visible (shown only at TOTALED). */
+    boolean isResumeVisibleForTest() {
+        return resumeButton.isVisible();
     }
 
     /** For tests: whether the three tender buttons (cash/debit/credit) are enabled. */
     boolean isTenderEnabledForTest() {
         return payCashButton.isEnabled() && payDebitButton.isEnabled()
                 && payCreditButton.isEnabled();
+    }
+
+    /**
+     * Marks the Quick Add tiles whose UPC carries a promotion, keyed by discount type so each tile's
+     * edge and the colour legend match. Forwarded to {@link QuickAddPanel}; delivered once the
+     * discount engine's promotional-rules fetch completes. An empty map (engine unreachable) marks
+     * nothing and hides the legend. No-op before the grid is built.
+     *
+     * @param marks UPC → discount type; must not be {@code null} (may be empty)
+     */
+    public void setPromoMarks(java.util.Map<String,
+            com.rocketpartners.onboarding.commons.model.DiscountType> marks) {
+        if (marks == null) throw new IllegalArgumentException("marks must not be null");
+        if (quickAddPanel != null) quickAddPanel.setPromoMarks(marks);
+    }
+
+    /**
+     * Sets the tax rate shown in the summary's Tax label, e.g. {@code 0.07} renders as
+     * {@code "Tax (7%)"}. Derived from the transaction so a configured rate is never contradicted
+     * by a hard-coded literal. The receipt applies the same treatment.
+     *
+     * @param rate the transaction's tax rate; must not be {@code null}
+     */
+    public void setTaxRate(BigDecimal rate) {
+        if (rate == null) throw new IllegalArgumentException("rate must not be null");
+        taxLabel.setText("Tax (" + percent(rate) + "%)");
+    }
+
+    /**
+     * Sets the count shown beside the Discount label — {@code "Discount (2)"} when two discounts
+     * are in play, bare {@code "Discount"} at zero. With the per-discount detail lines gone, this
+     * is the only on-screen hint that a lone discount total covers more than one thing, between
+     * Total and the receipt.
+     *
+     * @param count number of discounts applied or previewed; negative is treated as zero
+     */
+    public void setDiscountCount(int count) {
+        discountLabel.setText(count > 0 ? "Discount (" + count + ")" : "Discount");
+    }
+
+    /** Whole-number (or shortest-decimal) percentage of a rate: {@code 0.07 → "7"}, {@code 0.075 → "7.5"}. */
+    private static String percent(BigDecimal rate) {
+        return rate.multiply(BigDecimal.valueOf(100)).stripTrailingZeros().toPlainString();
     }
 
     /**
@@ -606,14 +748,38 @@ public class CustomerView extends JFrame {
         statusPill.setOpaque(true);
         statusPill.setBorder(BorderFactory.createEmptyBorder(5, 14, 5, 14));
 
+        // Resume control: compact so it doesn't balloon the header strip, hidden until TOTALED.
+        resumeButton.setFont(PosTheme.base(Font.BOLD, PosTheme.BODY));
+        resumeButton.setVisible(false);
+        resumeButton.addActionListener(e ->
+                dispatcher.dispatchPosEvent(new PosEvent(PosEventType.RESUME_EDITING_PRESSED)));
+        int resumeH = 34;
+        Dimension resumeSize = new Dimension(resumeButton.getPreferredSize().width, resumeH);
+        resumeButton.setPreferredSize(resumeSize);
+        resumeButton.setMinimumSize(resumeSize);
+        resumeButton.setMaximumSize(resumeSize);
+
         JPanel rightSide = new JPanel();
         rightSide.setOpaque(false);
         rightSide.setLayout(new BoxLayout(rightSide, BoxLayout.X_AXIS));
         rightSide.add(journalIndicator);
         rightSide.add(Box.createHorizontalStrut(12));
+        rightSide.add(resumeButton);
+        rightSide.add(Box.createHorizontalStrut(12));
         rightSide.add(statusPill);
         header.add(rightSide, BorderLayout.EAST);
+        refreshResumeButton();
         return header;
+    }
+
+    /**
+     * Shows the header "Add Item" control only while the transaction is TOTALED (basket input off,
+     * lifecycle still on, at least one line) — the window in which re-opening the order to add more
+     * items makes sense. Hidden in IN_PROGRESS (already editable) and in PAID/VOIDED (terminal).
+     */
+    private void refreshResumeButton() {
+        resumeButton.setVisible(
+                !basketInputEnabled && lifecycleInputEnabled && lastNonVoidedQuantitySum > 0);
     }
 
     /**
@@ -758,7 +924,12 @@ public class CustomerView extends JFrame {
         // the left column's bottom cell and the bottom-right actions card respectively. The list
         // now owns the full height of the basket card.
         basketList.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) refreshSelectionDependentButtons();
+            if (!e.getValueIsAdjusting()) {
+                // A click on an inert free row bounces to its product line (or clears) so the row
+                // can never appear highlighted or become the target of Void Line / Change Qty.
+                nudgeSelectionOffFreeRow();
+                refreshSelectionDependentButtons();
+            }
         });
         return PosTheme.card("Basket", body);
     }
@@ -818,6 +989,12 @@ public class CustomerView extends JFrame {
         return empty;
     }
 
+    /** The Summary card, retained so the snapshot harness can render it standalone. */
+    private JPanel summaryCard;
+
+    /** For the snapshot harness: the Summary card (tape only). */
+    JPanel getSummaryCardForTest() { return summaryCard; }
+
     /** Left column, bottom cell: the summary tape (Subtotal / Discount / Tax / TOTAL). */
     private JPanel buildSummaryCard() {
         summaryTape = buildSummaryTape();
@@ -826,8 +1003,13 @@ public class CustomerView extends JFrame {
         JPanel body = new JPanel(new BorderLayout());
         body.setBackground(PosTheme.SURFACE);
         body.setBorder(BorderFactory.createEmptyBorder(12, 16, 14, 16));
+        // The tape alone: Subtotal, the Discount total, Tax, and TOTAL. Per-discount detail lines
+        // were dropped — the receipt itemises every discount, and the summary has no room for both.
+        // The Discount label carries a count (see setDiscountCount) so the cashier at least knows
+        // how many discounts a lone "Discount (2)  -$11.37" total covers.
         body.add(summaryTape, BorderLayout.NORTH);
-        return PosTheme.card("Summary", body);
+        summaryCard = PosTheme.card("Summary", body);
+        return summaryCard;
     }
 
     /**
@@ -843,8 +1025,7 @@ public class CustomerView extends JFrame {
     private JPanel buildActionsCard() {
         changeQtyButton.addActionListener(e -> dispatchWithSelection(PosEventType.CHANGE_QTY_PRESSED));
         voidLineButton.addActionListener(e -> dispatchWithSelection(PosEventType.VOID_LINE_PRESSED));
-        // Discount is wired but disabled — enabling it requires the IN_PROGRESS-discount domain
-        // change tracked on feature/in-progress-discounts (see PosEventType#DISCOUNT_PRESSED).
+        // Discount opens the eligibility-discount dialog (owned by DiscountViewController).
         discountButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.DISCOUNT_PRESSED)));
         // Void basket is destructive and one tap away on a touchscreen. Dispatch the "pressed"
@@ -856,7 +1037,9 @@ public class CustomerView extends JFrame {
         totalButton.addActionListener(e ->
                 dispatcher.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED)));
         changeQtyButton.setEnabled(false);
-        discountButton.setEnabled(false);
+        // Discount enablement follows the basket-input phase; refreshDiscountButton() drives it
+        // (called from the constructor and setBasketInputEnabled). It starts enabled because the
+        // fresh transaction opened at startup is IN_PROGRESS.
 
         // Single horizontal row; GridLayout stretches every button to the full section height, so
         // each fills the ~180px row as one tall target. Order: destructive-and-edit on the left,

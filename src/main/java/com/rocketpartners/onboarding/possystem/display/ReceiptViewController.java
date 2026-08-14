@@ -15,7 +15,7 @@ import java.util.Set;
 /**
  * Opens the {@link ReceiptView} modal in response to
  * {@link PosEventType#TRANSACTION_COMPLETED}, renders the receipt string produced by
- * {@link TransactionService#generateReceipt(Transaction, String, Integer)}, and dispatches
+ * {@link TransactionService#generateReceipt(Transaction, String, Integer, String)}, and dispatches
  * {@link PosEventType#RECEIPT_DISMISSED} when the cashier presses Dismiss so the
  * {@link CustomerViewController} can reset to idle and open a fresh transaction.
  *
@@ -84,7 +84,11 @@ public class ReceiptViewController implements IController, IPosEventListener {
     private void openReceipt(PosEvent event) {
         Transaction paid = event.getProperty("transaction", Transaction.class);
         if (paid == null) return;
-        String text = parent.getTransactionService().generateReceipt(paid, storeName, laneNumber);
+        // The cashier code comes from the login screen, carried on PosComponent — stamp it on the
+        // receipt header alongside store and lane.
+        String cashier = parent.getOperatorId();
+        String text = parent.getTransactionService()
+                .generateReceipt(paid, storeName, laneNumber, cashier);
         view.setReceiptText(text);
         view.openDialog();
     }

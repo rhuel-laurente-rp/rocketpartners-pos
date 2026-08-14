@@ -1,9 +1,14 @@
 package com.rocketpartners.onboarding.possystem.display;
 
+import com.rocketpartners.onboarding.commons.model.Discount;
+import com.rocketpartners.onboarding.commons.model.DiscountType;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.commons.model.LineItem;
+import com.rocketpartners.onboarding.commons.model.Transaction;
+import com.rocketpartners.onboarding.possystem.component.EligibilityRule;
 import com.rocketpartners.onboarding.possystem.component.Journal;
 import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
+import com.rocketpartners.onboarding.possystem.service.ReceiptFormatter;
 
 import javax.imageio.ImageIO;
 import java.awt.Dimension;
@@ -12,8 +17,12 @@ import java.awt.GraphicsEnvironment;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Manual snapshot harness for the whole two-column {@link CustomerView} shell. Not a JUnit test —
@@ -59,6 +68,17 @@ public final class CustomerViewSnapshotTool {
         snapshotQuickAddFooter("first", new File(out, "quickadd-footer-first.png"));
         snapshotQuickAddFooter("middle", new File(out, "quickadd-footer-middle.png"));
         snapshotQuickAddFooter("last", new File(out, "quickadd-footer-last.png"));
+
+        // The refinements landed on this branch:
+        //  - a receipt whose discount description overruns the line (ellipsised, amount still aligned)
+        //  - the summary tape with and without a discount (discount total only, no detail lines)
+        //  - the Quick Add grid with one tile marked as promotional
+        //  - the eligibility dialog (selectable tiles + touch-sized ID checkbox)
+        snapshotReceiptLongDiscount(new File(out, "receipt-long-discount.txt"));
+        snapshotSummary(false, new File(out, "summary-no-discount.png"));
+        snapshotSummary(true, new File(out, "summary-with-discount.png"));
+        snapshotQuickAddPromo(new File(out, "quickadd-promo-marked.png"));
+        snapshotEligibilityDialog(new File(out, "eligibility-dialog.png"));
 
         measure();
 
@@ -304,6 +324,132 @@ public final class CustomerViewSnapshotTool {
             System.out.println("wrote " + target.getName());
         } finally {
             view.dispose();
+        }
+    }
+
+    /**
+     * Writes a plain-text receipt whose discount description overruns the line, so the ellipsis
+     * truncation and the still-aligned amount column can be eyeballed. Text, not an image — the
+     * receipt is a monospace document.
+     */
+    static void snapshotReceiptLongDiscount(File target) throws Exception {
+        Transaction tx = new Transaction("t-snap", Instant.EPOCH, new BigDecimal("0.07"));
+        tx.addLineItem(new Item("UPC-X", "Thing", new BigDecimal("3.79")), 7);
+        tx.total();
+        tx.applyDiscount(new Discount("LOYAL", "Super Duper Extra Long Loyalty Discount Name",
+                DiscountType.PERCENT_OFF, new BigDecimal("10"), new BigDecimal("2.65")));
+        tx.applyDiscount(new Discount("SENIOR_20", "Senior Disc 20%", DiscountType.PERCENT_OFF,
+                new BigDecimal("20"), new BigDecimal("3.79")));
+        String receipt = ReceiptFormatter.format(tx, "Rocket Store", 1);
+        Files.writeString(target.toPath(), receipt, StandardCharsets.UTF_8);
+        System.out.println("wrote " + target.getName());
+    }
+
+    /**
+     * Renders the Summary card standalone, with or without a discount. Without: a bare "Discount"
+     * label and a muted zero. With: "Discount (2)" and the combined total in green — no per-discount
+     * detail lines beneath the tape. Both carry the derived "Tax (7%)" label.
+     */
+    static void snapshotSummary(boolean withDiscount, File target) throws Exception {
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        try {
+            view.setTaxRate(new BigDecimal("0.07"));
+            if (withDiscount) {
+                view.setDiscountCount(2);
+                view.updateBasket(basket(3), new BigDecimal("26.53"), new BigDecimal("6.44"),
+                        new BigDecimal("1.41"), new BigDecimal("21.50"));
+            } else {
+                view.setDiscountCount(0);
+                view.updateBasket(basket(3), new BigDecimal("26.53"), BigDecimal.ZERO,
+                        new BigDecimal("1.86"), new BigDecimal("28.39"));
+            }
+            java.awt.Container card = view.getSummaryCardForTest();
+            Dimension pref = card.getPreferredSize();
+            card.setSize(Math.max(320, pref.width), Math.max(140, pref.height));
+            layoutAll(card);
+
+            BufferedImage img = new BufferedImage(card.getWidth(), card.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                g.setColor(PosTheme.PAPER);
+                g.fillRect(0, 0, img.getWidth(), img.getHeight());
+                card.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /**
+     * Renders the full window with three Quick Add tiles marked — one per discount type — so the
+     * per-type top-edge accents and the colour legend above the pager can be judged against the
+     * plain tiles around them.
+     */
+    static void snapshotQuickAddPromo(File target) throws Exception {
+        CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());
+        try {
+            java.awt.Container content = view.getContentPane();
+            content.setSize(1512, 982);
+            // Mark the first three quick-add items, one per discount type, to show all three accents
+            // and a full colour legend.
+            view.setPromoMarks(Map.of(
+                    String.format("%012d", 1), DiscountType.PROMO,
+                    String.format("%012d", 2), DiscountType.PERCENT_OFF,
+                    String.format("%012d", 3), DiscountType.FIXED_AMOUNT_OFF));
+            layoutAll(content);
+            BufferedImage img = new BufferedImage(1512, 982, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                content.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            view.dispose();
+        }
+    }
+
+    /**
+     * Renders the eligibility dialog primed with three rules — the middle one selected and ID
+     * verified — so the selectable tiles, the selected ring, and the touch-sized ID checkbox can be
+     * eyeballed. Primes without entering the modal event loop.
+     */
+    static void snapshotEligibilityDialog(File target) throws Exception {
+        DiscountView dialog = new DiscountView(null, noop());
+        try {
+            List<EligibilityRule> rules = List.of(
+                    new EligibilityRule("SENIOR_20", "Senior Disc 20%", DiscountType.PERCENT_OFF,
+                            new BigDecimal("20"), "CUSTOMER_ELIGIBILITY"),
+                    new EligibilityRule("VETERAN_15", "Veteran Disc 15%", DiscountType.PERCENT_OFF,
+                            new BigDecimal("15"), "CUSTOMER_ELIGIBILITY"),
+                    new EligibilityRule("EMPLOYEE_5", "Employee Disc $5 Off",
+                            DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("5.00"), "CUSTOMER_ELIGIBILITY"));
+            dialog.prepareForTest(rules, List.of());
+            dialog.clickRuleForTest("VETERAN_15");
+            dialog.getIdVerifiedForTest().setSelected(true);
+
+            java.awt.Container content = dialog.getContentPane();
+            dialog.pack();
+            layoutAll(content);
+            BufferedImage img = new BufferedImage(Math.max(1, content.getWidth()),
+                    Math.max(1, content.getHeight()), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            try {
+                content.printAll(g);
+            } finally {
+                g.dispose();
+            }
+            ImageIO.write(img, "PNG", target);
+            System.out.println("wrote " + target.getName());
+        } finally {
+            dialog.dispose();
         }
     }
 

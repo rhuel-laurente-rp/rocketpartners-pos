@@ -243,6 +243,11 @@ public class ErrorPopupViewController implements IController, IPosEventListener 
                 return "That action isn't allowed right now.";
             case "TRANSACTION_ALREADY_OPEN":
                 return "Finish the current transaction first.";
+            case "DISCOUNTS_UNAVAILABLE":
+                // The discount engine was unreachable or returned an invalid response at Total. The
+                // sale proceeds with no discounts; the cashier is told rather than left to wonder
+                // why a known discount silently vanished.
+                return "Discounts Unavailable — Continuing Without Them.";
             case "ABOVE_MAX_QUANTITY":
                 Integer max = event.getProperty("max", Integer.class);
                 return max != null

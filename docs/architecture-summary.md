@@ -213,8 +213,11 @@ Scan a UPC through to a printed receipt:
     → CASH_TENDERED + TRANSACTION_COMPLETED events
 
 8.  ReceiptViewController listens for TRANSACTION_COMPLETED
-    → calls TransactionService.generateReceipt(tx, storeName, laneNumber)
+    → calls TransactionService.generateReceipt(tx, storeName, laneNumber, cashier)
+      (cashier = the operator id from the login screen, carried on PosComponent;
+       the receipt header prints it as a "Cashier:" line)
     → ReceiptView opens showing the formatted text
+      (the transaction id on the header is a plain sequential integer, not a UUID)
 
 9.  Cashier dismisses receipt → RECEIPT_DISMISS_PRESSED → RECEIPT_DISMISSED
     → CustomerViewController opens a fresh transaction — ready for the next customer

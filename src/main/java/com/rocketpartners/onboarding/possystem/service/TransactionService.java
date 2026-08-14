@@ -313,6 +313,26 @@ public class TransactionService {
     }
 
     /**
+     * Re-opens the current (finalized) transaction for editing — {@code TOTALED} back to
+     * {@code IN_PROGRESS} — so more lines can be rung up after Total. Engine-applied discounts are
+     * cleared and recompute on the next {@link #total()}. Rejected (as {@code ILLEGAL_STATE}) if no
+     * transaction is open or it is not in {@code TOTALED}.
+     *
+     * @return the re-opened transaction
+     * @throws IllegalStateException if there is no current transaction, or it is not TOTALED
+     */
+    public Transaction resumeEditing() {
+        requireCurrentTransaction("resumeEditing");
+        try {
+            currentTransaction.resumeEditing();
+        } catch (IllegalStateException e) {
+            dispatchError("ILLEGAL_STATE", e.getMessage(), e, "operation", "resumeEditing");
+            throw e;
+        }
+        return currentTransaction;
+    }
+
+    /**
      * Records a cash tender. The current transaction transitions to
      * {@link TransactionState#PAID} and the "current" slot is released.
      *
@@ -425,6 +445,16 @@ public class TransactionService {
      */
     public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber) {
         return ReceiptFormatter.format(transaction, storeName, laneNumber);
+    }
+
+    /**
+     * As {@link #generateReceipt(Transaction, String, Integer)}, but also stamps the signed-in
+     * cashier onto the header. The cashier code originates at the login screen and is carried on
+     * {@code PosComponent}.
+     */
+    public String generateReceipt(Transaction transaction, String storeName, Integer laneNumber,
+                                  String cashier) {
+        return ReceiptFormatter.format(transaction, storeName, laneNumber, cashier);
     }
 
     private void requireCurrentTransaction(String operation) {
