@@ -1,0 +1,19 @@
+# Local one-command run of the discount engine: `docker compose up --build`.
+#
+# The Dockerfile copies the pre-built fat jar from build/libs, so build it FIRST:
+#     ./gradlew bootJar
+# Compose does not run Gradle — it only builds the image and starts the container.
+#
+# platform is pinned to linux/amd64 to match the x86 (Fargate) deploy target. An image built
+# for the host architecture (arm64 on Apple silicon) runs locally but fails on an x86 task with
+# "exec format error". Delete this line — or set it to linux/arm64 and use an ARM64 task
+# definition — if you deploy to ARM. See "Running with Docker" in the README.
+services:
+  discount-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    image: pos-discount-engine
+    ports:
+      - "8080:8080"
