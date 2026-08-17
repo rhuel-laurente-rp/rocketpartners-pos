@@ -1,8 +1,8 @@
 # Architecture
 
-One repo, one `../../build.gradle`, one source tree — three intended runnable entry points. Only two are live today (`runPos`, `runJournal`); the discount engine is a scaffolded package with no `Application` class yet. Separation is by **package**, not by build module.
+One repo, one `../../build.gradle`, one source tree — four runnable entry points, all live: `runPos`, `runJournal`, `tailJournalLog`, and `bootRun` (the Phase 3 discount engine). Separation is by **package**, not by build module.
 
-## Runtime — three processes, two network hops (one implemented)
+## Runtime — three processes, two network hops (both implemented)
 
 ```mermaid
 flowchart LR
@@ -14,22 +14,20 @@ flowchart LR
         JOURNAL["posvirtualjournal.Driver<br/>socket server :12345"]
     end
 
-    subgraph CloudHost["AWS (target — not yet implemented)"]
+    subgraph CloudHost["AWS ECS + ALB (or localhost:8080)"]
         ENGINE["posdiscountengine.Application<br/>Spring Boot REST :8080"]
     end
 
     POS -- "TCP socket :12345<br/>UTF-8 newline-delimited<br/>fire-and-forget, one-way<br/>no ACK, off Swing EDT" --> JOURNAL
-    POS -. "planned: HTTP POST /discounts/calculate<br/>on Total press" .-> ENGINE
+    POS -- "HTTP: GET /discounts/rules at startup,<br/>POST /discounts/calculate on Total press<br/>(via CloudApiComponent, 2s timeout)" --> ENGINE
 
     classDef initiator stroke-width:2px,stroke:#2b6cb0
     class POS initiator
-    classDef planned stroke-dasharray: 4 3,color:#6E7379
-    class ENGINE planned
 ```
 
-**Direction of dependency.** The POS is the only process that initiates anything. The journal server and the (future) discount engine know nothing about each other and nothing about the POS.
+**Direction of dependency.** The POS is the only process that initiates anything. The journal server and the discount engine know nothing about each other and nothing about the POS.
 
-**Both hops are optional at runtime — a hard requirement.** Journal writes are best-effort; discount calls (once implemented) time out and complete the sale with no discount. The POS must ring up sales with either or both peers down. `JournalCrossPhaseTest` is the anti-regression: it pins "Phase 1 stays green when the journal is unreachable."
+**Both hops are optional at runtime — a hard requirement.** Journal writes are best-effort; discount calls time out (2s, in `CloudApiComponent`) and complete the sale with no discount. The POS must ring up sales with either or both peers down. `JournalCrossPhaseTest` is the anti-regression: it pins "Phase 1 stays green when the journal is unreachable."
 
 **Journal fan-out.** The POS runs a composite `Journals(...)` wrapping three concrete `Journal` implementations, all three receiving every entry:
 
@@ -52,20 +50,21 @@ sequenceDiagram
     autonumber
     participant POS as possystem<br/>(Swing)
     participant J as posvirtualjournal<br/>(socket :12345)
-    participant E as posdiscountengine<br/>(HTTP :8080 — planned)
+    participant E as posdiscountengine<br/>(HTTP :8080)
 
     Note over POS: scan / Quick Add
     POS-->>J: log "line item added"<br/>(offer, fan-out to 3 journals)
     Note over POS: (many scans...)
     Note over POS: cashier presses Total
-    Note over POS,E: Discount call planned for Phase 3 —<br/>not implemented today; the sale<br/>completes with no discount applied.
+    POS->>E: POST /discounts/calculate {TransactionDto}
+    E-->>POS: DiscountResponseDto {discounts, discountTotal}<br/>(or empty/failed → no discount, sale continues)
     POS-->>J: log "totaled"
     Note over POS: cashier tenders + receipt prints
     POS-->>J: log "tendered"
     POS-->>J: log "receipt printed"
 ```
 
-Only pricing crosses HTTP in the target architecture. Every user action produces a journal line; journal writes are fire-and-forget and never block checkout.
+Only pricing crosses HTTP. Every user action produces a journal line; journal writes are fire-and-forget and never block checkout, and the discount call is bounded by a 2s timeout so a slow engine cannot stall the tender.
 
 ## Package boundaries (single project)
 
@@ -92,12 +91,12 @@ flowchart TB
             VJALL["Driver + socket handler"]
         end
 
-        subgraph DE["posdiscountengine (Phase 3 — scaffolded, empty)"]
-            DECMP["component"]
-            DECTL["controller"]
-            DEENT["entity"]
-            DEREPO["repository"]
-            DESVC["service"]
+        subgraph DE["posdiscountengine (Phase 3 — live)"]
+            DECMP["component<br/>(CsvDiscountsLoader)"]
+            DECTL["controller<br/>(Health, Calculate, Rules)"]
+            DEENT["entity<br/>(DiscountRule)"]
+            DEREPO["repository<br/>(DiscountRuleRepository)"]
+            DESVC["service<br/>(DiscountService)"]
         end
     end
 
@@ -106,7 +105,7 @@ flowchart TB
     DE -- OK --> COMMONS
 
     POSSYS -. socket .-> VJ
-    POSSYS -. HTTP (planned) .-> DE
+    POSSYS -. HTTP .-> DE
 
     COMMONS -.->|MUST NOT| POSSYS
     VJ -.->|MUST NOT| POSSYS
@@ -125,13 +124,13 @@ flowchart TB
 
 ## Component shape inside `possystem`
 
-The POS keeps its socket and (future) HTTP integrations behind small in-repo classes rather than importing anything from the server packages:
+The POS keeps its socket and HTTP integrations behind small in-repo classes rather than importing anything from the server packages:
 
 - **`JournalListener`** — subscribes to every `PosEventType`, formats each event as a `JournalRecord`, and hands it to the composite `Journals(...)`. It is *the* journal integration point; there is no separate "JournalClient".
 - **`Journals`** — a composite `Journal` wrapping `LocalJournal`, `FileJournal`, and `RemoteJournal`. Fans one record out to all three.
 - **`RemoteJournal`** — owns the socket, queue, sender thread, backoff, and connection listener.
-
-There is no `DiscountEngineClient` in the tree today; when Phase 3 lands it will sit under `possystem.service` and consume `commons.dto` types over HTTP.
+- **`CloudApiComponent`** — the POS's Apache HttpClient5 client to the discount engine, and the *only* seam to Phase 3. Nothing in `possystem` imports a `posdiscountengine` type; it deserializes JSON into `commons.dto`/`commons.model` values by hand and validates the engine's (untrusted) output. Every failure mode — timeout, refused connection, non-2xx, malformed body, validation rejection — becomes an empty/failed result, never an exception into checkout. Modeled on `RemoteJournal`'s resilience. `DiscountViewController` fetches the eligibility rules through it at startup; `CustomerViewController` calls `calculate` at Total.
+- **`DiscountSession`** / **`DiscountPreview`** — the transaction-scoped eligibility selection and the one small local preview the POS computes between scans; the engine's `calculate` response at Total is authoritative and replaces the preview.
 
 ## Pricebook storage
 
@@ -150,17 +149,14 @@ flowchart LR
     BUILD --> TPOS["gradle task<br/>runPos → JavaExec<br/>main = possystem.Application<br/>(works)"]
     BUILD --> TJRN["gradle task<br/>runJournal → JavaExec<br/>main = posvirtualjournal.Driver<br/>(works)"]
     BUILD --> TTAIL["gradle task<br/>tailJournalLog → JavaExec<br/>main = possystem.tools.TailJournal<br/>(works)"]
-    BUILD --> TBR["gradle task<br/>bootRun → Spring Boot<br/>main = posdiscountengine.Application<br/>(fails: class does not exist)"]
+    BUILD --> TBR["gradle task<br/>bootRun → Spring Boot<br/>main = posdiscountengine.Application<br/>(works)"]
 
-    BUILD -. planned .-> JAR["build/libs/*.jar<br/>(bootJar main = discount engine)"]
-    JAR -. planned .-> DOCKER["docker build<br/>--platform linux/amd64<br/>-t pos-discount-engine ."]
-    DOCKER -. planned .-> ECR["ECR"] -. planned .-> ECS["ECS + ALB<br/>stable HTTP endpoint"]
-
-    classDef planned stroke-dasharray: 4 3,color:#6E7379
-    class JAR,DOCKER,ECR,ECS planned
+    BUILD --> JAR["build/libs/*.jar<br/>(bootJar main = discount engine)"]
+    JAR --> DOCKER["docker buildx build<br/>--platform linux/amd64<br/>-t pos-discount-engine ."]
+    DOCKER --> ECR["ECR"] --> ECS["ECS + ALB<br/>stable HTTP endpoint"]
 ```
 
-Three run tasks (`runPos`, `runJournal`, `tailJournalLog`) plus `bootRun` distinguished by main class — that is how one project yields multiple entry points. `bootJar` builds a single fat jar and is intended, in the target architecture, to point at the discount engine so the container starts the API rather than opening a GUI. Today its main class does not exist, so `bootRun` fails at runtime — see `docs/known-issues.md` for the disposition.
+Three run tasks (`runPos`, `runJournal`, `tailJournalLog`) plus `bootRun` distinguished by main class — that is how one project yields multiple entry points. `bootJar` builds a single fat jar whose main class is the discount engine, so the container starts the API rather than opening a GUI. The `Dockerfile` at the repo root copies that jar onto `eclipse-temurin:17-jdk-jammy`; `deploy-ecs.sh` pushes the image to ECR and runs it on ECS Fargate behind an ALB. See [../run-and-test-commands.md](../run-and-test-commands.md) for the full build-and-deploy flow.
 
 ## Cross-references
 

@@ -19,7 +19,7 @@ possystem/
     constant/    reserved for shared constants
     tools/       standalone utilities (e.g. TailJournal)
 posvirtualjournal/  Phase 2 socket server (separate process)
-posdiscountengine/  Phase 3 REST server (scaffolded, not yet implemented)
+posdiscountengine/  Phase 3 Spring Boot REST server (live; containerized, deployed to AWS ECS)
 ```
 
 The two rules that make this work:
@@ -40,20 +40,21 @@ Framework-free Java objects for the nouns in the business:
 - **`Transaction`** — the aggregate root. Owns line items, discounts, tender, and the `TransactionState` state machine. Money math (`subtotal()`, `discountTotal()`, `taxTotal()`, `grandTotal()`) lives here. **`grandTotal()` is the sole rounding site** — HALF_UP, scale 2.
 - **`TransactionState`** — `IN_PROGRESS → TOTALED → PAID`, with `VOIDED` as a side-exit from either non-terminal state.
 - **`TenderType`** — `CASH`, `DEBIT`, `CREDIT`.
-- **`Discount`** / **`DiscountType`** — the shape of a discount the (future) engine returns.
+- **`Discount`** / **`DiscountType`** — the shape of a discount the engine returns.
 
 These types enforce their own invariants. `Transaction.addLineItem(...)` throws if the state is not `IN_PROGRESS`; disabling a Swing button is a nicety, the aggregate is the guarantee.
 
 ### `commons/dto/` — the wire contract
 
-Data-transfer objects for the **discount engine call** (Phase 3, not yet implemented):
+Data-transfer objects for the **discount engine call** (Phase 3, live):
 
-- **`TransactionDto`** — the wire form of a transaction, sent to `POST /discounts/calculate`.
+- **`TransactionDto`** — the wire form of a transaction, sent to `POST /discounts/calculate`. Also carries `appliedEligibilityCodes` — the cashier-selected eligibility codes.
 - **`LineItemDto`** — flattened line item; the item's UPC / description / unit price are inlined so the engine doesn't need to know the domain object graph.
+- **`DiscountResponseDto`** — the engine's reply: the `Discount` values to apply, in application order, plus their `discountTotal`.
 
 **Why DTOs are separate from the model.** The engine reads a narrow subset of what a `Transaction` holds — lifecycle state, tender type, cash tendered, and previously-applied discounts are deliberately omitted from the wire form. Keeping a separate DTO means the wire contract can evolve independently of the aggregate. Adding a field to `Transaction` doesn't force a bump of the API version, and vice versa.
 
-The mapping between `Transaction` and `TransactionDto` is a POS-side concern — it belongs in whatever class ends up calling the engine, not in `commons` itself.
+The mapping between `Transaction` and `TransactionDto` is a POS-side concern — it lives in `CloudApiComponent` (the POS's HTTP client to the engine), not in `commons` itself.
 
 ### `commons/utils/`
 
@@ -231,7 +232,7 @@ Nothing in the build enforces these; they are enforced in review.
 
 - **`commons` depends on nothing else here.** Never `commons → possystem`.
 - **`posvirtualjournal` and `posdiscountengine` never import from `possystem`.** They are servers; the POS calls them, not the reverse.
-- **`possystem` talks to the other two only over the wire** — socket for the journal, HTTP for the (future) discount engine. Importing `posdiscountengine.service.*` into the POS defeats the whole Phase 3 exercise.
+- **`possystem` talks to the other two only over the wire** — socket for the journal, HTTP (via `CloudApiComponent`) for the discount engine. Importing `posdiscountengine.service.*` into the POS defeats the whole Phase 3 exercise.
 - **Inside `possystem`:** `display/` may reach into `service/` and `component/` only via events and controllers; services never import `display/`; nothing outside `repository/*` should reference a concrete `ItemRepository` implementation.
 
 ## Cross-references

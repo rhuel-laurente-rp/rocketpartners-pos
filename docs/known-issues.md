@@ -8,17 +8,6 @@ Severity is the impact if the code path fires, not how easy it is to reach. Seve
 
 ## Live bugs
 
-### `build.gradle` — `bootJar` / `bootRun` main class doesn't exist
-Both tasks point at `com.rocketpartners.onboarding.posdiscountengine.Application`, which is not on the classpath (only empty `package-info.java` files exist under that tree). `bootJar` currently succeeds because Spring Boot doesn't verify the main class at packaging time; `bootRun` fails at task execution:
-
-```
-Error: Could not find or load main class com.rocketpartners.onboarding.posdiscountengine.Application
-```
-
-- **Severity:** medium — the CLAUDE.md brief lists `./gradlew bootRun` as a supported command; anyone running it hits a hard failure.
-- **Disposition:** flag on the Phase 3 kickoff branch. Options: (a) leave broken until Phase 3 lands and the class exists, (b) temporarily point both tasks at a placeholder `Main` class that logs "not yet implemented" and exits. Prefer (b) so `bootJar` produces something runnable and the "always green" invariant covers `bootRun` too.
-- **Suggested branch:** `phase3/scaffold-discount-engine-application`.
-
 ### `FileJournal.java` — synchronous disk write + flush on the caller's thread
 `journal(...)` opens/rolls the daily file, writes one line, then `flush()`es — all on the caller's thread, which is the Swing EDT. This violates the `Journal` contract ("must not block the caller ... must be safe to call from the Swing event dispatch thread"). In practice each write is well under a millisecond and the class Javadoc explicitly accepts this tradeoff.
 
@@ -48,9 +37,12 @@ Same shape: `try { j.close(); } catch (RuntimeException ignored) {}`. The commen
 Rough priority — highest impact and lowest coordination cost first. Nothing here is urgent; the app runs green.
 
 1. `refactor/journal-contract-audit` — needs a design decision, not a mechanical fix.
-2. `phase3/scaffold-discount-engine-application` — unblocks `bootRun` and sets up the Phase 3 tree at the same time.
 
 ## Resolved
+
+Fixed when Phase 3 landed (verified with `./gradlew build`):
+
+- **`bootJar` / `bootRun` main class now exists.** `com.rocketpartners.onboarding.posdiscountengine.Application` is a real `@SpringBootApplication`; `./gradlew bootRun` starts the discount engine on `:8080` and `./gradlew bootJar` produces the one fat jar the `Dockerfile` ships. The old `ClassNotFoundException` at task execution is gone.
 
 Fixed on branch `fix/known-issues-md` (verified with `./gradlew build`):
 

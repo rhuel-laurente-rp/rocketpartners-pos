@@ -186,4 +186,4 @@ flowchart LR
 ## What crosses the wire
 
 - **Journal (Phase 2).** Every event → one record → three journals (fan-out). The remote socket hop enqueues via non-blocking `offer()` and ships on a dedicated `remote-journal-sender` daemon thread. See [architecture.md](architecture.md).
-- **Discount engine (Phase 3).** Not implemented yet. The design calls for one HTTP hop on `TOTAL_PRESSED`; nothing crosses HTTP today.
+- **Discount engine (Phase 3).** Live. `CloudApiComponent` fetches the eligibility rules once at startup (`GET /discounts/rules`) and posts the transaction on Total (`POST /discounts/calculate`); the returned discounts are applied before the receipt renders. The call is bounded by a 2s timeout and every failure degrades to "no discount," so a slow or unreachable engine never blocks the tender. Selecting an eligibility discount dispatches `ELIGIBILITY_DISCOUNT_SELECTED`; the startup fetch dispatches `DISCOUNT_RULES_LOADED`. See [architecture.md](architecture.md).
