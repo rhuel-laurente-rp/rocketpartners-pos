@@ -39,3 +39,5 @@ logs/
 data/
 *.mv.db
 *.trace.db
+
+deploy-state.env

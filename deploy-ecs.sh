@@ -3,6 +3,7 @@
 # Deploy pos-discount-engine to ECS Fargate behind an ALB.
 #
 # Run from the Mac
+#   export AWS_ACCOUNT_ID=123456789012   # your 12-digit account id (required)
 #   chmod +x deploy-ecs.sh
 #   ./deploy-ecs.sh deploy      # create everything
 #   ./deploy-ecs.sh status      # check health
@@ -13,8 +14,11 @@
 
 set -euo pipefail
 
-ACCOUNT=115207986421
-REGION=us-east-1
+# Your 12-digit AWS account id. Not hardcoded so this script carries no environment
+# details: export it before running, e.g.  export AWS_ACCOUNT_ID=123456789012
+# (or derive it: export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text))
+ACCOUNT="${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID to your 12-digit AWS account id before running}"
+REGION="${AWS_REGION:-us-east-1}"
 REPO=pos-discount-engine
 ECR_URI=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO
 IMAGE=$ECR_URI:latest
@@ -422,7 +426,8 @@ teardown() {
   say "Still costing money elsewhere?"
   echo "    ECR repo kept (cents/month). Delete with:"
   echo "      aws ecr delete-repository --repository-name $REPO --force --region $REGION"
-  echo "    Your EC2 instance i-048c444c3d56d218c is separate and still billing."
+  echo "    Any standalone EC2 instances you launched are separate and still billing —"
+  echo "    check with: aws ec2 describe-instances --region $REGION --query 'Reservations[].Instances[].InstanceId'"
 }
 
 case "${1:-deploy}" in
