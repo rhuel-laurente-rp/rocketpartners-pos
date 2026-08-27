@@ -68,7 +68,7 @@ class TransactionDiscountTotalsTest {
                 new BigDecimal("20"), new BigDecimal("5.31")));
         // Discounted grand total is 22.71 -> ceils to 23.00 (NOT ceil of the undiscounted 28.39).
         tx.payNextDollar();
-        assertThat(tx.amountDue()).isEqualByComparingTo("23.00");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
+        assertThat(tx.amountDue()).isEqualByComparingTo("22.71");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.29");
     }
 }

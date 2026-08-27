@@ -174,7 +174,7 @@ class PayWithCashViewControllerTest {
     }
 
     @Test
-    void nextDollarMode_confirmed_tendersCeiledAmount_zeroChange_noEntryDialog() {
+    void nextDollarMode_confirmed_tendersAndGivesChange_noEntryDialog() {
         Transaction tx = totaledAndOpened(WIDGET); // 7.30 → ceil 8.00
         pos.dispatchPosEvent(new PosEvent(PosEventType.CASH_NEXT_DOLLAR_PRESSED));
 
@@ -182,16 +182,16 @@ class PayWithCashViewControllerTest {
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         verify(entryView, never()).openFor(any(), any());
-        // Next Dollar settles the ceiled figure as amountDue, so change is exactly zero.
-        assertThat(tx.amountDue()).isEqualByComparingTo("8.00");
-        assertThat(tx.changeDue()).isEqualByComparingTo("0.00");
+        // Next Dollar tenders the ceiled amount; amountDue stays at grand total so change is shown.
+        assertThat(tx.amountDue()).isEqualByComparingTo("7.30");
+        assertThat(tx.changeDue()).isEqualByComparingTo("0.70");
         PosEvent tendered = notifications.lastOf(PosEventType.CASH_TENDERED);
         assertThat(tendered.getProperty("amountTendered", BigDecimal.class))
                 .isEqualByComparingTo("8.00");
         assertThat(tendered.getProperty("amountDue", BigDecimal.class))
-                .isEqualByComparingTo("8.00");
+                .isEqualByComparingTo("7.30");
         assertThat(tendered.getProperty("changeDue", BigDecimal.class))
-                .isEqualByComparingTo("0.00");
+                .isEqualByComparingTo("0.70");
     }
 
     // ---- Back from the confirmation returns to the mode choice ----------
@@ -401,7 +401,7 @@ class PayWithCashViewControllerTest {
 
         assertThat(tx.getState()).isEqualTo(TransactionState.PAID);
         assertThat(notifications.lastOf(PosEventType.CASH_TENDERED)
-                .getProperty("changeDue", BigDecimal.class)).isEqualByComparingTo("0.00");
+                .getProperty("changeDue", BigDecimal.class)).isEqualByComparingTo("0.70");
     }
 
     // ---- Journal: one-tap paths show both mode and tender ---------------

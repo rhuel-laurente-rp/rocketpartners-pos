@@ -69,15 +69,20 @@ public class CsvDiscountsLoader implements CommandLineRunner {
             }
         }
 
-        int seeded = 0;
+        int inserted = 0, updated = 0;
         for (DiscountRule rule : rules) {
-            // Idempotent across restarts: only insert a code we haven't seen before.
-            if (repository.findByCode(rule.getCode()).isEmpty()) {
+            var existing = repository.findByCode(rule.getCode());
+            if (existing.isEmpty()) {
                 repository.save(rule);
-                seeded++;
+                inserted++;
+            } else {
+                rule.setId(existing.get().getId());
+                repository.save(rule);
+                updated++;
             }
         }
-        log.info("Discount seed complete: parsed {} rule(s), inserted {} new.", rules.size(), seeded);
+        log.info("Discount seed complete: parsed {} rule(s), inserted {}, updated {}.",
+                rules.size(), inserted, updated);
     }
 
     /**

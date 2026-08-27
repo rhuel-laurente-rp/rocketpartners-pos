@@ -326,7 +326,7 @@ public class Transaction {
     public void payNextDollar() {
         requireState("payNextDollar", TransactionState.TOTALED);
         BigDecimal ceiled = grandTotal().setScale(0, RoundingMode.CEILING).setScale(2, RoundingMode.HALF_UP);
-        tender(TenderType.CASH, ceiled, ceiled);
+        tender(TenderType.CASH, ceiled, grandTotal());
     }
 
     /**
