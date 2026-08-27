@@ -46,15 +46,15 @@ class ReceiptFormatterCashModeTest {
     }
 
     @Test
-    void nextDollar_showsCeiledAmountDueLine_changeZero() {
+    void nextDollar_tendersRoundedUp_showsChangeOnReceipt() {
         Transaction tx = totaled();
-        tx.payNextDollar(); // 7.30 → 8.00, amountDue = 8.00
+        tx.payNextDollar(); // cashTendered = 8.00, amountDue = grandTotal = 7.30
 
         String receipt = ReceiptFormatter.format(tx);
 
-        assertThat(receipt).containsPattern("Amount Due \\(Next Dollar\\):\\s+8\\.00");
+        assertThat(receipt).containsPattern("Amount Due \\(Exact\\):\\s+7\\.30");
         assertThat(receipt).containsPattern("Tender: CASH\\s+8\\.00");
-        assertThat(receipt).containsPattern("Change:\\s+0\\.00");
+        assertThat(receipt).containsPattern("Change:\\s+0\\.70");
     }
 
     @Test
