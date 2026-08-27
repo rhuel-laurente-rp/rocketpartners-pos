@@ -222,12 +222,45 @@ class DiscountServiceTest {
     }
 
     @Test
-    void fixedOffUpc_withoutBuyQuantity_appliesOnceWhenPresent() {
+    void fixedOffUpc_withoutBuyQuantity_scalesWithQuantity() {
+        // $1.00 off per unit: buying 3 → $3.00 off (not the old flat $1.00).
         stubPromos(fixedUpc("FIJI_1OFF", "FIJI", "1.00", null, 1));
 
         DiscountResponseDto res = service.calculate(txn(List.of(), line("FIJI", 3, "2.00")));
 
+        assertEquals(0, new BigDecimal("3.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+    }
+
+    @Test
+    void fixedOffUpc_withoutBuyQuantity_singleUnit_equalsOneAmount() {
+        // Boundary: quantity 1 → exactly the rule amount.
+        stubPromos(fixedUpc("FIJI_1OFF", "FIJI", "1.00", null, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("FIJI", 1, "2.00")));
+
         assertEquals(0, new BigDecimal("1.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+    }
+
+    @Test
+    void fixedOffUpc_withoutBuyQuantity_amountExceedsUnitPrice_cappedAtLineTotal() {
+        // $5 off per unit, but each unit costs $2 → cap prevents discount exceeding the line.
+        // 4 units: raw = 5*4 = 20, line total = 2*4 = 8 → capped at 8.
+        stubPromos(fixedUpc("BIG_5OFF", "ITEM", "5.00", null, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("ITEM", 4, "2.00")));
+
+        assertEquals(0, new BigDecimal("8.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+    }
+
+    @Test
+    void fixedOffUpc_withoutBuyQuantity_fiveUnitsAtOneDollarOff() {
+        // The canonical use case from the requirement: $1 off × 5 units = $5 off.
+        stubPromos(fixedUpc("ITEM_1OFF", "ITEM", "1.00", null, 1));
+
+        DiscountResponseDto res = service.calculate(txn(List.of(), line("ITEM", 5, "3.00")));
+
+        assertEquals(0, new BigDecimal("5.00").compareTo(res.getDiscounts().get(0).getAppliedAmount()));
+        assertEquals(0, new BigDecimal("5.00").compareTo(res.getDiscountTotal()));
     }
 
     @Test
