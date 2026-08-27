@@ -166,7 +166,8 @@ public class DiscountService {
      * A flat dollar amount off the targeted UPC's line. Two shapes, distinguished by
      * {@link DiscountRule#getBuyQuantity()}:
      * <ul>
-     *   <li>no {@code buyQuantity} — {@code amount} off once if the UPC is present at all;</li>
+     *   <li>no {@code buyQuantity} — {@code amount} off per unit purchased
+     *       ({@code amount × quantity}), i.e. "$1 off every Monster Energy bought";</li>
      *   <li>{@code buyQuantity = N} — {@code amount} off per completed group of N units
      *       ({@code amount × floor(qty / N)}), i.e. "Buy 2 Save $1.00".</li>
      * </ul>
@@ -191,7 +192,8 @@ public class DiscountService {
             }
             raw = rule.getAmount().multiply(BigDecimal.valueOf(groups));
         } else {
-            raw = rule.getAmount(); // once if present
+            // No buyQuantity: $amount off per unit purchased.
+            raw = rule.getAmount().multiply(BigDecimal.valueOf(line.quantity()));
         }
         BigDecimal lineTotal = line.lineTotal();
         return raw.compareTo(lineTotal) > 0 ? lineTotal : raw;

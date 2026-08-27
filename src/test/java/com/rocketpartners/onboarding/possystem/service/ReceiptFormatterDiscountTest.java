@@ -132,6 +132,21 @@ class ReceiptFormatterDiscountTest {
     }
 
     @Test
+    void fixedAmountOffUpc_receipt_showsQuantityScaledAppliedAmount() {
+        // The receipt must print appliedAmount ($5.00 for 5 units × $1 rule), not the base $1.00.
+        // Guards against accidental use of Discount.getAmount() instead of getAppliedAmount().
+        Transaction tx = totaled();
+        tx.applyDiscount(new Discount("ITEM_1OFF", "Item $1 Off", DiscountType.FIXED_AMOUNT_OFF,
+                new BigDecimal("1.00"), new BigDecimal("5.00")));
+
+        String receipt = ReceiptFormatter.format(tx);
+
+        assertThat(receipt).contains("Discount: Item $1 Off");
+        assertThat(receipt).contains("-5.00");
+        assertThat(receipt).contains("Discount Total:");
+    }
+
+    @Test
     void promoDiscountWithNullAmount_doesNotBreakTheReceipt() {
         Transaction tx = totaled();
         // A PROMO discount whose rule amount is null (only appliedAmount is meaningful). The receipt

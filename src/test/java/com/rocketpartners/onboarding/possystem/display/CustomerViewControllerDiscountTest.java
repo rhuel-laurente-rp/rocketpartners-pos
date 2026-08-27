@@ -217,6 +217,61 @@ class CustomerViewControllerDiscountTest {
     }
 
     @Test
+    void fixedAmountOffUpc_preview_scalesWithQuantity() {
+        // $2.00 off per widget, no buyQuantity. Buying 3 → preview discount = 3 × 2.00 = $6.00.
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of()));
+        api.promoRule = new CloudApiComponent.PromoRule("ITEM_2OFF", "$2 Off Widget", WIDGET.getUpc(),
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("2.00"), null, null);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 1
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 2
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 3
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<com.rocketpartners.onboarding.commons.model.LineItem>> rows =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        org.mockito.ArgumentCaptor<BigDecimal> subtotal = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        org.mockito.ArgumentCaptor<BigDecimal> discount = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                rows.capture(), subtotal.capture(), discount.capture(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        assertThat(rows.getValue()).anyMatch(r -> r instanceof DiscountLineItem);
+        assertThat(subtotal.getValue()).isEqualByComparingTo("30.00"); // 3 × $10.00
+        assertThat(discount.getValue()).isEqualByComparingTo("6.00");  // 3 × $2.00
+    }
+
+    @Test
+    void fixedAmountOffUpc_preview_cappedAtLineTotal() {
+        // $20.00 off per widget (exceeds unit price of $10). 2 units: raw = 40.00, capped at 20.00.
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of()));
+        api.promoRule = new CloudApiComponent.PromoRule("ITEM_20OFF", "$20 Off Widget", WIDGET.getUpc(),
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("20.00"), null, null);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 1
+        pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 2 — line total = 20.00
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<com.rocketpartners.onboarding.commons.model.LineItem>> rows =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        org.mockito.ArgumentCaptor<BigDecimal> discount = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                rows.capture(),
+                org.mockito.ArgumentMatchers.any(),
+                discount.capture(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+
+        assertThat(discount.getValue()).isEqualByComparingTo("20.00"); // capped at line total
+    }
+
+    @Test
     void resumeEditing_reopensTotaledOrder_clearsDiscounts_andLetsMoreItemsBeAdded() {
         Discount d = new Discount("SENIOR_20", "Senior 20%", DiscountType.PERCENT_OFF,
                 new BigDecimal("20"), new BigDecimal("2.00"));
@@ -238,6 +293,70 @@ class CustomerViewControllerDiscountTest {
         // Editable again: a further scan rings up on the same transaction (qty 1 -> 2).
         pos.dispatchPosEvent(quickAdd(WIDGET.getUpc()));
         assertThat(tx.getLineItems().get(0).getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void fixedAmountOffUpc_postTotal_discountLineItemShowsQuantityScaledAppliedAmount() {
+        // Engine returns $5.00 applied (5 units × $1.00/unit rule). The basket row and summary
+        // must show $5.00 — not the rule's base $1.00.
+        Discount fixedDiscount = new Discount("ITEM_1OFF", "Item $1 Off",
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("1.00"), new BigDecimal("5.00"));
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of(fixedDiscount)));
+        api.promoRule = new CloudApiComponent.PromoRule(
+                "ITEM_1OFF", "Item $1 Off", WIDGET.getUpc(),
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("1.00"), null, null);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+        for (int i = 0; i < 5; i++) pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 5
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        Transaction tx = pos.getTransactionService().getCurrentTransaction();
+        assertThat(tx.discountTotal()).isEqualByComparingTo("5.00");
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<java.util.List<com.rocketpartners.onboarding.commons.model.LineItem>> rows =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                rows.capture(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        // The post-Total basket must contain a DiscountLineItem whose amount is the engine's
+        // applied total ($5.00), not the rule's per-unit base amount ($1.00).
+        assertThat(rows.getValue())
+                .anyMatch(r -> r instanceof DiscountLineItem di
+                        && di.getDiscountAmount().compareTo(new BigDecimal("5.00")) == 0);
+    }
+
+    @Test
+    void fixedAmountOffUpc_postTotal_summaryDiscountTotalReflectsQuantityScaling() {
+        // Summary tape discount value must equal the engine's quantity-scaled appliedAmount, not
+        // the rule's flat base amount.
+        Discount fixedDiscount = new Discount("ITEM_2OFF", "Item $2 Off",
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("2.00"), new BigDecimal("6.00"));
+        StubApi api = new StubApi(CloudApiComponent.CalculateResult.ok(List.of(fixedDiscount)));
+        api.promoRule = new CloudApiComponent.PromoRule(
+                "ITEM_2OFF", "Item $2 Off", WIDGET.getUpc(),
+                DiscountType.FIXED_AMOUNT_OFF, new BigDecimal("2.00"), null, null);
+        CustomerViewController controller = new CustomerViewController(view, api, session, synchronous());
+        pos.addController(controller);
+        pos.start();
+        for (int i = 0; i < 3; i++) pos.dispatchPosEvent(quickAdd(WIDGET.getUpc())); // qty 3
+
+        pos.dispatchPosEvent(new PosEvent(PosEventType.TOTAL_PRESSED));
+
+        // The view's updateBasket discount argument must carry $6.00 (3 × $2), not $2.00.
+        org.mockito.ArgumentCaptor<BigDecimal> discount = org.mockito.ArgumentCaptor.forClass(BigDecimal.class);
+        verify(view, org.mockito.Mockito.atLeastOnce()).updateBasket(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                discount.capture(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        assertThat(discount.getValue()).isEqualByComparingTo("6.00");
     }
 
     @Test

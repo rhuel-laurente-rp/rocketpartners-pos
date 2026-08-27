@@ -552,14 +552,15 @@ public class CustomerViewController implements IController, IPosEventListener {
             BigDecimal amount;
             if (type == DiscountType.PERCENT_OFF) {
                 amount = lineTotal.multiply(rule.amount()).movePointLeft(2);
-            } else { // FIXED_AMOUNT_OFF: once, or once per completed "buy N" group; capped at the line
+            } else { // FIXED_AMOUNT_OFF: per unit, or once per completed "buy N" group; capped at line
                 int buy = rule.buyQuantity() == null ? 0 : rule.buyQuantity();
                 if (buy > 0) {
                     int groups = li.getQuantity() / buy;
                     if (groups == 0) continue;
                     amount = rule.amount().multiply(BigDecimal.valueOf(groups));
                 } else {
-                    amount = rule.amount();
+                    // No buyQuantity: $amount off per unit purchased — mirrors DiscountService.
+                    amount = rule.amount().multiply(BigDecimal.valueOf(li.getQuantity()));
                 }
                 if (amount.compareTo(lineTotal) > 0) amount = lineTotal;
             }
