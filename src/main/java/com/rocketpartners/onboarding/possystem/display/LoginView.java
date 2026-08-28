@@ -398,10 +398,11 @@ public class LoginView extends JFrame {
     // ---- Vector panel ------------------------------------------------------
 
     /**
-     * The left half: a {@link PosTheme#GO} green panel that paints one image centred and scaled
-     * proportionally to <em>fit</em> within a slim margin — aspect ratio preserved, never distorted,
-     * green showing in the letterbox gutter around it. A {@code null} image (the resource failed to
-     * load) leaves the panel plain green rather than throwing.
+     * The left half: a {@link PosTheme#LOGIN_VECTOR_BG} panel (brand green in light, a deep green in
+     * dark) that paints one image centred and scaled proportionally to <em>fit</em> within a slim
+     * margin — aspect ratio preserved, never distorted, the panel colour showing in the letterbox
+     * gutter around it. A {@code null} image (the resource failed to load) leaves the panel a plain
+     * fill rather than throwing.
      */
     static final class VectorPanel extends JPanel {
 
@@ -412,7 +413,7 @@ public class LoginView extends JFrame {
 
         VectorPanel(Image image) {
             this.image = image;
-            setBackground(PosTheme.GO);
+            setBackground(PosTheme.LOGIN_VECTOR_BG);
         }
 
         boolean hasImageForTest() {
@@ -421,7 +422,7 @@ public class LoginView extends JFrame {
 
         @Override
         protected void paintComponent(Graphics g) {
-            super.paintComponent(g); // fills the green background (and the letterbox gutter)
+            super.paintComponent(g); // fills the panel background (and the letterbox gutter)
             if (image == null) return;
             int iw = image.getWidth(null);
             int ih = image.getHeight(null);

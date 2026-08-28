@@ -149,6 +149,9 @@ public final class PosTheme {
     public static final Color SCROLL_THUMB = pick(0xC7C5BF, 0x3C434D);
     /** Pale text painted on the dark {@link #INK} header strip (journal pill, status chips). */
     public static final Color HEADER_TEXT = pick(0xC9D1D8, 0xC9D1D8);
+    /** Background of the login splash / vector panel: brand {@link #GO} green in light, a deep
+     *  green in dark so the transparent-cornered illustration still reads against a dark field. */
+    public static final Color LOGIN_VECTOR_BG = pick(0x0B6E4F, 0x0B3D2E);
 
     // ---- Button elevation tokens ------------------------------------------
     // The resting state of every {@link PosButton} composes shadow + fill + lip + top-highlight
