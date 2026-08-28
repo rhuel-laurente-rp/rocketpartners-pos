@@ -382,7 +382,7 @@ public class PayWithCashView extends PosDialog {
         // Force a minimum width so the status strip lays out without re-packing on message swap.
 
         amountDueLine.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
-        amountDueLine.setForeground(PosTheme.INK);
+        amountDueLine.setForeground(PosTheme.TEXT_PRIMARY);
         amountDueLine.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(amountDueLine);
         body.add(Box.createVerticalStrut(14));

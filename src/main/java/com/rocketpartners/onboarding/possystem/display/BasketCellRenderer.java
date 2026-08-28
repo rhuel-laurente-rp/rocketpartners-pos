@@ -113,6 +113,8 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
     /** Pre-rendered hex for the percent-off / amount-off accents, same no-allocation reason. */
     private final String promoPercentHex = hex(PosTheme.PROMO_PERCENT);
     private final String promoFixedHex = hex(PosTheme.PROMO_FIXED);
+    /** Pre-rendered hex for {@link PosTheme#STOP}, used by the VOID tag on voided rows. */
+    private final String stopHex = hex(PosTheme.STOP);
 
     public BasketCellRenderer() {
         super(new BorderLayout(COL_GAP, 0));
@@ -285,24 +287,24 @@ public class BasketCellRenderer extends JPanel implements ListCellRenderer<LineI
         // Plain-text quantity, always shown — including 1. The column is the distinction, so the
         // number needs no badge; a blank cell would read as missing data.
         qty.setText(String.valueOf(value.getQuantity()));
-        qty.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
+        qty.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.TEXT_PRIMARY);
 
         String label = value.getItem().getDisplayLabel().trim();
         // Voided rows use HTML so the strike is a real strike; non-voided stays plain text so the
         // JList ellipsises the description automatically when the Item column is too narrow.
         if (voided) {
             description.setText("<html><strike>" + escapeHtml(label)
-                    + "</strike> &nbsp;<font color='#A32A1F'>VOID</font></html>");
+                    + "</strike> &nbsp;<font color='" + stopHex + "'>VOID</font></html>");
         } else {
             description.setText(label);
         }
-        description.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
+        description.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.TEXT_PRIMARY);
 
         price.setText(PosTheme.money(value.getItem().getUnitPrice()));
         price.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.MUTED);
 
         extended.setText(PosTheme.money(value.extendedTotal()));
-        extended.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.INK);
+        extended.setForeground(voided ? PosTheme.DISABLED_FG : PosTheme.TEXT_PRIMARY);
 
         return this;
     }

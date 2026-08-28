@@ -164,14 +164,14 @@ public class VoidBasketConfirmView extends PosDialog {
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
         descriptionLabel.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
-        descriptionLabel.setForeground(PosTheme.INK);
+        descriptionLabel.setForeground(PosTheme.TEXT_PRIMARY);
         descriptionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(descriptionLabel);
 
         body.add(Box.createVerticalStrut(10));
 
         summaryLabel.setFont(PosTheme.base(Font.BOLD, PosTheme.HEADLINE));
-        summaryLabel.setForeground(PosTheme.INK);
+        summaryLabel.setForeground(PosTheme.TEXT_PRIMARY);
         summaryLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(summaryLabel);
 

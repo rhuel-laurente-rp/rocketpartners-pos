@@ -107,6 +107,23 @@ public class DiscountView extends PosDialog {
         setCancelAction(this::onCancel);
 
         idVerified.addActionListener(e -> refreshConfirmEnabled());
+
+        matchFooterButtonSizes();
+    }
+
+    private void matchFooterButtonSizes() {
+        // Cancel and Confirm Discount report one shared footer button size. setPrimary sizes the
+        // primary to PRIMARY_HEIGHT + SHADOW_INSET and leaves the secondary at its shorter, narrower
+        // natural size, so the two come out mismatched. Take the wider and taller of the two and
+        // apply it to both so the footer reads as a matched pair — the same treatment
+        // VoidBasketConfirmView gives its Void/Keep buttons.
+        Dimension confirmPref = confirmButton.getPreferredSize();
+        Dimension cancelPref = cancelButton.getPreferredSize();
+        Dimension shared = new Dimension(
+                Math.max(confirmPref.width, cancelPref.width),
+                Math.max(confirmPref.height, cancelPref.height));
+        confirmButton.setPreferredSize(shared);
+        cancelButton.setPreferredSize(shared);
     }
 
     // ---- Public API called by DiscountViewController ----------------------
@@ -200,7 +217,7 @@ public class DiscountView extends PosDialog {
         idVerified.setOpaque(false);
         idVerified.setIcon(new CheckBoxIcon());
         idVerified.setFont(PosTheme.base(Font.BOLD, PosTheme.ROW));
-        idVerified.setForeground(PosTheme.INK);
+        idVerified.setForeground(PosTheme.TEXT_PRIMARY);
         idVerified.setIconTextGap(12);
         idVerified.setFocusPainted(false);
         // Pad to a 44px minimum hit height around the 30px glyph (7px top/bottom).
@@ -332,7 +349,7 @@ public class DiscountView extends PosDialog {
             // HTML so a longer description wraps and stays centred inside the tall, narrower tile
             // rather than being clipped on one line.
             super("<html><center>" + text + "</center></html>",
-                    PosTheme.SURFACE, PosTheme.INK, PosTheme.base(Font.PLAIN, PosTheme.ROW));
+                    PosTheme.SURFACE, PosTheme.TEXT_PRIMARY, PosTheme.base(Font.PLAIN, PosTheme.ROW));
             setTouchMinHeight(TILE_FACE_HEIGHT);
         }
 

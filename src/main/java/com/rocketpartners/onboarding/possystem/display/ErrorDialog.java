@@ -8,7 +8,6 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -77,7 +76,7 @@ class ErrorDialog extends PosDialog {
         body.add(chipWrap, BorderLayout.WEST);
 
         messageLabel.setFont(PosTheme.base(Font.PLAIN, PosTheme.ROW));
-        messageLabel.setForeground(PosTheme.INK);
+        messageLabel.setForeground(PosTheme.TEXT_PRIMARY);
         messageLabel.setVerticalAlignment(JLabel.TOP);
         messageLabel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
         body.add(messageLabel, BorderLayout.CENTER);
@@ -94,7 +93,7 @@ class ErrorDialog extends PosDialog {
             int h = getHeight();
             int r = Math.min(w, h) / 2;
 
-            g2.setColor(new Color(0xFD, 0xF1, 0xEF)); // pale STOP tint
+            g2.setColor(PosTheme.BUTTON_DANGER_FILL); // pale STOP tint
             g2.fillOval(w / 2 - r, h / 2 - r, r * 2, r * 2);
             g2.setColor(PosTheme.STOP);
             g2.setStroke(new java.awt.BasicStroke(2f));

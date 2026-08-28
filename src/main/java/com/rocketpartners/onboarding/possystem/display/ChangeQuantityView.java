@@ -272,7 +272,7 @@ public class ChangeQuantityView extends PosDialog {
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 
         descriptionLabel.setFont(PosTheme.base(Font.BOLD, PosTheme.ROW));
-        descriptionLabel.setForeground(PosTheme.INK);
+        descriptionLabel.setForeground(PosTheme.TEXT_PRIMARY);
         descriptionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         body.add(descriptionLabel);
         body.add(Box.createVerticalStrut(14));

@@ -154,7 +154,7 @@ public class OnScreenKeypad extends JPanel {
     /** A digit (or decimal) key: neutral surface fill, elevated like a physical key. Typing the
      *  key's own label into the field is all it does. */
     private PosButton digitKey(String label) {
-        PosButton b = new PosButton(label, PosTheme.SURFACE, PosTheme.INK,
+        PosButton b = new PosButton(label, PosTheme.SURFACE, PosTheme.TEXT_PRIMARY,
                 PosTheme.base(Font.BOLD, PosTheme.AMOUNT));
         b.addActionListener(e -> OnScreenKeys.insert(target, label));
         return sizeKey(b);

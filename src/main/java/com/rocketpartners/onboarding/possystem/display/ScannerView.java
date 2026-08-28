@@ -73,7 +73,7 @@ public class ScannerView extends JPanel {
      */
     public static final String STATUS_LOCKED = "Locked — Complete Payment";
 
-    static final String PLACEHOLDER = "Scan or type a barcode, then Enter";
+    static final String PLACEHOLDER = "";
 
     /** Touch-target minimum for the field. Matches {@link PosTheme#BUTTON_HEIGHT_SECONDARY}. */
     private static final int FIELD_MIN_HEIGHT = 44;
@@ -281,7 +281,7 @@ public class ScannerView extends JPanel {
             statusHint.setText(" ");
             statusHint.setForeground(PosTheme.MUTED);
             scanField.setBorder(scanField.hasFocus() ? focusBorder : idleBorder);
-            scanField.setForeground(PosTheme.INK);
+            scanField.setForeground(PosTheme.TEXT_PRIMARY);
         }
     }
 

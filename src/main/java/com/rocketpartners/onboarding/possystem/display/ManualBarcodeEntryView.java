@@ -86,6 +86,23 @@ public class ManualBarcodeEntryView extends PosDialog {
         // ESC and the Cancel button both just close — no tender or scan is dispatched on abandon.
         setCancelAction(this::closeDialog);
         setInitialFocus(entryField);
+
+        matchFooterButtonSizes();
+    }
+
+    private void matchFooterButtonSizes() {
+        // Cancel and Add Item report one shared footer button size. setPrimary sizes the primary to
+        // PRIMARY_HEIGHT + SHADOW_INSET and leaves the secondary at its shorter, narrower natural
+        // size (secondary height + a lighter font), so the two come out mismatched. Take the wider
+        // and taller of the two and apply it to both so the footer reads as a matched pair — the
+        // same treatment VoidBasketConfirmView gives its Void/Keep buttons.
+        Dimension confirmPref = confirmButton.getPreferredSize();
+        Dimension cancelPref = cancelButton.getPreferredSize();
+        Dimension shared = new Dimension(
+                Math.max(confirmPref.width, cancelPref.width),
+                Math.max(confirmPref.height, cancelPref.height));
+        confirmButton.setPreferredSize(shared);
+        cancelButton.setPreferredSize(shared);
     }
 
     // ---- Public API called by ManualBarcodeEntryViewController -------------
@@ -142,7 +159,7 @@ public class ManualBarcodeEntryView extends PosDialog {
         entryField.setPreferredSize(new Dimension(BODY_WIDTH, 52));
         entryField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 52));
         entryField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        entryField.putClientProperty("JTextField.placeholderText", "Type or tap the barcode digits");
+        entryField.putClientProperty("JTextField.placeholderText", "");
         installDigitFilter(entryField);
         body.add(entryField);
         body.add(Box.createVerticalStrut(8));

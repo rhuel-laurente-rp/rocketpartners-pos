@@ -500,7 +500,7 @@ public class CustomerView extends JFrame {
         payCashButton.setEnabled(enabled);
         payDebitButton.setEnabled(enabled);
         payCreditButton.setEnabled(enabled);
-        amountDueValue.setForeground(enabled ? PosTheme.INK : PosTheme.MUTED);
+        amountDueValue.setForeground(enabled ? PosTheme.TEXT_PRIMARY : PosTheme.MUTED);
         refreshStatusPill();
     }
 
@@ -989,17 +989,11 @@ public class CustomerView extends JFrame {
 
         JLabel headline = new JLabel("Basket is empty");
         headline.setFont(PosTheme.base(Font.BOLD, 16f));
-        headline.setForeground(new Color(0x9A, 0x9E, 0xA3));
+        headline.setForeground(PosTheme.MUTED);
         headline.setAlignmentX(CENTER_ALIGNMENT);
-
-        JLabel hint = new JLabel("Scan a barcode or tap a quick-add item to start the sale");
-        hint.setFont(PosTheme.base(Font.PLAIN, PosTheme.BODY));
-        hint.setForeground(new Color(0xB0, 0xB4, 0xB8));
-        hint.setAlignmentX(CENTER_ALIGNMENT);
 
         stack.add(headline);
         stack.add(Box.createVerticalStrut(6));
-        stack.add(hint);
         empty.add(stack);
         return empty;
     }
@@ -1108,7 +1102,7 @@ public class CustomerView extends JFrame {
         subtotalLabel.setFont(componentFont);
         subtotalLabel.setForeground(PosTheme.MUTED);
         subtotalValue.setFont(componentFont);
-        subtotalValue.setForeground(PosTheme.INK);
+        subtotalValue.setForeground(PosTheme.TEXT_PRIMARY);
 
         discountLabel.setFont(componentFont);
         discountLabel.setForeground(PosTheme.MUTED);
@@ -1118,12 +1112,12 @@ public class CustomerView extends JFrame {
         taxLabel.setFont(componentFont);
         taxLabel.setForeground(PosTheme.MUTED);
         taxValue.setFont(componentFont);
-        taxValue.setForeground(PosTheme.INK);
+        taxValue.setForeground(PosTheme.TEXT_PRIMARY);
 
         totalLabel.setFont(PosTheme.eyebrow());
-        totalLabel.setForeground(PosTheme.INK);
+        totalLabel.setForeground(PosTheme.TEXT_PRIMARY);
         totalValue.setFont(PosTheme.base(Font.BOLD, SUMMARY_TOTAL_SIZE));
-        totalValue.setForeground(PosTheme.INK);
+        totalValue.setForeground(PosTheme.TEXT_PRIMARY);
 
         tape.add(componentRow(subtotalLabel, subtotalValue));
         tape.add(componentRow(discountLabel, discountValue));
@@ -1181,7 +1175,7 @@ public class CustomerView extends JFrame {
         subtotalValue.setText(PosTheme.money(subtotal));
 
         boolean hasDiscount = discount.signum() > 0;
-        discountLabel.setForeground(hasDiscount ? PosTheme.INK : PosTheme.MUTED);
+        discountLabel.setForeground(hasDiscount ? PosTheme.TEXT_PRIMARY : PosTheme.MUTED);
         discountValue.setForeground(hasDiscount ? PosTheme.GO : PosTheme.MUTED);
         discountValue.setText(hasDiscount
                 ? "-" + PosTheme.money(discount)
@@ -1338,7 +1332,7 @@ public class CustomerView extends JFrame {
         bar.setUnitIncrement(16);
         bar.setUI(new BasicScrollBarUI() {
             @Override protected void configureScrollBarColors() {
-                this.thumbColor = new Color(0xC7, 0xC5, 0xBF);
+                this.thumbColor = PosTheme.SCROLL_THUMB;
                 this.trackColor = PosTheme.SURFACE;
             }
             @Override protected javax.swing.JButton createDecreaseButton(int orientation) {
@@ -1383,16 +1377,13 @@ public class CustomerView extends JFrame {
         /** Gap between the dot and the label text. */
         private static final int DOT_GAP = 6;
 
-        /** Header foreground text colour — pale grey, readable on {@link PosTheme#INK}. */
-        private static final Color LABEL_FG = new Color(0xC9, 0xD1, 0xD8);
-
         private boolean connected;
 
         JournalStatusIndicator() {
             super();
             setOpaque(false);
             setFont(PosTheme.eyebrow());
-            setForeground(LABEL_FG);
+            setForeground(PosTheme.HEADER_TEXT);
             // Leave room on the left for the dot painted by paintComponent().
             setBorder(BorderFactory.createEmptyBorder(0, DOT_SIZE + DOT_GAP, 0, 0));
             setConnected(false);

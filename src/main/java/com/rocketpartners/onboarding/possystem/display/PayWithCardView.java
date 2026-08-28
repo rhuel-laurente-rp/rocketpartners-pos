@@ -95,7 +95,7 @@ public class PayWithCardView extends PosDialog {
         amountEyebrow.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         amountValue.setFont(PosTheme.base(Font.BOLD, PosTheme.DISPLAY));
-        amountValue.setForeground(PosTheme.INK);
+        amountValue.setForeground(PosTheme.TEXT_PRIMARY);
         amountValue.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         body.add(amountEyebrow);

@@ -3,6 +3,7 @@ package com.rocketpartners.onboarding.possystem;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.rocketpartners.onboarding.commons.model.Item;
 import com.rocketpartners.onboarding.possystem.component.PosComponent;
@@ -63,6 +64,12 @@ public final class Application {
             return;
         }
 
+        // Resolve the UI theme before any display class loads: PosTheme reads pos.theme once at
+        // class-load, and the matching FlatLaf variant is installed below. --theme is the only
+        // switch — there is no runtime toggle. Unknown values fall through to LIGHT.
+        boolean dark = "DARK".equalsIgnoreCase(args.theme);
+        System.setProperty("pos.theme", dark ? "DARK" : "LIGHT");
+
         Path dbDir = Paths.get(args.dbDir).toAbsolutePath();
         H2ItemRepository itemRepository;
         try {
@@ -80,7 +87,7 @@ public final class Application {
         TaxService taxService = new TaxService(DEFAULT_TAX_RATE);
 
         try {
-            UIManager.setLookAndFeel(new FlatLightLaf());
+            UIManager.setLookAndFeel(dark ? new FlatDarkLaf() : new FlatLightLaf());
         } catch (UnsupportedLookAndFeelException e) {
             System.err.println("FlatLaf unavailable, falling back to system LAF: " + e.getMessage());
         }
@@ -239,6 +246,7 @@ public final class Application {
                         + " journal=" + args.journalHost + ":" + args.journalPort
                         + " engine=" + args.discountEngineUrl
                         + " mode=" + args.appMode
+                        + " theme=" + args.theme
                         + " quickAdd=" + quickAddItems.size() + " items");
             }
     }
@@ -252,6 +260,10 @@ public final class Application {
         @Parameter(names = "--app-mode",
                 description = "Application mode: NORMAL or TRAINING (reserved; unused today)")
         public String appMode = "NORMAL";
+
+        @Parameter(names = "--theme",
+                description = "UI theme: LIGHT or DARK (default LIGHT)")
+        public String theme = "LIGHT";
 
         @Parameter(names = "--store-name", description = "Store label shown on the window and receipts")
         public String storeName = "Rocket Store";

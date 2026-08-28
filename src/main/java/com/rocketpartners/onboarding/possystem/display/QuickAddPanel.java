@@ -25,6 +25,7 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
@@ -133,9 +134,10 @@ class QuickAddPanel extends JPanel {
     /** Colour legend for the tile markers, shown just above the pager when any tile is marked. */
     private final JPanel legendPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 14, 0));
 
-    /** Minimum touch target for a pager control, in pixels. A glyph is not a target — each arrow
-     *  needs a real hit area around it (the 44px accessibility touch minimum). */
-    private static final int PAGER_TOUCH = 44;
+    /** Touch target for a pager control, in pixels. Well above the 44px accessibility minimum —
+     *  paging is a primary, frequently-hit action, so the arrows get an oversized square hit area
+     *  rather than the bare minimum. */
+    private static final int PAGER_TOUCH = 64;
 
     private String query = "";
     private SortMode sort = SortMode.NAME_ASC;
@@ -182,15 +184,12 @@ class QuickAddPanel extends JPanel {
         center.add(keyboardSlot, BorderLayout.SOUTH);
         add(center, BorderLayout.CENTER);
 
-        // South stack: the marker colour legend sits directly above the pagination footer. The
+        // The pagination footer runs along the bottom; the marker colour legend lives in the middle
+        // of that row, between the chevron cluster and the page indicator (see buildFooter). The
         // legend is empty and hidden until promotional marks arrive (see rebuildLegend).
         legendPanel.setOpaque(false);
         legendPanel.setVisible(false);
-        JPanel south = new JPanel(new BorderLayout(0, 6));
-        south.setOpaque(false);
-        south.add(legendPanel, BorderLayout.NORTH);
-        south.add(buildFooter(), BorderLayout.CENTER);
-        add(south, BorderLayout.SOUTH);
+        add(buildFooter(), BorderLayout.SOUTH);
 
         wireKeyboardTriggers();
 
@@ -325,10 +324,18 @@ class QuickAddPanel extends JPanel {
         controls.add(lastButton);
 
         // Justify the row across the full footer width: the chevron cluster is pinned to the far
-        // left, the "N of M pages" indicator to the far right.
+        // left, the "N of M pages" indicator to the far right, and the discount colour legend sits
+        // in the middle between them. The GridBag wrapper centres the legend both horizontally in
+        // the gap and vertically against the tall pager buttons; it takes no space while the legend
+        // is hidden (an unmarked grid).
+        JPanel legendWrap = new JPanel(new GridBagLayout());
+        legendWrap.setOpaque(false);
+        legendWrap.add(legendPanel);
+
         JPanel footer = new JPanel(new BorderLayout());
         footer.setOpaque(false);
         footer.add(controls, BorderLayout.WEST);
+        footer.add(legendWrap, BorderLayout.CENTER);
         footer.add(pagesIndicator, BorderLayout.EAST);
         return footer;
     }
@@ -337,9 +344,9 @@ class QuickAddPanel extends JPanel {
         PosButton b = PosButtons.secondary(glyph);
         b.setTouchMinHeight(PosTheme.BUTTON_HEIGHT_SECONDARY);
         // Secondary buttons default to a BODY-sized glyph, which reads as a hairline chevron on a
-        // 44px control. Bump to a bold AMOUNT-sized glyph so the arrow fills the touch target and
-        // is legible at a glance.
-        b.setFont(PosTheme.base(Font.BOLD, PosTheme.AMOUNT));
+        // large control. Bump to a bold HEADLINE-sized glyph so the arrow fills the oversized touch
+        // target and is legible at a glance.
+        b.setFont(PosTheme.base(Font.BOLD, PosTheme.HEADLINE));
         // A drawn chevron is a few pixels wide; give it a real square hit area so the whole
         // control — not just the glyph — is tappable. Fixed size keeps the BoxLayout row from
         // collapsing the button to the glyph's intrinsic width.
@@ -676,7 +683,7 @@ class QuickAddPanel extends JPanel {
         private final DiscountType mark;
 
         QuickAddTile(String description, String price, DiscountType mark) {
-            super("", PosTheme.SURFACE, PosTheme.INK, PosTheme.base(Font.PLAIN, PosTheme.BODY));
+            super("", PosTheme.SURFACE, PosTheme.TEXT_PRIMARY, PosTheme.base(Font.PLAIN, PosTheme.BODY));
             this.description = description;
             this.price = price;
             this.mark = mark;
@@ -725,7 +732,7 @@ class QuickAddPanel extends JPanel {
             g2.setFont(DESC_FONT);
             FontMetrics dfm = g2.getFontMetrics();
             List<String> lines = wrap(description, dfm, maxWidth, 2);
-            g2.setColor(on ? PosTheme.INK : PosTheme.DISABLED_FG);
+            g2.setColor(on ? PosTheme.TEXT_PRIMARY : PosTheme.DISABLED_FG);
             int y = PAD + dfm.getAscent() + sink;
             for (String line : lines) {
                 g2.drawString(line, PAD, y);

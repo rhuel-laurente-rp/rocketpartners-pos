@@ -4,7 +4,6 @@ import com.rocketpartners.onboarding.possystem.event.IPosEventDispatcher;
 import com.rocketpartners.onboarding.possystem.event.PosEvent;
 import com.rocketpartners.onboarding.possystem.event.PosEventType;
 
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
@@ -18,17 +17,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Modal cash-mode-choice dialog: {@link PosDialog}-shelled. Two square amount tiles side by
- * side, and a full-width Other Amount button beneath them.
+ * Modal cash-mode-choice dialog: {@link PosDialog}-shelled. Three amount buttons in a single row
+ * of equal columns — Exact Amount, Next Dollar, and Other Amount.
  *
  * <p><strong>Two ways to finish, or take a detour.</strong> Exact Amount and Next Dollar are the
  * <em>terminal</em> modes — picking one leads to a confirmation and then the receipt, with no
  * amount to key. The tile press opens a {@link TenderConfirmView} showing the figure; the cashier
  * confirms and the controller tenders (a mis-tap is recoverable via that dialog's Back). Other
  * Amount is <em>navigation</em> — it opens {@link PayWithCashView} so the cashier can key what the
- * customer actually handed over. The layout says as much: the two terminal tiles share the tile
- * row; Other Amount sits below a hairline as a full-width secondary, so its different
- * consequence is legible before a finger lands on it.</p>
+ * customer actually handed over. All three share one row of equal columns — the two terminal
+ * tiles first, Other Amount last — so any mode is one large fingertip target away.</p>
  *
  * <p><strong>Each tile shows the figure it will tender.</strong> Because the tiles are terminal,
  * the cashier must see the amount before committing — Exact Amount carries the grand total, Next
@@ -58,23 +56,17 @@ import java.util.Map;
  */
 public class CashModeChoiceView extends PosDialog {
 
-    /** Forces a minimum body width so the buttons lay out consistently. */
-    private static final int BODY_MIN_WIDTH = 380;
+    /** Forces a minimum body width so the three mode buttons lay out consistently and large. */
+    private static final int BODY_MIN_WIDTH = 576;
 
-    /** Touch height of the full-width Other Amount button — ≥56px so a fingertip can't miss. */
-    static final int MODE_BUTTON_HEIGHT = 56;
-
-    /** Vertical gap between the tile row and the hairline / Other Amount button. */
-    private static final int SECTION_GAP = 14;
-
-    /** Horizontal gap between the two square tiles. */
+    /** Horizontal gap between adjacent mode tiles. */
     private static final int MODE_TILE_GAP = 12;
 
     /**
-     * Side length of each square tile. Derived so that {@code side * 2 + gap} equals the body
-     * width — change {@link #BODY_MIN_WIDTH} and the tiles follow.
+     * Side length of each square mode tile. Derived so that {@code side * 3 + gap * 2} equals the
+     * body width — change {@link #BODY_MIN_WIDTH} and the three tiles follow.
      */
-    static final int MODE_TILE_SIDE = (BODY_MIN_WIDTH - MODE_TILE_GAP) / 2;
+    static final int MODE_TILE_SIDE = (BODY_MIN_WIDTH - MODE_TILE_GAP * 2) / 3;
 
     private final IPosEventDispatcher dispatcher;
 
@@ -100,7 +92,7 @@ public class CashModeChoiceView extends PosDialog {
         this.nextDollarButton = PosButtons.secondary("Next Dollar");
         this.nextDollarButton.setTouchMinHeight(MODE_TILE_SIDE);
         this.otherAmountButton = PosButtons.secondary("Other Amount");
-        this.otherAmountButton.setTouchMinHeight(MODE_BUTTON_HEIGHT);
+        this.otherAmountButton.setTouchMinHeight(MODE_TILE_SIDE);
         this.cancelButton = PosButtons.danger("Cancel");
 
         setBody(buildBody());
@@ -217,10 +209,13 @@ public class CashModeChoiceView extends PosDialog {
     // ---- Internals --------------------------------------------------------
 
     private JPanel buildBody() {
-        // GridLayout gives the two tiles identical cells and ignores their maximum size, so
-        // squareness is enforced by constraining this row rather than the buttons: fixing the
-        // row at (BODY_MIN_WIDTH x MODE_TILE_SIDE) makes each cell exactly MODE_TILE_SIDE square.
-        JPanel row = new JPanel(new GridLayout(1, 2, MODE_TILE_GAP, 0));
+        // All three cash modes share one row of three equal columns. GridLayout gives identical
+        // cells and ignores each button's maximum size, so the cell size is enforced by fixing the
+        // row at (BODY_MIN_WIDTH x MODE_TILE_SIDE): each of the three cells comes out MODE_TILE_SIDE
+        // square and spans the widened body. Exact and Next Dollar are terminal one-tap tenders;
+        // Other Amount opens the entry dialog — the distinction is behavioural, the row just keeps
+        // the three one large fingertip apart.
+        JPanel row = new JPanel(new GridLayout(1, 3, MODE_TILE_GAP, 0));
         row.setOpaque(false);
         Dimension rowSize = new Dimension(BODY_MIN_WIDTH, MODE_TILE_SIDE);
         row.setPreferredSize(rowSize);
@@ -229,30 +224,12 @@ public class CashModeChoiceView extends PosDialog {
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.add(exactButton);
         row.add(nextDollarButton);
-
-        // A hairline separates the two terminal tiles from Other Amount — the visual cue that
-        // Other Amount is a different kind of action (navigation, not commit).
-        JPanel hairline = new JPanel();
-        hairline.setBackground(PosTheme.RULE);
-        Dimension ruleSize = new Dimension(BODY_MIN_WIDTH, 1);
-        hairline.setPreferredSize(ruleSize);
-        hairline.setMinimumSize(ruleSize);
-        hairline.setMaximumSize(ruleSize);
-        hairline.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        // Other Amount spans the full body width beneath the hairline.
-        otherAmountButton.setAlignmentX(Component.LEFT_ALIGNMENT);
-        int otherHeight = otherAmountButton.getPreferredSize().height;
-        otherAmountButton.setMaximumSize(new Dimension(BODY_MIN_WIDTH, otherHeight));
+        row.add(otherAmountButton);
 
         JPanel body = new JPanel();
         body.setOpaque(false);
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.add(row);
-        body.add(Box.createVerticalStrut(SECTION_GAP));
-        body.add(hairline);
-        body.add(Box.createVerticalStrut(SECTION_GAP));
-        body.add(otherAmountButton);
 
         return body;
     }

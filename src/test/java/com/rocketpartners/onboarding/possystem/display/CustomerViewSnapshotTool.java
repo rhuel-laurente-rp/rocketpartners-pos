@@ -387,8 +387,8 @@ public final class CustomerViewSnapshotTool {
 
     /**
      * Renders the full window with three Quick Add tiles marked — one per discount type — so the
-     * per-type top-edge accents and the colour legend above the pager can be judged against the
-     * plain tiles around them.
+     * per-type top-edge accents and the colour legend in the pager row (between the chevron cluster
+     * and the page indicator) can be judged against the plain tiles around them.
      */
     static void snapshotQuickAddPromo(File target) throws Exception {
         CustomerView view = new CustomerView("Rocket POS — snapshot", quickAddItems(), noop());

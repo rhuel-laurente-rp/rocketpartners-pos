@@ -30,29 +30,64 @@ import java.util.Map;
  * <p>The palette is deliberately register-hardware in feel — graphite chassis, warm
  * receipt-tape white, one saturated green reserved for pay actions — rather than a generic UI
  * kit. That belongs alongside the tokens so the choice is legible.</p>
+ *
+ * <p><b>Light and dark.</b> Every colour token resolves its value once, at class-load, from the
+ * {@code pos.theme} system property ({@code LIGHT} — the default — or {@code DARK}). {@code
+ * Application} sets that property from the {@code --theme} CLI flag before any display class is
+ * loaded, and the matching FlatLaf variant is installed alongside it. Because the choice is made
+ * before a single component is built, every view simply reads the already-selected palette when
+ * it is constructed — there is no runtime toggle and no component-tree rebuild. Token <i>names</i>
+ * and their light values are unchanged from the light-only design, so consumers and tests that
+ * compare against a token move in lockstep with it.</p>
  */
 public final class PosTheme {
 
     private PosTheme() {}
 
+    // ---- Theme mode --------------------------------------------------------
+    // Resolved once, at class-load, from the pos.theme system property. Declared before any
+    // colour field so it is set before the first pick(...) runs (static fields initialise in
+    // textual order). Application sets the property from --theme before any display class loads.
+
+    private enum Mode { LIGHT, DARK }
+
+    private static final Mode MODE =
+            "DARK".equalsIgnoreCase(System.getProperty("pos.theme", "LIGHT")) ? Mode.DARK : Mode.LIGHT;
+
+    /** @return true when the dark palette is active. Handy for snapshot tools and opt-in tests. */
+    public static boolean isDark() {
+        return MODE == Mode.DARK;
+    }
+
+    /**
+     * Selects a token's value for the active mode. Each argument is a packed {@code 0xRRGGBB}
+     * literal; the returned {@link Color} is fully opaque. In light mode the light value is
+     * byte-identical to the pre-dark-mode design.
+     */
+    private static Color pick(int lightRgb, int darkRgb) {
+        return new Color(MODE == Mode.DARK ? darkRgb : lightRgb);
+    }
+
     // ---- Palette -----------------------------------------------------------
 
-    /** Near-black. Primary text, header strip, and heavy chrome. */
-    public static final Color INK = new Color(0x14, 0x18, 0x1D);
+    /** Near-black chrome strip: header bar and dialog header. Stays dark in both modes. */
+    public static final Color INK = pick(0x14181D, 0x0E1116);
+    /** Primary text and labels on {@link #PAPER}/{@link #SURFACE}. Near-white in dark mode. */
+    public static final Color TEXT_PRIMARY = pick(0x14181D, 0xE7EAEE);
     /** Warm off-white for the app-wide background. Reads as receipt tape, not screen white. */
-    public static final Color PAPER = new Color(0xFB, 0xFA, 0xF7);
-    /** Pure white for card and dialog body surfaces. */
-    public static final Color SURFACE = Color.WHITE;
+    public static final Color PAPER = pick(0xFBFAF7, 0x14171C);
+    /** Card and dialog body surfaces. Pure white in light mode, elevated graphite in dark. */
+    public static final Color SURFACE = pick(0xFFFFFF, 0x1E232B);
     /** Hairline colour used for card borders, summary rules, and disabled outlines. */
-    public static final Color RULE = new Color(0xE2, 0xE0, 0xDA);
+    public static final Color RULE = pick(0xE2E0DA, 0x363D47);
     /** Secondary label colour: metadata, unit prices, disabled hints. */
-    public static final Color MUTED = new Color(0x6E, 0x73, 0x79);
-    /** Saturated green reserved for pay-forward affirmative actions. */
-    public static final Color GO = new Color(0x0B, 0x6E, 0x4F);
+    public static final Color MUTED = pick(0x6E7379, 0x9AA0A7);
+    /** Saturated green reserved for pay-forward affirmative actions. Brightened for dark. */
+    public static final Color GO = pick(0x0B6E4F, 0x1DA46E);
     /** Saturated red for destructive actions (void basket) and error accents. */
-    public static final Color STOP = new Color(0xA3, 0x2A, 0x1F);
+    public static final Color STOP = pick(0xA32A1F, 0xE5645A);
     /** Amber for "live / awaiting" states (tender enabled, processing card). */
-    public static final Color LIVE = new Color(0xC9, 0x7A, 0x0E);
+    public static final Color LIVE = pick(0xC97A0E, 0xCC8A1F);
     /**
      * Violet — the buy-N-get-M "free item" / promo marker, on a basket free-row and on a Quick Add
      * tile whose UPC carries a {@code PROMO} rule. Deliberately none of the hues already carrying
@@ -62,42 +97,58 @@ public final class PosTheme {
      * ({@link #CARD_DEBIT}/{@link #CARD_CREDIT}) are the tenders. Violet reads as a persistent "deal"
      * accent that a cashier won't confuse with any of those.
      */
-    public static final Color PROMO = new Color(0x9D, 0x2E, 0xA8);
+    public static final Color PROMO = pick(0x9D2EA8, 0xC264D0);
     /**
      * Azure — a Quick Add tile whose UPC carries a percent-off rule. Sits in the same "deal accent"
      * family as {@link #PROMO} and {@link #PROMO_FIXED}, all three shown in the grid's colour legend.
      * A brighter, greener blue than the deep navy {@link #CARD_DEBIT} tender so the two don't blur.
      */
-    public static final Color PROMO_PERCENT = new Color(0x1C, 0x7E, 0xD6);
+    public static final Color PROMO_PERCENT = pick(0x1C7ED6, 0x43A6F5);
     /**
      * Teal — a Quick Add tile whose UPC carries a flat amount-off rule (including "Buy N Save $X").
      * The third member of the promo-accent family, distinct from the azure {@link #PROMO_PERCENT} and
      * the violet {@link #PROMO}, and clear of {@link #GO} green.
      */
-    public static final Color PROMO_FIXED = new Color(0x0E, 0x8A, 0x7D);
+    public static final Color PROMO_FIXED = pick(0x0E8A7D, 0x1FB5A6);
     /** Tint used on selected basket rows and change-due strip. */
-    public static final Color SELECTED = new Color(0xEC, 0xF3, 0xF0);
+    public static final Color SELECTED = pick(0xECF3F0, 0x1C2E27);
     /** Row hover background — one step darker than SURFACE, still lighter than SELECTED. */
-    public static final Color HOVER_ROW = new Color(0xF5, 0xF6, 0xF3);
+    public static final Color HOVER_ROW = pick(0xF5F6F3, 0x262B33);
     /** Muted rule inside the basket list between rows. */
-    public static final Color ROW_RULE = new Color(0xF1, 0xEF, 0xEA);
+    public static final Color ROW_RULE = pick(0xF1EFEA, 0x2A3039);
     /** Fill for disabled controls. */
-    public static final Color DISABLED_BG = new Color(0xF0, 0xEF, 0xEB);
+    public static final Color DISABLED_BG = pick(0xF0EFEB, 0x24292F);
     /** Foreground for disabled control text. */
-    public static final Color DISABLED_FG = new Color(0xA8, 0xAB, 0xAF);
+    public static final Color DISABLED_FG = pick(0xA8ABAF, 0x5C6169);
 
     // ---- Tender palette ---------------------------------------------------
     // Each tender type carries its own fill so a cashier can hit the right button by colour
     // without reading the label. Green for cash (the most common tender in a convenience store,
     // and the pay-forward colour the rest of the system already speaks in), deep blue for debit,
     // indigo for credit — separated at the hue level so they read cleanly even at a glance
-    // through fluorescent glare. All three exceed WCAG 4.5:1 contrast against white text.
+    // through fluorescent glare. All three exceed WCAG 4.5:1 contrast against white text, and
+    // stay mutually distinct (and distinct from DISABLED_BG) in both light and dark palettes.
 
     /** Deep blue for {@link com.rocketpartners.onboarding.commons.model.TenderType#DEBIT}. */
-    public static final Color CARD_DEBIT = new Color(0x1E, 0x40, 0xAF);
+    public static final Color CARD_DEBIT = pick(0x1E40AF, 0x3B6FE0);
     /** Indigo for {@link com.rocketpartners.onboarding.commons.model.TenderType#CREDIT}. Kept a
      *  full step off {@link #CARD_DEBIT} in hue so debit and credit don't blur under glare. */
-    public static final Color CARD_CREDIT = new Color(0x6D, 0x28, 0xD9);
+    public static final Color CARD_CREDIT = pick(0x6D28D9, 0x8B5CF6);
+
+    // ---- Component fills ---------------------------------------------------
+    // Tints and chrome shades that used to live as literals in individual views. Kept here so the
+    // "no view hard-codes a colour" rule holds and every surface tracks the active palette.
+
+    /** Pale neutral fill for secondary (non-affirmative) dialog buttons. */
+    public static final Color BUTTON_SECONDARY_FILL = pick(0xF2F1ED, 0x2E343D);
+    /** Pale {@link #STOP} tint for danger buttons and the error dialog accent. */
+    public static final Color BUTTON_DANGER_FILL = pick(0xFDF1EF, 0x3A2320);
+    /** Pale {@link #GO} tint for affirmative-secondary buttons. */
+    public static final Color BUTTON_GO_TINT_FILL = pick(0xE8F4EE, 0x17302A);
+    /** Scrollbar thumb colour, sitting one step off {@link #SURFACE} in both modes. */
+    public static final Color SCROLL_THUMB = pick(0xC7C5BF, 0x3C434D);
+    /** Pale text painted on the dark {@link #INK} header strip (journal pill, status chips). */
+    public static final Color HEADER_TEXT = pick(0xC9D1D8, 0xC9D1D8);
 
     // ---- Button elevation tokens ------------------------------------------
     // The resting state of every {@link PosButton} composes shadow + fill + lip + top-highlight

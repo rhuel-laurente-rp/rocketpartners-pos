@@ -94,7 +94,7 @@ public class OnScreenKeyboard extends JPanel {
 
     /** A letter or digit key. Typing its own label into the field is all it does. */
     private PosButton charKey(String label) {
-        PosButton b = new PosButton(label, PosTheme.SURFACE, PosTheme.INK,
+        PosButton b = new PosButton(label, PosTheme.SURFACE, PosTheme.TEXT_PRIMARY,
                 PosTheme.base(Font.BOLD, PosTheme.ROW));
         b.addActionListener(e -> OnScreenKeys.insert(target, label));
         return sizeKey(b);

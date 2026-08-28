@@ -176,7 +176,7 @@ public class LoginView extends JFrame {
 
         JLabel heading = new JLabel("Login");
         heading.setFont(PosTheme.base(Font.BOLD, PosTheme.DISPLAY));
-        heading.setForeground(PosTheme.INK);
+        heading.setForeground(PosTheme.TEXT_PRIMARY);
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         form.add(heading);
         form.add(Box.createVerticalStrut(6));

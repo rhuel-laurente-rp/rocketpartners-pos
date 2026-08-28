@@ -128,7 +128,7 @@ public class ReceiptView extends PosDialog {
         textArea.setFocusable(false);
         textArea.setFont(mono);
         textArea.setBackground(PosTheme.PAPER);
-        textArea.setForeground(PosTheme.INK);
+        textArea.setForeground(PosTheme.TEXT_PRIMARY);
         textArea.setLineWrap(false);
         textArea.setBorder(BorderFactory.createEmptyBorder(14, TEXT_INSET_H, 14, TEXT_INSET_H));
 
